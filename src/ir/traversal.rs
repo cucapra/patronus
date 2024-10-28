@@ -5,13 +5,28 @@
 use crate::ir::{Context, Expr, ExprRef, ForEachChild};
 
 /// Visits expression nodes bottom up while propagating values
-pub fn bottom_up<R>(
+#[inline]
+pub fn bottom_up<R>(ctx: &Context, expr: ExprRef, f: impl FnMut(&Context, &Expr, &[R]) -> R) -> R {
+    bottom_up_multi_pat(
+        ctx,
+        expr,
+        |_ctx, expr, children| expr.for_each_child(|c| children.push(*c)),
+        f,
+    )
+}
+
+/// Visits expression nodes bottom up while propagating values.
+/// Can match patterns with multiple nodes that will turn into a single output value.
+#[inline]
+pub fn bottom_up_multi_pat<R>(
     ctx: &Context,
     expr: ExprRef,
+    mut get_children: impl FnMut(&Context, &Expr, &mut Vec<ExprRef>),
     mut f: impl FnMut(&Context, &Expr, &[R]) -> R,
 ) -> R {
     let mut todo = vec![(expr, false)];
     let mut stack = Vec::with_capacity(4);
+    let mut child_vec = Vec::with_capacity(4);
 
     while let Some((e, bottom_up)) = todo.pop() {
         let expr = ctx.get(e);
@@ -19,16 +34,13 @@ pub fn bottom_up<R>(
         // Check if there are children that we need to compute first.
         if !bottom_up {
             // check if there are child expressions to evaluate
-            let mut has_child = false;
-            expr.for_each_child(|c| {
-                if !has_child {
-                    has_child = true;
-                    todo.push((e, true));
+            debug_assert!(child_vec.is_empty());
+            get_children(ctx, expr, &mut child_vec);
+            if !child_vec.is_empty() {
+                todo.push((e, true));
+                for c in child_vec.drain(..) {
+                    todo.push((c, false));
                 }
-                todo.push((*c, false));
-            });
-            // we need to process the children first
-            if has_child {
                 continue;
             }
         }
