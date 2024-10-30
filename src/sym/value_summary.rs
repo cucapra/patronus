@@ -5,6 +5,7 @@
 use crate::ir::*;
 use boolean_expression::{BDDFunc, BDD};
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 
 #[derive(Debug, Clone)]
 pub struct GuardCtx {
@@ -40,21 +41,24 @@ impl GuardCtx {
 type Guard = BDDFunc;
 
 #[allow(dead_code)]
-pub struct ValueSummary {
-    entries: Vec<Entry>,
+pub struct ValueSummary<V: Clone> {
+    entries: Vec<Entry<V>>,
 }
 
-impl ValueSummary {
-    pub fn new(gc: &mut GuardCtx, value: ExprRef) -> Self {
+impl<V: Clone + Eq + Hash> ValueSummary<V> {
+    pub fn new(gc: &mut GuardCtx, value: V) -> Self {
         Self {
-            entries: vec![Entry::new(gc, value)],
+            entries: vec![Entry {
+                guard: gc.tru(),
+                value,
+            }],
         }
     }
 
     pub fn apply_bin_op(
         ec: &mut Context,
         gc: &mut GuardCtx,
-        op: fn(a: ExprRef, b: ExprRef) -> ExprRef,
+        op: fn(a: V, b: V) -> V,
         a: Self,
         b: Self,
     ) -> Self {
@@ -74,8 +78,8 @@ impl ValueSummary {
             sorted_common_guards.sort();
             for guard in sorted_common_guards.into_iter() {
                 // unwrap should never fail, since otherwise this would not be a common guard!
-                let a_expr = a.iter().find(|e| e.guard == guard).unwrap().value;
-                let b_expr = b.iter().find(|e| e.guard == guard).unwrap().value;
+                let a_expr = a.iter().find(|e| e.guard == guard).cloned().unwrap().value;
+                let b_expr = b.iter().find(|e| e.guard == guard).cloned().unwrap().value;
 
                 // we can create exactly one new entry with the common guard
                 out.push(Entry {
@@ -100,7 +104,7 @@ impl ValueSummary {
                         // create a new entry
                         out.push(Entry {
                             guard,
-                            value: op(a_entry.value, b_entry.value),
+                            value: op(a_entry.value.clone(), b_entry.value.clone()),
                         })
                     }
                 }
@@ -157,19 +161,10 @@ fn delete_entries<T>(delete_list: Vec<usize>, entries: &mut Vec<T>) {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Entry {
+#[derive(Clone)]
+struct Entry<V: Clone> {
     guard: Guard,
-    value: ExprRef,
-}
-
-impl Entry {
-    pub fn new(gc: &mut GuardCtx, value: ExprRef) -> Self {
-        Self {
-            guard: gc.tru(),
-            value,
-        }
-    }
+    value: V,
 }
 
 #[cfg(test)]
