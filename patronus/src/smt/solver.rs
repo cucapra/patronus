@@ -136,6 +136,8 @@ impl<R: Write + Send> Solver<R> for SmtLibSolver {
             response: String::new(),
             replay_file,
             has_error: false,
+            solver_args: self.args.iter().map(|a| a.to_string()).collect(),
+            solver_options: self.options.iter().map(|a| a.to_string()).collect(),
         };
         for option in self.options.iter() {
             solver.write_cmd(
@@ -172,6 +174,9 @@ pub struct SmtLibSolverCtx<R: Write + Send> {
     /// keeps track of whether there was an error from the solver which might make regular shutdown
     /// impossible
     has_error: bool,
+    // meta data to be able to restart solver
+    solver_args: Vec<String>,
+    solver_options: Vec<String>,
 }
 
 impl<R: Write + Send> SmtLibSolverCtx<R> {
@@ -258,23 +263,29 @@ fn count_parens(s: &str) -> i64 {
 
 impl<R: Write + Send> Drop for SmtLibSolverCtx<R> {
     fn drop(&mut self) {
-        // try to close the child process as not to leak resources
-        if self.write_cmd(None, &SmtCommand::Exit).is_err() {
-            if self.has_error {
-                return;
-            } else {
-                panic!("failed to send exit command");
-            }
-        }
-        let _status = self
-            .proc
-            .wait()
-            .expect("failed to wait for SMT solver to exit");
-        // we don't care whether the solver crashed or returned success, as long as it is cleaned up
+        shut_down_solver(self);
     }
 }
 
+/// internal method to try to cleanly shut down the solver process
+fn shut_down_solver<R: Write + Send>(solver: &mut SmtLibSolverCtx<R>) {
+    // try to close the child process as not to leak resources
+    if solver.write_cmd(None, &SmtCommand::Exit).is_err() {
+        if solver.has_error {
+            return;
+        } else {
+            panic!("failed to send exit command");
+        }
+    }
+    let _status = solver
+        .proc
+        .wait()
+        .expect("failed to wait for SMT solver to exit");
+    // we don't care whether the solver crashed or returned success, as long as it is cleaned up
+}
+
 impl<R: Write + Send> SolverContext for SmtLibSolverCtx<R> {
+
     fn name(&self) -> &str {
         &self.name
     }
@@ -287,7 +298,25 @@ impl<R: Write + Send> SolverContext for SmtLibSolverCtx<R> {
     }
 
     fn restart(&mut self) -> Result<()> {
-        todo!()
+        shut_down_solver(self);
+
+        let mut proc = Command::new(&self.name)
+            .args(&self.solver_args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let stdin = BufWriter::new(proc.stdin.take().unwrap());
+        let stdout = BufReader::new(proc.stdout.take().unwrap());
+        let stderr = proc.stderr.take().unwrap();
+        self.proc = proc;
+        self.stdin = stdin;
+        self.stdout = stdout;
+        self.stderr = stderr;
+        for option in self.solver_options.clone() {
+            self.write_cmd(None, &SmtCommand::SetOption(option, "true".to_string()))?;
+        }
+        Ok(())
     }
 
     fn set_logic(&mut self, logic: Logic) -> Result<()> {
@@ -407,5 +436,26 @@ mod tests {
         assert_eq!(res.unwrap(), CheckSatResponse::Sat);
         let value_of_a = solver.get_value(&mut ctx, a).unwrap();
         assert_eq!(value_of_a, ctx.bit_vec_val(3, 3));
+    }
+
+    #[test]
+    fn test_bitwuzla_restart() {
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 3);
+        let replay = Some(std::fs::File::create("replay.smt").unwrap());
+        let mut solver = BITWUZLA.start(replay).unwrap();
+        let three = ctx.bit_vec_val(3, 3);
+        let four = ctx.bit_vec_val(3, 3);
+        solver.define_const(&ctx, a, three).unwrap();
+        let _res = solver.check_sat().unwrap();
+        let value_of_a = solver.get_value(&mut ctx, a).unwrap();
+        assert_eq!(value_of_a, three);
+
+        // restarting bitwuzla allows us to redefine `a`
+        solver.restart().unwrap();
+        solver.define_const(&ctx, a, four).unwrap();
+        let _res = solver.check_sat().unwrap();
+        let value_of_a = solver.get_value(&mut ctx, a).unwrap();
+        assert_eq!(value_of_a, four);
     }
 }
