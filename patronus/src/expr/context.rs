@@ -16,7 +16,7 @@
 
 use crate::expr::nodes::*;
 use crate::expr::TypeCheck;
-use baa::{BitVecValue, BitVecValueIndex, BitVecValueRef, IndexToRef};
+use baa::{BitVecValue, BitVecValueIndex, BitVecValueRef, IndexToRef, Value};
 use rustc_hash::FxBuildHasher;
 use std::borrow::Borrow;
 use std::cell::RefCell;
@@ -170,6 +170,12 @@ impl Context {
     pub fn symbol(&mut self, name: StringRef, tpe: Type) -> ExprRef {
         assert_ne!(tpe, Type::BV(0), "0-bit bitvectors are not allowed");
         self.add_expr(Expr::symbol(name, tpe))
+    }
+    pub fn lit(&mut self, value: impl Borrow<Value>) -> ExprRef {
+        match value.borrow() {
+            Value::BitVec(value) => self.bv_lit(value),
+            Value::Array(_) => todo!("add support for array literals"),
+        }
     }
     pub fn bv_lit<'a>(&mut self, value: impl Into<BitVecValueRef<'a>>) -> ExprRef {
         let index = self.values.get_index(value);

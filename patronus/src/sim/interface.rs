@@ -3,14 +3,20 @@
 // author: Kevin Laeufer <laeufer@berkeley.edu>
 
 use crate::expr::ExprRef;
-use baa::{BitVecValue, BitVecValueRef};
+use baa::{BitVecValueRef, Value};
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub enum InitKind {
+    Zero,
+    Random(u64),
+}
 
 /// An implementation of a transition system simulator.
 pub trait Simulator {
     type SnapshotId;
 
     /// Initializes all states and inputs to zero.
-    fn init(&mut self);
+    fn init(&mut self, kind: InitKind);
 
     /// Recalculate signals.
     fn update(&mut self);
@@ -21,15 +27,8 @@ pub trait Simulator {
     /// Change the value or an expression in the simulator.
     fn set<'a>(&mut self, expr: ExprRef, value: impl Into<BitVecValueRef<'a>>);
 
-    /// Inspect the value of any bit vector expression in the circuit
-    fn get(&self, expr: ExprRef) -> Option<BitVecValue>;
-
-    /// Retrieve the value of an array element
-    fn get_element<'a>(
-        &self,
-        expr: ExprRef,
-        index: impl Into<BitVecValueRef<'a>>,
-    ) -> Option<BitVecValue>;
+    /// Inspect the value of any expression in the circuit
+    fn get(&self, expr: ExprRef) -> Option<Value>;
 
     fn step_count(&self) -> u64;
 

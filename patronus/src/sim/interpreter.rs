@@ -3,7 +3,7 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use super::Simulator;
+use super::{InitKind, Simulator};
 use crate::expr::*;
 use crate::system::*;
 use baa::*;
@@ -59,7 +59,12 @@ fn set_signal_to_zero(ctx: &Context, state: &mut SymbolValueStore, symbol: ExprR
 impl<'a> Simulator for Interpreter<'a> {
     type SnapshotId = u32;
 
-    fn init(&mut self) {
+    fn init(&mut self, kind: InitKind) {
+        match kind {
+            InitKind::Zero => {} // OK
+            InitKind::Random(_) => todo!("add support for random initialization"),
+        }
+
         self.data.clear();
 
         // allocate space for inputs, and states
@@ -107,19 +112,8 @@ impl<'a> Simulator for Interpreter<'a> {
         self.data.update_bv(expr, value);
     }
 
-    fn get(&self, expr: ExprRef) -> Option<BitVecValue> {
-        if !self.ctx[expr].is_bv_type() {
-            return None;
-        }
-        Some(eval_bv_expr(self.ctx, &self.data, expr))
-    }
-
-    fn get_element<'b>(
-        &self,
-        _expr: ExprRef,
-        _index: impl Into<BitVecValueRef<'b>>,
-    ) -> Option<BitVecValue> {
-        todo!()
+    fn get(&self, expr: ExprRef) -> Option<Value> {
+        Some(eval_expr(self.ctx, &self.data, expr))
     }
 
     fn step_count(&self) -> u64 {

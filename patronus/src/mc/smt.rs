@@ -23,14 +23,14 @@ pub struct SmtModelCheckerOptions {
     pub save_smt_replay: bool,
 }
 
-pub struct SmtModelChecker<S: Solver> {
+pub struct SmtModelChecker<S: Solver<std::fs::File>> {
     solver: S,
     opts: SmtModelCheckerOptions,
 }
 
 type Result<T> = crate::smt::Result<T>;
 
-impl<S: Solver> SmtModelChecker<S> {
+impl<S: Solver<std::fs::File>> SmtModelChecker<S> {
     pub fn new(solver: S, opts: SmtModelCheckerOptions) -> Self {
         Self { solver, opts }
     }
@@ -88,7 +88,7 @@ impl<S: Solver> SmtModelChecker<S> {
             if self.opts.check_bad_states_individually {
                 for (_bs_id, expr_ref) in bad_states.iter().enumerate() {
                     let expr = enc.get_at(ctx, *expr_ref, k);
-                    let res = check_assuming(&ctx, &mut smt_ctx, [expr], &self.solver)?;
+                    let res = check_assuming(&ctx, &mut smt_ctx, [expr])?;
 
                     // count expression uses
                     let use_counts = count_expr_uses(ctx, sys);
@@ -104,7 +104,7 @@ impl<S: Solver> SmtModelChecker<S> {
                         )?;
                         return Ok(ModelCheckResult::Fail(wit));
                     }
-                    check_assuming_end(&mut smt_ctx, &self.solver)?;
+                    check_assuming_end(&mut smt_ctx)?;
                 }
             } else {
                 let all_bads = bad_states
@@ -112,7 +112,7 @@ impl<S: Solver> SmtModelChecker<S> {
                     .map(|expr_ref| enc.get_at(ctx, *expr_ref, k))
                     .collect::<Vec<_>>();
                 let any_bad = all_bads.into_iter().reduce(|a, b| ctx.or(a, b)).unwrap();
-                let res = check_assuming(&ctx, &mut smt_ctx, [any_bad], &self.solver)?;
+                let res = check_assuming(&ctx, &mut smt_ctx, [any_bad])?;
 
                 // count expression uses
                 let use_counts = count_expr_uses(ctx, sys);
@@ -128,7 +128,7 @@ impl<S: Solver> SmtModelChecker<S> {
                     )?;
                     return Ok(ModelCheckResult::Fail(wit));
                 }
-                check_assuming_end(&mut smt_ctx, &self.solver)?;
+                check_assuming_end(&mut smt_ctx)?;
             }
 
             // advance
@@ -214,9 +214,8 @@ pub fn check_assuming(
     ctx: &Context,
     smt_ctx: &mut impl SolverContext,
     props: impl IntoIterator<Item = ExprRef>,
-    solver: &impl Solver,
 ) -> Result<CheckSatResponse> {
-    if solver.supports_check_assuming() {
+    if smt_ctx.supports_check_assuming() {
         smt_ctx.check_sat_assuming(ctx, props)
     } else {
         smt_ctx.push()?; // add new assertion
@@ -230,8 +229,8 @@ pub fn check_assuming(
 
 // pops context for solver that do not support check assuming
 #[inline]
-pub fn check_assuming_end(smt_ctx: &mut impl SolverContext, solver: &impl Solver) -> Result<()> {
-    if !solver.supports_check_assuming() {
+pub fn check_assuming_end(smt_ctx: &mut impl SolverContext) -> Result<()> {
+    if !smt_ctx.supports_check_assuming() {
         smt_ctx.pop()
     } else {
         Ok(())

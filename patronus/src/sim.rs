@@ -4,5 +4,5 @@
 mod interface;
 mod interpreter;
 
-pub use interface::Simulator;
-pub use interpreter::Interpreter;
+pub use interface::*;
+pub use interpreter::*;

@@ -73,9 +73,10 @@ pub enum CheckSatResponse {
 }
 
 /// Represents a kind of SMT solver and allows that solver to be started.
-pub trait Solver {
+pub trait Solver<R: Write + Send> {
+    type Context: SolverContext;
     /// Launch a new instance of this solver.
-    fn start<R: Write + Send>(&self, replay_file: Option<R>) -> Result<impl SolverContext>;
+    fn start(&self, replay_file: Option<R>) -> Result<Self::Context>;
     // properties
     fn name(&self) -> &str;
     fn supports_check_assuming(&self) -> bool;
@@ -84,6 +85,11 @@ pub trait Solver {
 
 /// Interface to a running SMT Solver with everything executing as blocking I/O.
 pub trait SolverContext {
+    // type Replay : Write + Send;
+    fn name(&self) -> &str;
+    fn supports_uf(&self) -> bool;
+    fn supports_check_assuming(&self) -> bool;
+    fn restart(&mut self) -> Result<()>;
     fn set_logic(&mut self, option: Logic) -> Result<()>;
     fn assert(&mut self, ctx: &Context, e: ExprRef) -> Result<()>;
     fn declare_const(&mut self, ctx: &Context, symbol: ExprRef) -> Result<()>;
@@ -108,8 +114,9 @@ pub struct SmtLibSolver {
     supports_check_assuming: bool,
 }
 
-impl Solver for SmtLibSolver {
-    fn start<R: Write + Send>(&self, replay_file: Option<R>) -> Result<impl SolverContext> {
+impl<R: Write + Send> Solver<R> for SmtLibSolver {
+    type Context = SmtLibSolverCtx<R>;
+    fn start(&self, replay_file: Option<R>) -> Result<Self::Context> {
         let mut proc = Command::new(self.name)
             .args(self.args)
             .stdin(Stdio::piped())
@@ -268,6 +275,21 @@ impl<R: Write + Send> Drop for SmtLibSolverCtx<R> {
 }
 
 impl<R: Write + Send> SolverContext for SmtLibSolverCtx<R> {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn supports_uf(&self) -> bool {
+        todo!()
+    }
+    fn supports_check_assuming(&self) -> bool {
+        todo!()
+    }
+
+    fn restart(&mut self) -> Result<()> {
+        todo!()
+    }
+
     fn set_logic(&mut self, logic: Logic) -> Result<()> {
         self.write_cmd(None, &SmtCommand::SetLogic(logic))
     }
@@ -339,6 +361,19 @@ pub const YICES2: SmtLibSolver = SmtLibSolver {
     supports_uf: false, // actually true, but ignoring for now
     supports_check_assuming: false,
 };
+
+// trait WithAnOutput {
+//     type Out: Write + Send;
+// }
+//
+// struct OutputImpl<R: Write + Send> {
+//     out: R
+// }
+//
+//
+// impl<R: Write + Send> WithAnOutput for OutputImpl<R> {
+//     type Out = R;
+// }
 
 #[cfg(test)]
 mod tests {
