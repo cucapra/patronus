@@ -28,7 +28,7 @@ pub trait Simulator {
     fn set<'a>(&mut self, expr: ExprRef, value: impl Into<BitVecValueRef<'a>>);
 
     /// Inspect the value of any expression in the circuit
-    fn get(&self, expr: ExprRef) -> Option<Value>;
+    fn get(&self, expr: ExprRef) -> Value;
 
     fn step_count(&self) -> u64;
 

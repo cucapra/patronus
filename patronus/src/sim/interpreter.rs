@@ -112,8 +112,8 @@ impl<'a> Simulator for Interpreter<'a> {
         self.data.update_bv(expr, value);
     }
 
-    fn get(&self, expr: ExprRef) -> Option<Value> {
-        Some(eval_expr(self.ctx, &self.data, expr))
+    fn get(&self, expr: ExprRef) -> Value {
+        eval_expr(self.ctx, &self.data, expr)
     }
 
     fn step_count(&self) -> u64 {
