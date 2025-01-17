@@ -2,8 +2,10 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@berkeley.edu>
 
-use crate::expr::ExprRef;
-use baa::{BitVecValueRef, Value};
+use crate::expr::{ArrayType, ExprRef, Type};
+use baa::{ArrayValue, BitVecValue, BitVecValueRef, Value};
+use rand::rngs::SmallRng;
+use rand::SeedableRng;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum InitKind {
@@ -36,4 +38,41 @@ pub trait Simulator {
     fn take_snapshot(&mut self) -> Self::SnapshotId;
     /// Restores a snapshot that was previously taken with the same simulator.
     fn restore_snapshot(&mut self, id: Self::SnapshotId);
+}
+
+pub struct InitValueGenerator {
+    rng: Option<SmallRng>,
+}
+
+impl InitValueGenerator {
+    pub fn from_kind(kind: InitKind) -> Self {
+        match kind {
+            InitKind::Zero => Self { rng: None },
+            InitKind::Random(seed) => Self {
+                rng: Some(SmallRng::seed_from_u64(seed)),
+            },
+        }
+    }
+
+    pub fn gen(&mut self, tpe: Type) -> Value {
+        match tpe {
+            Type::BV(bits) => {
+                if let Some(rng) = &mut self.rng {
+                    BitVecValue::random(rng, bits).into()
+                } else {
+                    BitVecValue::zero(bits).into()
+                }
+            }
+            Type::Array(ArrayType {
+                index_width,
+                data_width,
+            }) => {
+                if let Some(rng) = &mut self.rng {
+                    ArrayValue::random(rng, index_width, data_width).into()
+                } else {
+                    ArrayValue::new_sparse(index_width, &BitVecValue::zero(data_width)).into()
+                }
+            }
+        }
+    }
 }
