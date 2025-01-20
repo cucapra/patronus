@@ -16,7 +16,9 @@
 
 use crate::expr::nodes::*;
 use crate::expr::TypeCheck;
-use baa::{BitVecValue, BitVecValueIndex, BitVecValueRef, IndexToRef, Value};
+use baa::{
+    ArrayOps, BitVecValue, BitVecValueIndex, BitVecValueRef, IndexToRef, SparseArrayValue, Value,
+};
 use rustc_hash::FxBuildHasher;
 use std::borrow::Borrow;
 use std::cell::RefCell;
@@ -174,7 +176,18 @@ impl Context {
     pub fn lit(&mut self, value: impl Borrow<Value>) -> ExprRef {
         match value.borrow() {
             Value::BitVec(value) => self.bv_lit(value),
-            Value::Array(_) => todo!("add support for array literals"),
+            Value::Array(value) => {
+                let sparse: SparseArrayValue = value.into();
+                let default = self.bv_lit(&sparse.default());
+                let base = self.array_const(default, sparse.index_width());
+                sparse
+                    .non_default_entries()
+                    .fold(base, |array, (index, data)| {
+                        let index = self.bv_lit(&index);
+                        let data = self.bv_lit(&data);
+                        self.array_store(array, index, data)
+                    })
+            }
         }
     }
     pub fn bv_lit<'a>(&mut self, value: impl Into<BitVecValueRef<'a>>) -> ExprRef {
