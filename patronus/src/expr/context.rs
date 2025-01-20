@@ -21,12 +21,12 @@ use rustc_hash::FxBuildHasher;
 use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
-use std::num::{NonZeroU16, NonZeroU32};
+use std::num::NonZeroU32;
 use std::ops::Index;
 
 /// Uniquely identifies a [`String`] stored in a [`Context`].
 #[derive(PartialEq, Eq, Clone, Copy, Hash, PartialOrd, Ord)]
-pub struct StringRef(NonZeroU16);
+pub struct StringRef(NonZeroU32);
 
 impl Debug for StringRef {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -36,7 +36,7 @@ impl Debug for StringRef {
 
 impl StringRef {
     fn from_index(index: usize) -> Self {
-        Self(NonZeroU16::new((index + 1) as u16).unwrap())
+        Self(NonZeroU32::new((index + 1) as u32).unwrap())
     }
 
     fn index(&self) -> usize {
@@ -555,7 +555,7 @@ mod tests {
 
     #[test]
     fn ir_type_size() {
-        assert_eq!(std::mem::size_of::<StringRef>(), 2);
+        assert_eq!(std::mem::size_of::<StringRef>(), 4);
         assert_eq!(std::mem::size_of::<ExprRef>(), 4);
     }
 
