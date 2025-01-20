@@ -73,26 +73,25 @@ pub enum CheckSatResponse {
 }
 
 /// Represents the meta data of an SMT Solver
-pub trait Solver {
+pub trait SolverMetaData {
     // properties
     fn name(&self) -> &str;
     fn supports_check_assuming(&self) -> bool;
     fn supports_uf(&self) -> bool;
+    /// Indicates whether the solver supports the non-standard `(as const)` command.
+    fn supports_const_array(&self) -> bool;
 }
 
 /// Allows an SMT solver to start a Context.
-pub trait SolverStart<R: Write + Send>: Solver {
+pub trait Solver<R: Write + Send>: SolverMetaData {
     type Context: SolverContext;
     /// Launch a new instance of this solver.
     fn start(&self, replay_file: Option<R>) -> Result<Self::Context>;
 }
 
 /// Interface to a running SMT Solver with everything executing as blocking I/O.
-pub trait SolverContext {
+pub trait SolverContext: SolverMetaData {
     // type Replay : Write + Send;
-    fn name(&self) -> &str;
-    fn supports_uf(&self) -> bool;
-    fn supports_check_assuming(&self) -> bool;
     fn restart(&mut self) -> Result<()>;
     fn set_logic(&mut self, option: Logic) -> Result<()>;
     fn assert(&mut self, ctx: &Context, e: ExprRef) -> Result<()>;
@@ -116,9 +115,10 @@ pub struct SmtLibSolver {
     options: &'static [&'static str],
     supports_uf: bool,
     supports_check_assuming: bool,
+    supports_const_array: bool,
 }
 
-impl Solver for SmtLibSolver {
+impl SolverMetaData for SmtLibSolver {
     fn name(&self) -> &str {
         self.name
     }
@@ -130,9 +130,13 @@ impl Solver for SmtLibSolver {
     fn supports_uf(&self) -> bool {
         self.supports_uf
     }
+
+    fn supports_const_array(&self) -> bool {
+        self.supports_const_array
+    }
 }
 
-impl<R: Write + Send> SolverStart<R> for SmtLibSolver {
+impl<R: Write + Send> Solver<R> for SmtLibSolver {
     type Context = SmtLibSolverCtx<R>;
     fn start(&self, replay_file: Option<R>) -> Result<Self::Context> {
         let mut proc = Command::new(self.name)
@@ -158,6 +162,7 @@ impl<R: Write + Send> SolverStart<R> for SmtLibSolver {
             solver_options: self.options.iter().map(|a| a.to_string()).collect(),
             supports_uf: self.supports_uf,
             supports_check_assuming: self.supports_check_assuming,
+            supports_const_array: self.supports_const_array,
         };
         for option in self.options.iter() {
             solver.write_cmd(
@@ -188,6 +193,7 @@ pub struct SmtLibSolverCtx<R: Write + Send> {
     // solver capabilities
     supports_uf: bool,
     supports_check_assuming: bool,
+    supports_const_array: bool,
 }
 
 impl<R: Write + Send> SmtLibSolverCtx<R> {
@@ -207,7 +213,7 @@ impl<R: Write + Send> SmtLibSolverCtx<R> {
                 // check to see if we can find an error message
                 match self.read_response() {
                     Err(e @ Error::FromSolver(_, _)) => Err(e),
-                    other => Err(Error::SolverDead(self.name.clone())),
+                    _ => Err(Error::SolverDead(self.name.clone())),
                 }
             }
             Err(other) => Err(other.into()),
@@ -294,7 +300,7 @@ fn shut_down_solver<R: Write + Send>(solver: &mut SmtLibSolverCtx<R>) {
     // we don't care whether the solver crashed or returned success, as long as it is cleaned up
 }
 
-impl<R: Write + Send> SolverContext for SmtLibSolverCtx<R> {
+impl<R: Write + Send> SolverMetaData for SmtLibSolverCtx<R> {
     fn name(&self) -> &str {
         &self.name
     }
@@ -306,6 +312,12 @@ impl<R: Write + Send> SolverContext for SmtLibSolverCtx<R> {
         self.supports_check_assuming
     }
 
+    fn supports_const_array(&self) -> bool {
+        self.supports_const_array
+    }
+}
+
+impl<R: Write + Send> SolverContext for SmtLibSolverCtx<R> {
     fn restart(&mut self) -> Result<()> {
         shut_down_solver(self);
 
@@ -391,6 +403,7 @@ pub const BITWUZLA: SmtLibSolver = SmtLibSolver {
     options: &["incremental", "produce-models"],
     supports_uf: false,
     supports_check_assuming: true,
+    supports_const_array: true,
 };
 
 pub const YICES2: SmtLibSolver = SmtLibSolver {
@@ -399,6 +412,8 @@ pub const YICES2: SmtLibSolver = SmtLibSolver {
     options: &[],
     supports_uf: false, // actually true, but ignoring for now
     supports_check_assuming: false,
+    // see https://github.com/SRI-CSL/yices2/issues/110
+    supports_const_array: false,
 };
 
 #[cfg(test)]

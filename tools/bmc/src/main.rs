@@ -5,7 +5,7 @@
 
 use clap::{Parser, ValueEnum};
 use patronus::expr::*;
-use patronus::smt::{Solver, BITWUZLA, YICES2};
+use patronus::smt::*;
 use patronus::*;
 
 #[derive(Parser, Debug)]
