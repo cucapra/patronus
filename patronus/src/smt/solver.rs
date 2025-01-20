@@ -203,8 +203,12 @@ impl<R: Write + Send> SmtLibSolverCtx<R> {
         match self.stdin.flush() {
             Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
                 // make sure we drop the replay file
-                self.replay_file.take();
-                Err(Error::SolverDead(self.name.clone()))
+                let _ = self.replay_file.take();
+                // check to see if we can find an error message
+                match self.read_response() {
+                    Err(e @ Error::FromSolver(_, _)) => Err(e),
+                    other => Err(Error::SolverDead(self.name.clone())),
+                }
             }
             Err(other) => Err(other.into()),
             Ok(_) => Ok(()),
@@ -213,7 +217,6 @@ impl<R: Write + Send> SmtLibSolverCtx<R> {
 
     /// after this function executes, the result will be available in `self.result`.
     fn read_response(&mut self) -> Result<()> {
-        self.stdin.flush()?; // make sure that the commands reached the solver
         self.response.clear();
         // our basic assumptions are:
         // 1. the solver will terminate its answer with '\n'
@@ -251,6 +254,7 @@ impl<R: Write + Send> SmtLibSolverCtx<R> {
     }
 
     fn read_sat_response(&mut self) -> Result<CheckSatResponse> {
+        self.stdin.flush()?; // make sure that the commands reached the solver
         self.read_response()?;
         let response = self.response.trim();
         match response {
@@ -373,6 +377,7 @@ impl<R: Write + Send> SolverContext for SmtLibSolverCtx<R> {
 
     fn get_value(&mut self, ctx: &mut Context, e: ExprRef) -> Result<ExprRef> {
         self.write_cmd(Some(ctx), &SmtCommand::GetValue(e))?;
+        self.stdin.flush()?; // make sure that the commands reached the solver
         self.read_response()?;
         let response = self.response.trim();
         let expr = parse_get_value_response(ctx, response.as_bytes())?;
@@ -395,19 +400,6 @@ pub const YICES2: SmtLibSolver = SmtLibSolver {
     supports_uf: false, // actually true, but ignoring for now
     supports_check_assuming: false,
 };
-
-// trait WithAnOutput {
-//     type Out: Write + Send;
-// }
-//
-// struct OutputImpl<R: Write + Send> {
-//     out: R
-// }
-//
-//
-// impl<R: Write + Send> WithAnOutput for OutputImpl<R> {
-//     type Out = R;
-// }
 
 #[cfg(test)]
 mod tests {
