@@ -281,17 +281,12 @@ impl<R: Write + Send> Drop for SmtLibSolverCtx<R> {
 /// internal method to try to cleanly shut down the solver process
 fn shut_down_solver<R: Write + Send>(solver: &mut SmtLibSolverCtx<R>) {
     // try to close the child process as not to leak resources
-    if solver.write_cmd(None, &SmtCommand::Exit).is_err() {
-        if solver.has_error {
-            return;
-        } else {
-            panic!("failed to send exit command");
-        }
+    if solver.write_cmd(None, &SmtCommand::Exit).is_ok() {
+        let _status = solver
+            .proc
+            .wait()
+            .expect("failed to wait for SMT solver to exit");
     }
-    let _status = solver
-        .proc
-        .wait()
-        .expect("failed to wait for SMT solver to exit");
     // we don't care whether the solver crashed or returned success, as long as it is cleaned up
 }
 
