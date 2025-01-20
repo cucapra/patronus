@@ -156,6 +156,8 @@ impl<R: Write + Send> SolverStart<R> for SmtLibSolver {
             has_error: false,
             solver_args: self.args.iter().map(|a| a.to_string()).collect(),
             solver_options: self.options.iter().map(|a| a.to_string()).collect(),
+            supports_uf: self.supports_uf,
+            supports_check_assuming: self.supports_check_assuming,
         };
         for option in self.options.iter() {
             solver.write_cmd(
@@ -180,9 +182,12 @@ pub struct SmtLibSolverCtx<R: Write + Send> {
     /// keeps track of whether there was an error from the solver which might make regular shutdown
     /// impossible
     has_error: bool,
-    // meta data to be able to restart solver
+    // metadata to be able to restart solver
     solver_args: Vec<String>,
     solver_options: Vec<String>,
+    // solver capabilities
+    supports_uf: bool,
+    supports_check_assuming: bool,
 }
 
 impl<R: Write + Send> SmtLibSolverCtx<R> {
@@ -296,10 +301,10 @@ impl<R: Write + Send> SolverContext for SmtLibSolverCtx<R> {
     }
 
     fn supports_uf(&self) -> bool {
-        todo!()
+        self.supports_uf
     }
     fn supports_check_assuming(&self) -> bool {
-        todo!()
+        self.supports_check_assuming
     }
 
     fn restart(&mut self) -> Result<()> {

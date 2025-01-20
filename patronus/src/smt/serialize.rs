@@ -304,7 +304,7 @@ pub fn serialize_cmd(out: &mut impl Write, ctx: Option<&Context>, cmd: &SmtComma
             write!(
                 out,
                 "(declare-const {} ",
-                ctx.get_symbol_name(*symbol).unwrap()
+                escape_smt_identifier(ctx.get_symbol_name(*symbol).unwrap())
             )?;
             serialize_type(out, symbol.get_type(ctx))?;
             writeln!(out, ")")
@@ -315,7 +315,7 @@ pub fn serialize_cmd(out: &mut impl Write, ctx: Option<&Context>, cmd: &SmtComma
             write!(
                 out,
                 "(define-fun {} () ",
-                ctx.get_symbol_name(*symbol).unwrap()
+                escape_smt_identifier(ctx.get_symbol_name(*symbol).unwrap())
             )?;
             serialize_type(out, symbol.get_type(ctx))?;
             write!(out, " ")?;
@@ -430,6 +430,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_serialize_symbols() {
+        let mut ctx = Context::default();
+        let sym = ctx.bv_symbol("$auto$async2sync.cc:262:execute$65@20", 4);
+        assert_eq!(s_expr(&ctx, sym), "|$auto$async2sync.cc:262:execute$65@20|");
+    }
+
+    #[test]
+    fn test_serialize_declare_const() {
+        let mut ctx = Context::default();
+        let sym = ctx.bv_symbol("$auto$async2sync.cc:262:execute$65@20", 4);
+        let cmd = SmtCommand::DeclareConst(sym);
+        // we need to ensure that symbol names are properly escaped!
+        assert_eq!(
+            s_cmd(&ctx, &cmd),
+            "(declare-const |$auto$async2sync.cc:262:execute$65@20| (_ BitVec 4))\n"
+        );
+    }
+
     fn s_type(t: Type) -> String {
         let mut out = Vec::new();
         serialize_type(&mut out, t).unwrap();
@@ -439,6 +458,12 @@ mod tests {
     fn s_expr(ctx: &Context, e: ExprRef) -> String {
         let mut out = Vec::new();
         serialize_expr(&mut out, ctx, e).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    fn s_cmd(ctx: &Context, cmd: &SmtCommand) -> String {
+        let mut out = Vec::new();
+        serialize_cmd(&mut out, Some(ctx), cmd).unwrap();
         String::from_utf8(out).unwrap()
     }
 
