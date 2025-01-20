@@ -72,15 +72,19 @@ pub enum CheckSatResponse {
     Unknown,
 }
 
-/// Represents a kind of SMT solver and allows that solver to be started.
-pub trait Solver<R: Write + Send> {
-    type Context: SolverContext;
-    /// Launch a new instance of this solver.
-    fn start(&self, replay_file: Option<R>) -> Result<Self::Context>;
+/// Represents the meta data of an SMT Solver
+pub trait Solver {
     // properties
     fn name(&self) -> &str;
     fn supports_check_assuming(&self) -> bool;
     fn supports_uf(&self) -> bool;
+}
+
+/// Allows an SMT solver to start a Context.
+pub trait SolverStart<R: Write + Send>: Solver {
+    type Context: SolverContext;
+    /// Launch a new instance of this solver.
+    fn start(&self, replay_file: Option<R>) -> Result<Self::Context>;
 }
 
 /// Interface to a running SMT Solver with everything executing as blocking I/O.
@@ -114,7 +118,21 @@ pub struct SmtLibSolver {
     supports_check_assuming: bool,
 }
 
-impl<R: Write + Send> Solver<R> for SmtLibSolver {
+impl Solver for SmtLibSolver {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn supports_check_assuming(&self) -> bool {
+        self.supports_check_assuming
+    }
+
+    fn supports_uf(&self) -> bool {
+        self.supports_uf
+    }
+}
+
+impl<R: Write + Send> SolverStart<R> for SmtLibSolver {
     type Context = SmtLibSolverCtx<R>;
     fn start(&self, replay_file: Option<R>) -> Result<Self::Context> {
         let mut proc = Command::new(self.name)
@@ -146,18 +164,6 @@ impl<R: Write + Send> Solver<R> for SmtLibSolver {
             )?
         }
         Ok(solver)
-    }
-
-    fn name(&self) -> &str {
-        self.name
-    }
-
-    fn supports_check_assuming(&self) -> bool {
-        self.supports_check_assuming
-    }
-
-    fn supports_uf(&self) -> bool {
-        self.supports_uf
     }
 }
 
@@ -285,7 +291,6 @@ fn shut_down_solver<R: Write + Send>(solver: &mut SmtLibSolverCtx<R>) {
 }
 
 impl<R: Write + Send> SolverContext for SmtLibSolverCtx<R> {
-
     fn name(&self) -> &str {
         &self.name
     }

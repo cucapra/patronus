@@ -3,7 +3,7 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use baa::{BitVecOps, BitVecValue, WidthInt};
+use baa::{BitVecOps, BitVecValue, Value, WidthInt};
 use clap::{arg, Parser, ValueEnum};
 use patronus::expr::*;
 use patronus::sim::*;
@@ -70,11 +70,10 @@ fn main() {
 
     match args.init {
         Init::Zero => {
-            sim.init();
+            sim.init(InitKind::Zero);
         }
         Init::Random => {
-            println!("WARN: random initialization is currently not supported");
-            sim.init();
+            sim.init(InitKind::Random(123));
         }
     }
     let delta_load = std::time::Instant::now() - start_load;
@@ -193,8 +192,8 @@ fn do_step(
     if !signal_to_print.is_empty() {
         println!();
         for (name, expr) in signal_to_print.iter() {
-            if let Some(value_ref) = sim.get(*expr) {
-                let value = value_ref.to_bit_str();
+            if let Value::BitVec(v) = sim.get(*expr) {
+                let value = v.to_bit_str();
                 println!("{name}@{step_id} = {value}")
             }
         }
@@ -207,10 +206,10 @@ fn do_step(
             if cell_id == output.0 {
                 // apply input
                 let trimmed = cell.trim();
-                if trimmed.to_ascii_lowercase() != "x" {
+                if !trimmed.eq_ignore_ascii_case("x") {
                     let width = output.3;
                     let expected = BitVecValue::from_str_radix(trimmed, 10, width).unwrap();
-                    let actual = sim.get(output.1).unwrap();
+                    let actual: BitVecValue = sim.get(output.1).try_into().unwrap();
                     assert_eq!(expected, actual, "{}@{step_id}", output.2);
                 }
 
