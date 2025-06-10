@@ -177,7 +177,7 @@ impl<V: Value> ValueSummary<V> {
     }
 
     /// Indicates that this value summary is trivially true.
-    fn is_true(&self, ec: &V::Context) -> bool {
+    pub fn is_true(&self, ec: &V::Context) -> bool {
         match self.entries.as_slice() {
             [entry] => entry.value.is_true(ec),
             _ => false,
@@ -185,7 +185,7 @@ impl<V: Value> ValueSummary<V> {
     }
 
     /// Indicates that this value summary is trivially false.
-    fn is_false(&self, ec: &V::Context) -> bool {
+    pub fn is_false(&self, ec: &V::Context) -> bool {
         match self.entries.as_slice() {
             [entry] => entry.value.is_false(ec),
             _ => false,
@@ -209,6 +209,9 @@ impl<V: Value> ValueSummary<V> {
     pub fn coalesce(&mut self, gc: &mut GuardCtx) {
         coalesce_entries(&mut self.entries, gc);
     }
+
+    /// returns a concrete value, if the value summary consists of a single concrete value
+    pub fn concrete(&self) -> Option<baa::l
 }
 
 fn coalesce_entries<V: Value>(entries: &mut Vec<Entry<V>>, gc: &mut GuardCtx) {
