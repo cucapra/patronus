@@ -17,7 +17,7 @@ pub enum InitKind {
 pub trait Simulator {
     type SnapshotId;
 
-    /// Initializes all states and inputs to zero.
+    /// Initializes all states and inputs to zero or random values.
     fn init(&mut self, kind: InitKind);
 
     /// Advance the state.

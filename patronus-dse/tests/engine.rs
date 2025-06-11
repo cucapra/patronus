@@ -2,10 +2,10 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use patronus::expr::Context;
+use patronus::expr::{Context, ExprRef};
 use patronus::sim::InitKind;
 use patronus::*;
-use patronus_dse::SymEngine;
+use patronus_dse::{SymEngine, ValueSummary};
 
 const COUNT_2: &str = r#"
 1 sort bitvec 3
@@ -32,7 +32,14 @@ fn test_exec_count_2() {
     let bad = sys.bad_states[0];
     let mut sim = SymEngine::new(&ctx, sys);
 
+    fn v(v: ValueSummary<ExprRef>) -> u64 {
+        v.concrete()
+            .expect("not concrete!")
+            .try_into_u64()
+            .expect("cannot be represented by a u64")
+    }
+
     // init
-    sim.init(InitKind::Zero);
-    assert!(sim.get(counter_state).);
+    sim.init(&mut ctx, InitKind::Zero);
+    assert_eq!(v(sim.get(counter_state)), 1);
 }

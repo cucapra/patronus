@@ -5,6 +5,7 @@
 use boolean_expression::{BDD, BDDFunc};
 use patronus::expr::*;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
+use smallvec::{smallvec, Array, SmallVec};
 use std::hash::Hash;
 
 #[derive(Debug, Clone)]
@@ -87,29 +88,37 @@ impl GuardCtx {
 
 type Guard = BDDFunc;
 
+type ValueContext = Context;
+
 /// Value in a `[[ValueSummary]]`.
 pub trait Value: Clone + Eq + Hash {
-    type Context;
+    type Concrete;
 
     /// Indicates that the value is trivially true.
-    fn is_true(&self, _ec: &Self::Context) -> bool {
+    fn is_true(&self, _ec: &ValueContext) -> bool {
         false
     }
     /// Indicates that the value is trivially false.
-    fn is_false(&self, _ec: &Self::Context) -> bool {
+    fn is_false(&self, _ec: &ValueContext) -> bool {
         false
     }
+    /// Returns the concrete value, iff available.
+    fn concrete(&self, _ec: &ValueContext) -> Option<Self::Concrete>;
+    /// Generate a zero value of the same type.
+    fn zero(_ec: &mut ValueContext, tpe: &Type) -> Self;
 }
+
+type EntryVec<V: Value> = SmallVec<[Entry<V>; 4]>;
 
 #[allow(dead_code)]
 pub struct ValueSummary<V: Value> {
-    entries: Vec<Entry<V>>,
+    entries: EntryVec<V>,
 }
 
 impl<V: Value> ValueSummary<V> {
     pub fn new(gc: &mut GuardCtx, value: V) -> Self {
         Self {
-            entries: vec![Entry {
+            entries: smallvec![Entry {
                 guard: gc.get_true(),
                 value,
             }],
@@ -118,16 +127,16 @@ impl<V: Value> ValueSummary<V> {
 
     /// Applies an operation to a and b.
     pub fn apply_bin_op(
-        ec: &mut V::Context,
+        ec: &mut ValueContext,
         gc: &mut GuardCtx,
-        op: fn(ec: &mut V::Context, a: V, b: V) -> V,
+        op: fn(ec: &mut ValueContext, a: V, b: V) -> V,
         a: Self,
         b: Self,
     ) -> Self {
         let mut a = a.entries;
         let mut b = b.entries;
         debug_assert!(!a.is_empty() && !b.is_empty());
-        let mut out = Vec::with_capacity(a.len() + b.len());
+        let mut out = SmallVec::with_capacity(a.len() + b.len());
 
         // first we check to see if any guards are the same, then we do not need to apply the cross product
         let a_guards: FxHashSet<Guard> = a.iter().map(|e| e.guard).collect();
@@ -177,7 +186,7 @@ impl<V: Value> ValueSummary<V> {
     }
 
     /// Indicates that this value summary is trivially true.
-    pub fn is_true(&self, ec: &V::Context) -> bool {
+    pub fn is_true(&self, ec: &ValueContext) -> bool {
         match self.entries.as_slice() {
             [entry] => entry.value.is_true(ec),
             _ => false,
@@ -185,7 +194,7 @@ impl<V: Value> ValueSummary<V> {
     }
 
     /// Indicates that this value summary is trivially false.
-    pub fn is_false(&self, ec: &V::Context) -> bool {
+    pub fn is_false(&self, ec: &ValueContext) -> bool {
         match self.entries.as_slice() {
             [entry] => entry.value.is_false(ec),
             _ => false,
@@ -211,10 +220,12 @@ impl<V: Value> ValueSummary<V> {
     }
 
     /// returns a concrete value, if the value summary consists of a single concrete value
-    pub fn concrete(&self) -> Option<baa::l
+    pub fn concrete(&self) -> Option<V::Concrete> {
+        todo!()
+    }
 }
 
-fn coalesce_entries<V: Value>(entries: &mut Vec<Entry<V>>, gc: &mut GuardCtx) {
+fn coalesce_entries<V: Value>(entries: &mut EntryVec<V>, gc: &mut GuardCtx) {
     let mut by_value = FxHashMap::with_capacity_and_hasher(entries.len(), FxBuildHasher);
     let mut delete_list = vec![];
     for ii in 0..entries.len() {
@@ -240,7 +251,7 @@ fn coalesce_entries<V: Value>(entries: &mut Vec<Entry<V>>, gc: &mut GuardCtx) {
 impl<V: Value + ToGuard> ValueSummary<V> {
     /// Combines two values depending on a conditional.
     pub fn apply_ite(
-        ec: &mut V::Context,
+        ec: &mut ValueContext,
         gc: &mut GuardCtx,
         cond: Self,
         tru: Self,
@@ -268,7 +279,7 @@ impl<V: Value + ToGuard> ValueSummary<V> {
         }
 
         // create combined entries
-        let mut entries = Vec::with_capacity(tru.len() + fals.len());
+        let mut entries = EntryVec::with_capacity(tru.len() + fals.len());
         for e in tru.entries.into_iter() {
             entries.push(Entry {
                 guard: gc.and(e.guard, tru_cond),
@@ -287,8 +298,8 @@ impl<V: Value + ToGuard> ValueSummary<V> {
     }
 
     /// Converts the value summary into a guard.
-    fn to_guard(&self, ec: &mut V::Context, gc: &mut GuardCtx) -> (Guard, Vec<Entry<V>>) {
-        let mut results = vec![];
+    fn to_guard(&self, ec: &mut ValueContext, gc: &mut GuardCtx) -> (Guard, EntryVec<V>) {
+        let mut results = EntryVec::default();
         let mut guard = gc.get_false();
         for e in self.entries.iter() {
             match e.value.to_guard(ec, gc) {
@@ -316,11 +327,11 @@ impl<V: Value + ToGuard> ValueSummary<V> {
     }
 
     /// Canonicalizes a boolean value summary such that it only contains two or fewer entries.
-    pub fn import_into_guard(&mut self, ec: &mut V::Context, gc: &mut GuardCtx) {
+    pub fn import_into_guard(&mut self, ec: &mut ValueContext, gc: &mut GuardCtx) {
         let (value_as_guard, others) = self.to_guard(ec, gc);
         if gc.is_true(value_as_guard) {
             debug_assert!(others.is_empty());
-            self.entries = vec![Entry {
+            self.entries = smallvec![Entry {
                 guard: gc.get_true(),
                 value: V::true_value(ec),
             }];
@@ -328,7 +339,7 @@ impl<V: Value + ToGuard> ValueSummary<V> {
         }
         if gc.is_false(value_as_guard) {
             debug_assert!(others.is_empty());
-            self.entries = vec![Entry {
+            self.entries = smallvec![Entry {
                 guard: gc.get_true(),
                 value: V::false_value(ec),
             }];
@@ -337,7 +348,7 @@ impl<V: Value + ToGuard> ValueSummary<V> {
         if !others.is_empty() {
             todo!("deal with other values!")
         }
-        self.entries = vec![
+        self.entries = smallvec![
             Entry {
                 guard: gc.not(value_as_guard),
                 value: V::false_value(ec),
@@ -350,32 +361,33 @@ impl<V: Value + ToGuard> ValueSummary<V> {
     }
 }
 
-fn delete_entries<T>(delete_list: Vec<usize>, entries: &mut Vec<T>) {
-    if !delete_list.is_empty() {
-        let mut delete_iter = delete_list.into_iter().peekable();
-        let mut index = 0usize;
-        entries.retain(|_| {
-            let current_index = index;
-            index += 1;
-            if delete_iter.peek().cloned() == Some(current_index) {
-                delete_iter.next().unwrap();
-                false
-            } else {
-                true
-            }
-        })
-    }
+fn delete_entries<T: Array>(
+    delete_list: impl IntoIterator<Item = usize>,
+    entries: &mut SmallVec<T>,
+) {
+    let mut delete_iter = delete_list.into_iter().peekable();
+    let mut index = 0usize;
+    entries.retain(|_| {
+        let current_index = index;
+        index += 1;
+        if delete_iter.peek().cloned() == Some(current_index) {
+            delete_iter.next().unwrap();
+            false
+        } else {
+            true
+        }
+    })
 }
 
 /// Implemented by values that can be lifted into a guard.
 pub trait ToGuard: Value {
     /// Indicates whether the given value can be turned into a guard.
-    fn can_be_guard(&self, ec: &Self::Context) -> bool;
+    fn can_be_guard(&self, ec: &ValueContext) -> bool;
 
     /// Turns the value into a guard.
-    fn to_guard(&self, ec: &Self::Context, gc: &mut GuardCtx) -> GuardResult<Self>;
-    fn true_value(ec: &mut Self::Context) -> Self;
-    fn false_value(ec: &mut Self::Context) -> Self;
+    fn to_guard(&self, ec: &ValueContext, gc: &mut GuardCtx) -> GuardResult<Self>;
+    fn true_value(ec: &mut ValueContext) -> Self;
+    fn false_value(ec: &mut ValueContext) -> Self;
 }
 
 pub enum GuardResult<V: Value> {
@@ -388,19 +400,30 @@ pub enum GuardResult<V: Value> {
 }
 
 impl Value for ExprRef {
-    type Context = Context;
+    type Concrete = baa::Value;
 
-    fn is_true(&self, ec: &Context) -> bool {
+    fn is_true(&self, ec: &ValueContext) -> bool {
         ec[*self].is_true()
     }
 
-    fn is_false(&self, ec: &Context) -> bool {
+    fn is_false(&self, ec: &ValueContext) -> bool {
         ec[*self].is_false()
+    }
+
+    fn concrete(&self, ec: &ValueContext) -> Option<Self::Concrete> {
+        todo!()
+    }
+
+    fn zero(ec: &mut ValueContext, tpe: &Type) -> Self {
+        match *tpe {
+            Type::BV(width) => ec.zero(width),
+            Type::Array(t) => ec.zero_array(t),
+        }
     }
 }
 
 impl ToGuard for ExprRef {
-    fn can_be_guard(&self, ec: &Self::Context) -> bool {
+    fn can_be_guard(&self, ec: &ValueContext) -> bool {
         ec[*self].is_bool(ec)
     }
 
@@ -411,11 +434,11 @@ impl ToGuard for ExprRef {
         let guard = gc.expr_to_guard(ec, *self);
         GuardResult::Guard(guard)
     }
-    fn true_value(ec: &mut Self::Context) -> Self {
+    fn true_value(ec: &mut ValueContext) -> Self {
         ec.get_true()
     }
 
-    fn false_value(ec: &mut Self::Context) -> Self {
+    fn false_value(ec: &mut ValueContext) -> Self {
         ec.get_false()
     }
 }
@@ -441,8 +464,8 @@ mod tests {
 
     #[test]
     fn test_delete_entries() {
-        let mut entries = vec!['a', 'b', 'c', 'd'];
+        let mut entries: SmallVec<[char; 4]> = smallvec!['a', 'b', 'c', 'd'];
         delete_entries(vec![1, 2], &mut entries);
-        assert_eq!(entries, ['a', 'd']);
+        assert_eq!(entries.as_slice(), ['a', 'd']);
     }
 }

@@ -13,3 +13,5 @@ rust-version.workspace = true
 patronus = { path = "../patronus" }
 boolean_expression.workspace = true
 rustc-hash.workspace = true
+baa.workspace = true
+smallvec.workspace = true
