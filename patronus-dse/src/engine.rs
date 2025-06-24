@@ -6,8 +6,11 @@ use crate::value_summary::Value;
 use crate::{GuardCtx, ValueSummary};
 use patronus::expr::{Context, ExprRef, Type, TypeCheck};
 use patronus::sim::InitKind;
+use patronus::system::analysis::count_expr_uses;
 use patronus::system::TransitionSystem;
 use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
+use std::ops::Index;
 
 /// Symbolic execution engine.
 pub struct SymEngine<V: Value> {
@@ -15,15 +18,18 @@ pub struct SymEngine<V: Value> {
     gc: GuardCtx,
     step_count: u64,
     data: Data<V>,
+    dependencies: Dependencies,
 }
 
 impl<V: Value> SymEngine<V> {
-    pub fn new(_ctx: &Context, sys: TransitionSystem) -> Self {
+    pub fn new(ctx: &Context, sys: TransitionSystem) -> Self {
+        let dependencies = Dependencies::calculate(ctx, &sys);
         Self {
             sys,
             gc: GuardCtx::default(),
             step_count: 0,
             data: Data::<V>::default(),
+            dependencies,
         }
     }
 
@@ -61,7 +67,11 @@ impl<V: Value> SymEngine<V> {
     }
 
     pub fn get(&self, expr: ExprRef) -> ValueSummary<V> {
-        todo!()
+        let mut todo: SmallVec<[Dep; 4]> =
+            SmallVec::from_iter(self.dependencies[expr].iter().cloned());
+        while let Some(dep) = todo.pop() {}
+        todo!("Where should we actually do the computation? As part of data or here?")
+        //self.data.g
     }
 
     pub fn step_count(&self) -> u64 {
@@ -109,3 +119,25 @@ impl<V: Value> Default for Data<V> {
 
 /// Data structure, tracking the dependencies of every expression in the circuit.
 struct Dependencies {}
+
+impl Dependencies {
+    fn calculate(ctx: &Context, sys: &TransitionSystem) -> Self {
+        let uses = count_expr_uses(ctx, sys);
+
+        todo!()
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum Dep {
+    Same(ExprRef),
+    Past(ExprRef),
+}
+
+impl Index<ExprRef> for Dependencies {
+    type Output = [Dep];
+
+    fn index(&self, index: ExprRef) -> &Self::Output {
+        todo!()
+    }
+}
