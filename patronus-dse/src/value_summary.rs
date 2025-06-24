@@ -88,7 +88,7 @@ impl GuardCtx {
 
 type Guard = BDDFunc;
 
-type ValueContext = Context;
+pub type ValueContext = Context;
 
 /// Value in a `[[ValueSummary]]`.
 pub trait Value: Clone + Eq + Hash {
@@ -111,6 +111,7 @@ pub trait Value: Clone + Eq + Hash {
 type EntryVec<V: Value> = SmallVec<[Entry<V>; 4]>;
 
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct ValueSummary<V: Value> {
     entries: EntryVec<V>,
 }
