@@ -154,9 +154,17 @@ impl TypeCheck for Expr {
             Expr::BVSlice { e, hi, lo } => {
                 let e_width = e.get_type(ctx).expect_bv("slicing")?;
                 if hi >= e_width {
-                    Err(TypeCheckError{msg: format!("Bit-slice upper index must be smaller than the width {e_width}. Not: {hi}")})
+                    Err(TypeCheckError {
+                        msg: format!(
+                            "Bit-slice upper index must be smaller than the width {e_width}. Not: {hi}"
+                        ),
+                    })
                 } else if hi < lo {
-                    Err(TypeCheckError{msg: format!("Bit-slice upper index must be larger or the same as the lower index. But {hi} < {lo}")})
+                    Err(TypeCheckError {
+                        msg: format!(
+                            "Bit-slice upper index must be larger or the same as the lower index. But {hi} < {lo}"
+                        ),
+                    })
                 } else {
                     Ok(Type::BV(hi - lo + 1))
                 }

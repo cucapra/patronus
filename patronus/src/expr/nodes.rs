@@ -3,8 +3,8 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::expr::context::{ExprRef, StringRef};
 use crate::expr::Context;
+use crate::expr::context::{ExprRef, StringRef};
 use baa::{BitVecValueIndex, BitVecValueRef};
 use std::fmt::Debug;
 

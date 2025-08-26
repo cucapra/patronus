@@ -6,7 +6,7 @@ mod smt;
 mod types;
 
 pub use smt::{
-    check_assuming, check_assuming_end, get_smt_value, ModelCheckResult, SmtModelChecker,
-    SmtModelCheckerOptions, TransitionSystemEncoding, UnrollSmtEncoding,
+    ModelCheckResult, SmtModelChecker, SmtModelCheckerOptions, TransitionSystemEncoding,
+    UnrollSmtEncoding, check_assuming, check_assuming_end, get_smt_value,
 };
 pub use types::{InitValue, Witness};

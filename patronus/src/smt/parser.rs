@@ -298,7 +298,7 @@ pub fn parse_command(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Resul
                 return Err(SmtParserError::UnknownCommand(format!(
                     "{}",
                     String::from_utf8_lossy(name)
-                )))
+                )));
             }
         },
         _ => return Err(SmtParserError::ExpectedCommand(format!("{cmd_token:?}"))),
@@ -493,12 +493,14 @@ fn parse_pattern<'a>(
         // Types
         ///////////////////////////////////////////////////////////////////////////////////////////
         [Sym(b"_"), Sym(b"BitVec"), Sym(width)] => PType(Type::BV(parse_width(width)?)),
-        [Sym(b"Array"), PType(Type::BV(index_width)), PType(Type::BV(data_width))] => {
-            PType(Type::Array(ArrayType {
-                index_width: *index_width,
-                data_width: *data_width,
-            }))
-        }
+        [
+            Sym(b"Array"),
+            PType(Type::BV(index_width)),
+            PType(Type::BV(data_width)),
+        ] => PType(Type::Array(ArrayType {
+            index_width: *index_width,
+            data_width: *data_width,
+        })),
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // Parameterized Ops

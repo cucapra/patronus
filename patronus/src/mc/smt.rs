@@ -4,10 +4,10 @@
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
 use crate::expr::*;
-use crate::mc::types::InitValue;
 use crate::mc::Witness;
+use crate::mc::types::InitValue;
 use crate::smt::*;
-use crate::system::analysis::{analyze_for_serialization, count_expr_uses, UseCountInt, Uses};
+use crate::system::analysis::{UseCountInt, Uses, analyze_for_serialization, count_expr_uses};
 use crate::system::{State, TransitionSystem};
 use baa::*;
 use rustc_hash::FxHashSet;

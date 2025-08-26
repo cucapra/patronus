@@ -14,8 +14,8 @@
 //! are no checks to ensure that a [`ExprRef`] or [`StringRef`] from different contexts are
 //! not matched. Thus working with more than one [`Context`] object can be dangerous.
 
-use crate::expr::nodes::*;
 use crate::expr::TypeCheck;
+use crate::expr::nodes::*;
 use baa::{
     ArrayOps, BitVecValue, BitVecValueIndex, BitVecValueRef, IndexToRef, SparseArrayValue, Value,
 };

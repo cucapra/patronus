@@ -2,7 +2,7 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::samples::{get_var_name, RuleInfo, Samples};
+use crate::samples::{RuleInfo, Samples, get_var_name};
 use bitvec::prelude as bv;
 use egg::Var;
 use patronus::expr::WidthInt;

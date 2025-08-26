@@ -87,10 +87,10 @@ fn init_signal(
     ctx: &Context,
     state: &mut SymbolValueStore,
     symbol: ExprRef,
-    gen: &mut InitValueGenerator,
+    generator: &mut InitValueGenerator,
 ) {
     let tpe = ctx[symbol].get_type(ctx);
-    match gen.gen(tpe) {
+    match generator.generate(tpe) {
         Value::Array(value) => {
             state.define_array(symbol, value);
         }
@@ -104,16 +104,16 @@ impl Simulator for Interpreter {
     type SnapshotId = u32;
 
     fn init(&mut self, kind: InitKind) {
-        let mut gen = InitValueGenerator::from_kind(kind);
+        let mut generator = InitValueGenerator::from_kind(kind);
 
         self.data.clear();
 
         // allocate space for inputs, and states
         for state in self.sys.states.iter() {
-            init_signal(&self.ctx, &mut self.data, state.symbol, &mut gen);
+            init_signal(&self.ctx, &mut self.data, state.symbol, &mut generator);
         }
         for &symbol in self.sys.inputs.iter() {
-            init_signal(&self.ctx, &mut self.data, symbol, &mut gen);
+            init_signal(&self.ctx, &mut self.data, symbol, &mut generator);
         }
 
         // evaluate init expressions

@@ -4,7 +4,7 @@
 
 use clap::Parser;
 use patronus::expr::*;
-use patronus::smt::{parse_command, serialize_cmd, SmtCommand};
+use patronus::smt::{SmtCommand, parse_command, serialize_cmd};
 use rustc_hash::FxHashMap;
 use std::io::{BufRead, BufReader, BufWriter};
 use std::path::PathBuf;

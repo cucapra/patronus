@@ -10,7 +10,7 @@ introspect them in order to check re-write conditions or debug matches.
 !*/
 
 use crate::arithmetic::{eval_width_left_shift, eval_width_max_plus_1};
-use crate::{get_const_width_or_sign, is_bin_op, Arith, EGraph, WidthConstantFold};
+use crate::{Arith, EGraph, WidthConstantFold, get_const_width_or_sign, is_bin_op};
 use egg::{
     ConditionalApplier, ENodeOrVar, Id, Language, Pattern, PatternAst, Searcher, Subst, Var,
 };
@@ -22,16 +22,12 @@ macro_rules! arith_rewrite {
     (
         $name:expr;
         $lhs:expr => $rhs:expr
-    ) => {{
-        ArithRewrite::new::<&str>($name, $lhs, $rhs, [], None)
-    }};
+    ) => {{ ArithRewrite::new::<&str>($name, $lhs, $rhs, [], None) }};
     (
         $name:expr;
         $lhs:expr => $rhs:expr;
         if $vars:expr, $cond:expr
-    ) => {{
-        ArithRewrite::new($name, $lhs, $rhs, $vars, Some($cond))
-    }};
+    ) => {{ ArithRewrite::new($name, $lhs, $rhs, $vars, Some($cond)) }};
 }
 
 /// Generate our ROVER inspired rewrite rules.
@@ -162,12 +158,14 @@ impl ArithRewrite {
             };
             vec![Rewrite::new(self.name.clone(), self.lhs.clone(), cond_app).unwrap()]
         } else {
-            vec![Rewrite::new(
-                self.name.clone(),
-                self.lhs.clone(),
-                self.rhs_derived.clone(),
-            )
-            .unwrap()]
+            vec![
+                Rewrite::new(
+                    self.name.clone(),
+                    self.lhs.clone(),
+                    self.rhs_derived.clone(),
+                )
+                .unwrap(),
+            ]
         }
     }
 

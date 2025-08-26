@@ -477,8 +477,8 @@ fn test_random_z3_issue_simplification() {
     // it is nice to see that z3 implements some bit-mask support similar to ours
     // we currently do slightly better by simplifying away the right shift by a constant
     ts(
-      "or(shift_left(and(V : bv<32>, 32'd65535), 32'd17), shift_right(and(V, 32'd65535), 32'd15))",
-      "or(concat(V:bv<32>[14:0], 17'x00000), concat(31'x00000000, V[15]))"
+        "or(shift_left(and(V : bv<32>, 32'd65535), 32'd17), shift_right(and(V, 32'd65535), 32'd15))",
+        "or(concat(V:bv<32>[14:0], 17'x00000), concat(31'x00000000, V[15]))",
     );
 }
 

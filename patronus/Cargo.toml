@@ -16,7 +16,7 @@ indexmap = "2.7.0"
 codespan-reporting = "0.11.1"
 lazy_static = "1.4.0"
 smallvec = { version = "1.x", features = ["union"] }
-rand = { version = "0.8.5", features = ["small_rng"] }
+rand = { version = "0.9", features = ["small_rng"] }
 boolean_expression.workspace = true
 regex.workspace = true
 baa.workspace = true

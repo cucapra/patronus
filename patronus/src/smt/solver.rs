@@ -3,7 +3,7 @@
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
 use crate::expr::{Context, ExprRef};
-use crate::smt::parser::{parse_get_value_response, SmtParserError};
+use crate::smt::parser::{SmtParserError, parse_get_value_response};
 use crate::smt::serialize::serialize_cmd;
 use std::io::{BufRead, BufReader, BufWriter};
 use std::io::{Read, Write};

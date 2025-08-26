@@ -911,11 +911,10 @@ fn report_errors(errors: Errors, name: &str, source: &str) {
 fn report_error(error: ParserError, file: &codespan_reporting::files::SimpleFile<&str, &str>) {
     let diagnostic = codespan_reporting::diagnostic::Diagnostic::error()
         .with_message(error.msg)
-        .with_labels(vec![codespan_reporting::diagnostic::Label::primary(
-            (),
-            error.start..error.end,
-        )
-        .with_message(error.explain)]);
+        .with_labels(vec![
+            codespan_reporting::diagnostic::Label::primary((), error.start..error.end)
+                .with_message(error.explain),
+        ]);
     let writer = codespan_reporting::term::termcolor::StandardStream::stderr(
         codespan_reporting::term::termcolor::ColorChoice::Auto,
     );

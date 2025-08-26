@@ -3,16 +3,16 @@ resolver = "2"
 members = ["patronus", "patronus-egraphs", "patronus-dse", "tools/bmc", "tools/egraphs-cond-synth", "tools/sim", "tools/simplify", "tools/view"]
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
 authors = ["Kevin Laeufer <laeufer@berkeley.edu>"]
 repository = "https://github.com/cucapra/patronus"
 readme = "Readme.md"
 license = "BSD-3-Clause"
-rust-version = "1.73.0"
+rust-version = "1.85.0"
 
 [workspace.dependencies]
 rustc-hash = "2.x"
-baa = { version = "0.16.9", features = ["rand1"] }
+baa = { version = "0.17.1", features = ["rand1"] }
 egg = "0.9.5"
 regex = "1.11.1"
 boolean_expression = "0.4.4"

@@ -3,9 +3,9 @@
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
 use baa::BitVecOps;
-use egg::{define_language, Analysis, DidMerge, Id, Language, RecExpr};
+use egg::{Analysis, DidMerge, Id, Language, RecExpr, define_language};
 use patronus::expr::*;
-use std::cmp::{max, Ordering};
+use std::cmp::{Ordering, max};
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 

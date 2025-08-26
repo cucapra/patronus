@@ -2,7 +2,7 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use egg::{rewrite, ENodeOrVar, Id, Language, PatternAst, RecExpr, Var};
+use egg::{ENodeOrVar, Id, Language, PatternAst, RecExpr, Var, rewrite};
 use indicatif::ProgressBar;
 use patronus::expr::traversal::TraversalCmd;
 use patronus::expr::{Context, ExprRef, WidthInt};

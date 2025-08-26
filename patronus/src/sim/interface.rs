@@ -4,8 +4,8 @@
 
 use crate::expr::{ArrayType, ExprRef, Type};
 use baa::{ArrayValue, BitVecValue, BitVecValueRef, Value};
-use rand::rngs::SmallRng;
 use rand::SeedableRng;
+use rand::rngs::SmallRng;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum InitKind {
@@ -51,7 +51,7 @@ impl InitValueGenerator {
         }
     }
 
-    pub fn gen(&mut self, tpe: Type) -> Value {
+    pub fn generate(&mut self, tpe: Type) -> Value {
         match tpe {
             Type::BV(bits) => {
                 if let Some(rng) = &mut self.rng {

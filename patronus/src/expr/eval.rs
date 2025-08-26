@@ -380,7 +380,7 @@ fn eval_expr_internal(
 
 #[cfg(test)]
 mod tests {
-    use super::{eval_array_expr, eval_bv_expr, SymbolValueStore};
+    use super::{SymbolValueStore, eval_array_expr, eval_bv_expr};
     use crate::expr::*;
     use baa::*;
 
@@ -395,12 +395,14 @@ mod tests {
         assert!(eval_bv_expr(&c, [(a, BitVecValue::new_false())].as_slice(), a_and_1).is_false());
         let b = c.bv_symbol("b", 1);
         let expr = c.build(|c| c.or(c.and(a, c.not(b)), c.and(a, b)));
-        assert!(eval_bv_expr(
-            &c,
-            [(a, BitVecValue::new_false()), (b, BitVecValue::new_false())].as_slice(),
-            expr
-        )
-        .is_false());
+        assert!(
+            eval_bv_expr(
+                &c,
+                [(a, BitVecValue::new_false()), (b, BitVecValue::new_false())].as_slice(),
+                expr
+            )
+            .is_false()
+        );
 
         // arithmetic and ite
         let a = c.bv_symbol("a", 128);

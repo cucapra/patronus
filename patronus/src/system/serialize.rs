@@ -3,11 +3,11 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use super::analysis::{analyze_for_serialization, SerializeSignalKind};
 use super::TransitionSystem;
+use super::analysis::{SerializeSignalKind, analyze_for_serialization};
 use crate::expr::{
-    serialize_expr, serialize_expr_ref, Context, ExprRef, SerializableIrNode, SparseExprMap,
-    TypeCheck,
+    Context, ExprRef, SerializableIrNode, SparseExprMap, TypeCheck, serialize_expr,
+    serialize_expr_ref,
 };
 use std::io::Write;
 

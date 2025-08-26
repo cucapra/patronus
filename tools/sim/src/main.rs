@@ -4,7 +4,7 @@
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
 use baa::{BitVecOps, BitVecValue, Value, WidthInt};
-use clap::{arg, Parser, ValueEnum};
+use clap::{Parser, ValueEnum, arg};
 use patronus::expr::*;
 use patronus::sim::*;
 use patronus::system::*;

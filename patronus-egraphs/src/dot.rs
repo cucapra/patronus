@@ -3,7 +3,7 @@
 // author: Kevin Laeufer <laeufer@cornell.edu>
 // some of the code is based on `egg` source code which is licenced under MIT
 
-use crate::{get_const_width_or_sign, is_bin_op, EGraph};
+use crate::{EGraph, get_const_width_or_sign, is_bin_op};
 use egg::Language;
 use rustc_hash::FxHashMap;
 use std::io::{BufWriter, Write};

@@ -279,11 +279,15 @@ fn check_conditions(
         (false_negative * 100) as f64 / num_total
     );
     if !false_pos_examples.is_empty() {
-        println!("Some example assignments that are incorrectly classified as OK by our current condition:");
+        println!(
+            "Some example assignments that are incorrectly classified as OK by our current condition:"
+        );
         show_assignments(rule, info, &false_pos_examples, 10, CheckSatResponse::Sat);
     }
     if !false_neg_examples.is_empty() {
-        println!("Some example assignments that are incorrectly classified as DOES NOT APPLY by our current condition:");
+        println!(
+            "Some example assignments that are incorrectly classified as DOES NOT APPLY by our current condition:"
+        );
         show_assignments(
             rule,
             info,
@@ -305,7 +309,7 @@ fn show_assignments(
     let mut ctx = Context::default();
     let mut smt_ctx = start_solver(false);
     for _ in 0..num_samples {
-        let a_idx = rnd.gen::<usize>() % examples.len();
+        let a_idx = rnd.r#gen::<usize>() % examples.len();
         let a = &examples[a_idx];
 
         // generate smt expressions

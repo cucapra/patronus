@@ -4,13 +4,13 @@
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
 use super::{
-    do_transform_expr, BVLitValue, Context, Expr, ExprMap, ExprRef, SparseExprMap, TypeCheck,
-    WidthInt,
+    BVLitValue, Context, Expr, ExprMap, ExprRef, SparseExprMap, TypeCheck, WidthInt,
+    do_transform_expr,
 };
 use crate::expr::meta::get_fixed_point;
 use crate::expr::transform::ExprTransformMode;
 use baa::BitVecOps;
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 
 /// Applies simplifications to a single expression.
 pub fn simplify_single_expression(ctx: &mut Context, expr: ExprRef) -> ExprRef {
