@@ -3,6 +3,7 @@
 // author: Kevin Laeufer <laeufer@berkeley.edu>
 mod interface;
 mod interpreter;
+mod wave;
 
 pub use interface::*;
 pub use interpreter::*;

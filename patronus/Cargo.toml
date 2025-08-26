@@ -22,6 +22,7 @@ regex.workspace = true
 baa.workspace = true
 rustc-hash.workspace = true
 thiserror.workspace = true
+fst-writer = "0.3.1"
 
 [dev-dependencies]
 insta = { version = "1.x", features = ["yaml"] }

@@ -5,8 +5,10 @@
 
 use super::{InitKind, InitValueGenerator, Simulator};
 use crate::expr::*;
+use crate::sim::wave::Wavedump;
 use crate::system::*;
 use baa::*;
+use std::path::Path;
 
 /// Interpreter based simulator for a transition system.
 pub struct Interpreter {
@@ -15,20 +17,36 @@ pub struct Interpreter {
     step_count: u64,
     data: SymbolValueStore,
     snapshots: Vec<SymbolValueStore>,
+    wavedump: Option<Wavedump>,
     #[allow(dead_code)]
     do_trace: bool,
 }
 
 impl Interpreter {
     pub fn new(ctx: &Context, sys: &TransitionSystem) -> Self {
-        Self::internal_new(ctx, sys, false)
+        Self::internal_new(ctx, sys, false, None)
     }
 
     pub fn new_with_trace(ctx: &Context, sys: &TransitionSystem) -> Self {
-        Self::internal_new(ctx, sys, true)
+        Self::internal_new(ctx, sys, true, None)
     }
 
-    fn internal_new(ctx: &Context, sys: &TransitionSystem, do_trace: bool) -> Self {
+    pub fn new_with_wavedump(
+        ctx: &Context,
+        sys: &TransitionSystem,
+        filename: impl AsRef<Path>,
+    ) -> Self {
+        let wavedump = Wavedump::open_fst(filename, ctx, sys)
+            .expect("Failed to open FST for waveform dumping");
+        Self::internal_new(ctx, sys, true, Some(wavedump))
+    }
+
+    fn internal_new(
+        ctx: &Context,
+        sys: &TransitionSystem,
+        do_trace: bool,
+        wavedump: Option<Wavedump>,
+    ) -> Self {
         // TODO: we do not need a copy of the full context, only of the part that is relevant to
         //       the transition system. Once we implement garbage collection, we should use that!
 
@@ -39,6 +57,28 @@ impl Interpreter {
             data: Default::default(),
             snapshots: vec![],
             do_trace,
+            wavedump,
+        }
+    }
+
+    fn dump_signals(&mut self) {
+        if self.wavedump.is_some() {
+            let signals = self.wavedump.as_ref().unwrap().signals();
+            let values: Vec<_> = signals
+                .into_iter()
+                .map(|e| {
+                    if let Value::BitVec(v) = self.get(e) {
+                        Some(v)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            self.wavedump
+                .as_mut()
+                .unwrap()
+                .dump_signals(values, self.step_count)
+                .expect("failed to write signal values");
         }
     }
 }
@@ -101,7 +141,9 @@ impl Simulator for Interpreter {
             }
         }
 
-        // increment step cout
+        self.dump_signals();
+
+        // increment step count
         self.step_count += 1;
     }
 
