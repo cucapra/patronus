@@ -849,7 +849,7 @@ pub(crate) struct LineTokens<'a> {
 }
 
 const NO_TOKEN: usize = usize::MAX;
-pub(crate) fn tokenize_line(line: &str) -> LineTokens {
+pub(crate) fn tokenize_line(line: &str) -> LineTokens<'_> {
     if line.is_empty() {
         // special handling for empty lines
         return LineTokens::default();

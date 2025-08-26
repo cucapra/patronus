@@ -9,9 +9,9 @@ use crate::system::*;
 use baa::*;
 
 /// Interpreter based simulator for a transition system.
-pub struct Interpreter<'a> {
-    ctx: &'a Context,
-    sys: &'a TransitionSystem,
+pub struct Interpreter {
+    ctx: Context,
+    sys: TransitionSystem,
     step_count: u64,
     data: SymbolValueStore,
     snapshots: Vec<SymbolValueStore>,
@@ -19,19 +19,22 @@ pub struct Interpreter<'a> {
     do_trace: bool,
 }
 
-impl<'a> Interpreter<'a> {
-    pub fn new(ctx: &'a Context, sys: &'a TransitionSystem) -> Self {
+impl Interpreter {
+    pub fn new(ctx: &Context, sys: &TransitionSystem) -> Self {
         Self::internal_new(ctx, sys, false)
     }
 
-    pub fn new_with_trace(ctx: &'a Context, sys: &'a TransitionSystem) -> Self {
+    pub fn new_with_trace(ctx: &Context, sys: &TransitionSystem) -> Self {
         Self::internal_new(ctx, sys, true)
     }
 
-    fn internal_new(ctx: &'a Context, sys: &'a TransitionSystem, do_trace: bool) -> Self {
+    fn internal_new(ctx: &Context, sys: &TransitionSystem, do_trace: bool) -> Self {
+        // TODO: we do not need a copy of the full context, only of the part that is relevant to
+        //       the transition system. Once we implement garbage collection, we should use that!
+
         Self {
-            ctx,
-            sys,
+            ctx: ctx.clone(),
+            sys: sys.clone(),
             step_count: 0,
             data: Default::default(),
             snapshots: vec![],
@@ -57,7 +60,7 @@ fn init_signal(
     }
 }
 
-impl<'a> Simulator for Interpreter<'a> {
+impl Simulator for Interpreter {
     type SnapshotId = u32;
 
     fn init(&mut self, kind: InitKind) {
@@ -67,16 +70,16 @@ impl<'a> Simulator for Interpreter<'a> {
 
         // allocate space for inputs, and states
         for state in self.sys.states.iter() {
-            init_signal(self.ctx, &mut self.data, state.symbol, &mut gen);
+            init_signal(&self.ctx, &mut self.data, state.symbol, &mut gen);
         }
         for &symbol in self.sys.inputs.iter() {
-            init_signal(self.ctx, &mut self.data, symbol, &mut gen);
+            init_signal(&self.ctx, &mut self.data, symbol, &mut gen);
         }
 
         // evaluate init expressions
         for state in self.sys.states.iter() {
             if let Some(init) = state.init {
-                let value = eval_expr(self.ctx, &self.data, init);
+                let value = eval_expr(&self.ctx, &self.data, init);
                 self.data.update(state.symbol, value);
             }
         }
@@ -88,7 +91,7 @@ impl<'a> Simulator for Interpreter<'a> {
             .sys
             .states
             .iter()
-            .map(|s| s.next.map(|n| eval_expr(self.ctx, &self.data, n)))
+            .map(|s| s.next.map(|n| eval_expr(&self.ctx, &self.data, n)))
             .collect::<Vec<_>>();
 
         // assign next value to store
@@ -107,7 +110,7 @@ impl<'a> Simulator for Interpreter<'a> {
     }
 
     fn get(&self, expr: ExprRef) -> Value {
-        eval_expr(self.ctx, &self.data, expr)
+        eval_expr(&self.ctx, &self.data, expr)
     }
 
     fn step_count(&self) -> u64 {
