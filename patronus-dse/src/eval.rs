@@ -69,7 +69,9 @@ pub fn eval<V: Value>(
                 // TODO: turn into return Err
                 panic!("No value found for symbol: {} : bv<{width}>", ctx[*name]);
             }
-            Expr::BVLiteral(value) => stack.push(value.get(ctx).into()),
+            Expr::BVLiteral(value) => {
+                stack.push(ValueSummary::new(gc, Expr::BVLiteral(*value)))
+            },
             // unary
             Expr::BVZeroExt { by, .. } => un_op(&mut stack, |e| e.zero_extend(*by)),
             Expr::BVSignExt { by, .. } => un_op(&mut stack, |e| e.sign_extend(*by)),
