@@ -126,6 +126,9 @@ impl Simulator for Interpreter {
     }
 
     fn step(&mut self) {
+        // dump all signal values right before the step.
+        self.dump_signals();
+
         // calculate all next states
         let next_states = self
             .sys
@@ -140,8 +143,6 @@ impl Simulator for Interpreter {
                 self.data.update(state.symbol, value);
             }
         }
-
-        self.dump_signals();
 
         // increment step count
         self.step_count += 1;
