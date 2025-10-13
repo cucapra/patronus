@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=64", "wheel", "setuptools-rust>=1.8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "patronus-btor"
+version = "0.1.0"
+description = "PyO3 bindings for Patronus BTOR parsing"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [{ name = "Patronus Authors" }]
+license = { text = "BSD-3-Clause" }
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python",
+    "License :: OSI Approved :: BSD License"
+]

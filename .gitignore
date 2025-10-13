@@ -7,3 +7,32 @@ Cargo.lock
 /perf.data
 /perf.data.old
 replay.smt
+
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+.env
+.python-version
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.ipynb_checkpoints
+.pytest_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+.coverage
+
+# C extensions
+*.so

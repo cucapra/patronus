@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["patronus", "patronus-egraphs", "patronus-dse", "tools/bmc", "tools/egraphs-cond-synth", "tools/sim", "tools/simplify", "tools/view"]
+members = ["patronus", "patronus-egraphs", "patronus-dse", "tools/bmc", "tools/egraphs-cond-synth", "tools/sim", "tools/simplify", "tools/view", "python/patronus_btor"]
 
 [workspace.package]
 edition = "2024"
