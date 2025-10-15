@@ -1,4 +1,7 @@
 mod ctx;
+mod sim;
+
+use std::path::{PathBuf};
 pub use ctx::Context;
 use ctx::{ContextGuardRead, ContextGuardWrite};
 
@@ -114,10 +117,24 @@ pub fn parse_btor2_str(content: &str, name: Option<&str>) -> PyResult<Transition
     }
 }
 
+#[pyfunction]
+pub fn parse_btor2_file(filename: PathBuf) -> PyResult<TransitionSystem> {
+    let mut ctx_guard = ContextGuardWrite::default();
+    let ctx = ctx_guard.deref_mut();
+    match btor2::parse_file_with_ctx(filename, ctx) {
+        Some(sys) => Ok(TransitionSystem(sys)),
+        None => Err(PyValueError::new_err("failed to parse btor")),
+    }
+}
+
 #[pymodule]
 #[pyo3(name = "patronus")]
 fn patronus(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> PyResult<()> {
     m.add_class::<TransitionSystem>()?;
+    m.add_class::<ExprRef>()?;
+    m.add_class::<Output>()?;
+    m.add_class::<State>()?;
     m.add_function(wrap_pyfunction!(parse_btor2_str, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_btor2_file, m)?)?;
     Ok(())
 }

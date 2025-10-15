@@ -43,4 +43,21 @@ def test_transition_system_fields():
     assert str(state.symbol) == "_state_0"
     assert str(state.init) == "3'b000"
     assert str(state.next) == "add(_state_0, 3'b001)"
+    assert len(sys.outputs) == 0
 
+def test_transition_system_simulation():
+    sys = parse_btor2_file(repo_root / "inputs" / "unittest" / "swap.btor")
+    sim = Interpreter(sys)
+    a, b = sys['a'], sys['b']
+
+    sim.init('zero')
+    assert sim[a] == 0, "a@0"
+    assert sim[b] == 1, "b@0"
+
+    sim.step()
+    assert sim[a] == 1
+    assert sim[b] == 0
+
+    sim.step()
+    assert sim[a] == 0
+    assert sim[b] == 1
