@@ -1,0 +1,16 @@
+[package]
+name = "patronus_py"
+description = "PyO3 bindings for Patronus"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "patronus"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.26.0" }
+patronus = { path = "../patronus" }
+baa.workspace = true

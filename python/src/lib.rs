@@ -1,9 +1,9 @@
+use ::patronus::btor2;
+use ::patronus::expr::{Context, Expr, ExprRef};
+use ::patronus::system::TransitionSystem;
+use baa::BitVecOps;
 use pyo3::exceptions::{PyIOError, PyIndexError, PyValueError};
 use pyo3::prelude::*;
-use baa::BitVecOps;
-use patronus::btor2;
-use patronus::expr::{Context, Expr, ExprRef};
-use patronus::system::TransitionSystem;
 
 #[pyclass]
 pub struct Design {
@@ -110,7 +110,8 @@ pub fn parse(path: &str) -> PyResult<Design> {
 }
 
 #[pymodule]
-fn patronus_btor(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> PyResult<()> {
+#[pyo3(name = "patronus")]
+fn patronus(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> PyResult<()> {
     m.add_class::<Design>()?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     Ok(())
@@ -119,7 +120,7 @@ fn patronus_btor(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) ->
 // Helpers
 
 fn expr_to_dict(py: Python<'_>, e: &Expr, ctx: &Context) -> PyResult<PyObject> {
-    let d = pyo3::types::PyDict::new_bound(py);
+    let d = pyo3::types::PyDict::new(py);
 
     macro_rules! set {
         ($k:expr, $v:expr) => {
@@ -306,7 +307,11 @@ fn expr_to_dict(py: Python<'_>, e: &Expr, ctx: &Context) -> PyResult<PyObject> {
             set!("b", idx!(*b));
             set!("width", *width as u64);
         }
-        Expr::BVArrayRead { array, index, width } => {
+        Expr::BVArrayRead {
+            array,
+            index,
+            width,
+        } => {
             set!("kind", "BVArrayRead");
             set!("array", idx!(*array));
             set!("index", idx!(*index));
@@ -359,5 +364,5 @@ fn expr_to_dict(py: Python<'_>, e: &Expr, ctx: &Context) -> PyResult<PyObject> {
         }
     }
 
-    Ok(d.into_py(py))
+    Ok(d.into())
 }

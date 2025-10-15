@@ -1,0 +1,31 @@
+[project]
+name = "patronus"
+requires-python = ">=3.9"
+dynamic = ["version"]
+license = "BSD-3-Clause"
+description = "The hardware bug-finding toolkit for Python programmers."
+authors = [
+    { name = "Adwait Godbole", email = "adwait@berkeley.edu" },
+    { name = "Kevin Laeufer", email = "laeufer@cornell.edu" },
+]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python",
+    "License :: OSI Approved :: BSD License"
+]
+
+[project.urls]
+Homepage = "https://github.com/cucapra/patronus"
+Issues = "https://github.com/cucapra/patronus/issues"
+
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]

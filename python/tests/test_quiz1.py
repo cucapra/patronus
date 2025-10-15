@@ -1,17 +1,14 @@
 import pathlib
 import pytest
 
-from patronus_btor import parse
+from patronus import parse
 
 
-def repo_root() -> pathlib.Path:
-    # this file: repo/python/patronus_btor/tests/test_quiz1.py
-    # parents[0]=tests, [1]=patronus_btor, [2]=python, [3]=repo root
-    return pathlib.Path(__file__).resolve().parents[3]
+repo_root = (pathlib.Path(__file__) / '..' / '..' / '..').resolve()
 
 
 def test_parse_and_index_quiz1():
-    btor_path = repo_root() / "inputs" / "chiseltest" / "Quiz1.btor"
+    btor_path = repo_root / "inputs" / "chiseltest" / "Quiz1.btor"
     assert btor_path.is_file(), f"missing BTOR test input at {btor_path}"
 
     design = parse(str(btor_path))
@@ -65,7 +62,7 @@ def test_parse_and_index_quiz1():
 
 def test_out_of_range_index_raises():
     # Use a tiny BTOR file to parse, then index out of bounds
-    btor_path = repo_root() / "inputs" / "chiseltest" / "Quiz1.btor"
+    btor_path = repo_root / "inputs" / "chiseltest" / "Quiz1.btor"
     design = parse(str(btor_path))
     with pytest.raises(IndexError):
         _ = design[len(design)]
