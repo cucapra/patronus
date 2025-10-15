@@ -11,6 +11,3 @@ replay.smt
 
 # Python
 __pycache__/
-
-# UV lock files
-uv.lock
