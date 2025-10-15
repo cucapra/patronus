@@ -20,7 +20,6 @@ COUNT_2 = """
 """
 
 def test_parse_and_serialize_count2():
-    filename = repo_root / "inputs" / "chiseltest" / "Quiz1.btor"
     sys = parse_btor2_str(COUNT_2, "count2")
     assert sys.name == "count2"
 
@@ -32,3 +31,16 @@ state _state_0 : bv<3>
   [next] add(_state_0, 3'b001)
     """
     assert expected_system.strip() == str(sys).strip()
+
+def test_transition_system_fields():
+    sys = parse_btor2_str(COUNT_2, "count2")
+    assert sys.inputs == []
+    assert sys.constraints == []
+    assert [str(e) for e in sys.bad_states] == ["eq(_state_0, 3'b111)"]
+    assert len(sys.states) == 1
+    state = sys.states[0]
+    assert state.name == "_state_0"
+    assert str(state.symbol) == "_state_0"
+    assert str(state.init) == "3'b000"
+    assert str(state.next) == "add(_state_0, 3'b001)"
+

@@ -5,7 +5,7 @@
 use crate::expr::{Context, ExprMap, ExprRef, SparseExprMap, StringRef};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Copy)]
 pub struct State {
     pub symbol: ExprRef,
     pub init: Option<ExprRef>,
