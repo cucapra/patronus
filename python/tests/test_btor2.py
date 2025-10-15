@@ -48,9 +48,9 @@ def test_transition_system_fields():
 def test_transition_system_simulation():
     sys = parse_btor2_file(repo_root / "inputs" / "unittest" / "swap.btor")
     sim = Interpreter(sys)
-    a, b = sys['a'], sys['b']
+    a, b = sys['a'].symbol, sys['b'].symbol
 
-    sim.init('zero')
+    sim.init()
     assert sim[a] == 0, "a@0"
     assert sim[b] == 1, "b@0"
 

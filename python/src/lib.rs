@@ -1,9 +1,10 @@
 mod ctx;
 mod sim;
 
-use std::path::{PathBuf};
 pub use ctx::Context;
 use ctx::{ContextGuardRead, ContextGuardWrite};
+pub use sim::{Simulator, interpreter};
+use std::path::PathBuf;
 
 use ::patronus::btor2;
 use ::patronus::expr::SerializableIrNode;
@@ -104,6 +105,17 @@ impl TransitionSystem {
     fn __str__(&self) -> String {
         self.0.serialize_to_str(ContextGuardRead::default().deref())
     }
+
+    /// look up states
+    fn __getitem__(&self, key: &str) -> Option<State> {
+        let ctx_guard = ContextGuardRead::default();
+        let ctx = ctx_guard.deref();
+        self.0
+            .states
+            .iter()
+            .find(|s| ctx.get_symbol_name(s.symbol).unwrap() == key)
+            .map(|s| State(*s))
+    }
 }
 
 #[pyfunction]
@@ -136,5 +148,6 @@ fn patronus(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> PyRe
     m.add_class::<State>()?;
     m.add_function(wrap_pyfunction!(parse_btor2_str, m)?)?;
     m.add_function(wrap_pyfunction!(parse_btor2_file, m)?)?;
+    m.add_function(wrap_pyfunction!(interpreter, m)?)?;
     Ok(())
 }
