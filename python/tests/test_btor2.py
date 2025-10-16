@@ -61,3 +61,9 @@ def test_transition_system_simulation():
     sim.step()
     assert sim[a] == 0
     assert sim[b] == 1
+
+def test_expression_builder():
+    # we are emulating the Z3 API as much as possible
+    a = BitVec('a', 3)
+    b = BitVec('b', 3)
+    assert str(a < b) == "sgt(b, a)"

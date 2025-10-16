@@ -1,8 +1,10 @@
 mod ctx;
+mod expr;
 mod sim;
 
 pub use ctx::Context;
 use ctx::{ContextGuardRead, ContextGuardWrite};
+pub use expr::{ExprRef, bit_vec};
 pub use sim::{Simulator, interpreter};
 use std::path::PathBuf;
 
@@ -10,17 +12,6 @@ use ::patronus::btor2;
 use ::patronus::expr::SerializableIrNode;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-
-#[pyclass]
-#[derive(Clone)]
-pub struct ExprRef(::patronus::expr::ExprRef);
-
-#[pymethods]
-impl ExprRef {
-    fn __str__(&self) -> String {
-        self.0.serialize_to_str(ContextGuardRead::default().deref())
-    }
-}
 
 #[pyclass]
 #[derive(Clone)]
@@ -151,6 +142,9 @@ fn patronus(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> PyRe
     m.add_class::<State>()?;
     m.add_function(wrap_pyfunction!(parse_btor2_str, m)?)?;
     m.add_function(wrap_pyfunction!(parse_btor2_file, m)?)?;
+    // sim
     m.add_function(wrap_pyfunction!(interpreter, m)?)?;
+    // expr
+    m.add_function(wrap_pyfunction!(bit_vec, m)?)?;
     Ok(())
 }
