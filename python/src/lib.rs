@@ -66,9 +66,45 @@ pub struct TransitionSystem(::patronus::system::TransitionSystem);
 
 #[pymethods]
 impl TransitionSystem {
+    #[new]
+    #[pyo3(signature = (name, inputs=None, states=None, outputs=None, bad_states=None, constraints=None))]
+    fn create(
+        name: &str,
+        inputs: Option<Vec<ExprRef>>,
+        states: Option<Vec<State>>,
+        outputs: Option<Vec<Output>>,
+        bad_states: Option<Vec<ExprRef>>,
+        constraints: Option<Vec<ExprRef>>,
+    ) -> Self {
+        Self(::patronus::system::TransitionSystem {
+            name: name.to_string(),
+            states: states
+                .map(|v| v.into_iter().map(|e| e.0).collect())
+                .unwrap_or_default(),
+            inputs: inputs
+                .map(|v| v.into_iter().map(|e| e.0).collect())
+                .unwrap_or_default(),
+            outputs: outputs
+                .map(|v| v.into_iter().map(|e| e.0).collect())
+                .unwrap_or_default(),
+            bad_states: bad_states
+                .map(|v| v.into_iter().map(|e| e.0).collect())
+                .unwrap_or_default(),
+            constraints: constraints
+                .map(|v| v.into_iter().map(|e| e.0).collect())
+                .unwrap_or_default(),
+            names: Default::default(),
+        })
+    }
+
     #[getter]
     fn name(&self) -> &str {
         &self.0.name
+    }
+
+    #[setter(name)]
+    fn set_name(&mut self, name: &str) {
+        self.0.name = name.to_string();
     }
 
     #[getter]
@@ -76,14 +112,30 @@ impl TransitionSystem {
         self.0.inputs.iter().map(|e| ExprRef(*e)).collect()
     }
 
+    #[setter(inputs)]
+    fn set_inputs(&mut self, inputs: Vec<ExprRef>) {
+        // TODO: validate that all inputs are symbols!
+        self.0.inputs = inputs.into_iter().map(|e| e.0).collect();
+    }
+
     #[getter]
     fn outputs(&self) -> Vec<Output> {
         self.0.outputs.iter().map(|e| Output(*e)).collect()
     }
 
+    #[setter(outputs)]
+    fn set_outputs(&mut self, outputs: Vec<Output>) {
+        self.0.outputs = outputs.into_iter().map(|e| e.0).collect();
+    }
+
     #[getter]
     fn states(&self) -> Vec<State> {
         self.0.states.iter().map(|e| State(*e)).collect()
+    }
+
+    #[setter(states)]
+    fn set_states(&mut self, states: Vec<State>) {
+        self.0.states = states.into_iter().map(|e| e.0).collect();
     }
 
     #[getter]

@@ -67,3 +67,13 @@ def test_expression_builder():
     a = BitVec('a', 3)
     b = BitVec('b', 3)
     assert str(a < b) == "sgt(b, a)"
+
+
+def test_transition_system_builder():
+    sys = TransitionSystem("test")
+    sys.inputs = [BitVec('en', 1)]
+    sys.states = [State('count_s', init=BitVecVal(0, 8), next=If(BitVec('en', 1), BitVec('count_s') + BitVecVal(1, 8), BitVec('count_s', 8)))]
+    sys.outputs = [Output('count', BitVec('count_s', 8))]
+    sys.bad_states.append(BitVec('count_s') == BitVecVal(123, 8))
+    expected_system = ""
+    assert str(sys) == expected_system
