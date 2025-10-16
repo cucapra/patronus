@@ -1,6 +1,7 @@
-use crate::TransitionSystem;
 use crate::ctx::ContextGuardRead;
-use patronus::expr::ExprRef;
+use crate::{ExprRef, TransitionSystem};
+use baa::{BitVecOps, Value};
+use num_bigint::BigInt;
 use patronus::sim::InitKind;
 use pyo3::prelude::*;
 
@@ -19,9 +20,17 @@ impl Simulator {
         self.0.step();
     }
 
-    // fn __getitem__(&self, key: ExprRef) -> Option<BigInt> {
-    //
-    // }
+    /// access the value of an expression
+    fn __getitem__(&self, key: ExprRef) -> Option<BigInt> {
+        use patronus::sim::Simulator;
+        let value = self.0.get(key.0);
+        match value {
+            Value::Array(_) => {
+                todo!("Array support!")
+            }
+            Value::BitVec(bv) => Some(bv.to_big_int()),
+        }
+    }
 }
 
 #[pyfunction]

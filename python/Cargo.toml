@@ -13,5 +13,5 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.26.0" , features = ["num-bigint"]}
 patronus = { path = "../patronus" }
-baa.workspace = true
-bigint = "4.4.3"
+baa = { version = "0.17.1", features = ["rand1", "bigint"] }
+num-bigint = "0.4.6"

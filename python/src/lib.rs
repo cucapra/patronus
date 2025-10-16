@@ -12,6 +12,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 #[pyclass]
+#[derive(Clone)]
 pub struct ExprRef(::patronus::expr::ExprRef);
 
 #[pymethods]
@@ -22,6 +23,7 @@ impl ExprRef {
 }
 
 #[pyclass]
+#[derive(Clone)]
 pub struct Output(::patronus::system::Output);
 
 #[pymethods]
@@ -38,6 +40,7 @@ impl Output {
 }
 
 #[pyclass]
+#[derive(Clone)]
 pub struct State(::patronus::system::State);
 
 #[pymethods]
