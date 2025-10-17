@@ -4,7 +4,7 @@ mod sim;
 
 pub use ctx::Context;
 use ctx::{ContextGuardRead, ContextGuardWrite};
-pub use expr::{ExprRef, bit_vec};
+pub use expr::*;
 pub use sim::{Simulator, interpreter};
 use std::path::PathBuf;
 
@@ -198,5 +198,7 @@ fn patronus(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> PyRe
     m.add_function(wrap_pyfunction!(interpreter, m)?)?;
     // expr
     m.add_function(wrap_pyfunction!(bit_vec, m)?)?;
+    m.add_function(wrap_pyfunction!(bit_vec_val, m)?)?;
+    m.add_function(wrap_pyfunction!(if_expr, m)?)?;
     Ok(())
 }

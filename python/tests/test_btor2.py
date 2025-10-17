@@ -71,9 +71,10 @@ def test_expression_builder():
 
 def test_transition_system_builder():
     sys = TransitionSystem("test")
-    sys.inputs = [BitVec('en', 1)]
-    sys.states = [State('count_s', init=BitVecVal(0, 8), next=If(BitVec('en', 1), BitVec('count_s') + BitVecVal(1, 8), BitVec('count_s', 8)))]
-    sys.outputs = [Output('count', BitVec('count_s', 8))]
-    sys.bad_states.append(BitVec('count_s') == BitVecVal(123, 8))
+    en, count_s = BitVec('en', 1), BitVec('count_s', 8)
+    sys.inputs = [en]
+    sys.states = [State('count_s', init=BitVecVal(0, 8), next=If(en, count_s + BitVecVal(1, 8), count_s))]
+    sys.outputs = [Output('count', count_s)]
+    sys.bad_states.append(count_s == BitVecVal(123, 8))
     expected_system = ""
     assert str(sys) == expected_system
