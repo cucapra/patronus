@@ -75,6 +75,16 @@ def test_transition_system_builder():
     sys.inputs = [en]
     sys.states = [State('count_s', init=BitVecVal(0, 8), next=If(en, count_s + BitVecVal(1, 8), count_s))]
     sys.outputs = [Output('count', count_s)]
-    sys.bad_states.append(count_s == BitVecVal(123, 8))
-    expected_system = ""
-    assert str(sys) == expected_system
+    # TODO: there is a big pitfall here: you cannot just `append` to the bad_states, inputs, etc. because we use
+    #       a getter / setter approach
+    sys.bad_states = [count_s == BitVecVal(123, 8)]
+    expected_system = """
+test
+input en : bv<1>
+output count : bv<8> = count_s
+bad %20 : bv<1> = eq(count, 8'b01111011)
+state count_s : bv<8>
+  [init] 8'b00000000
+  [next] ite(en, add(count, 8'b00000001), count)
+    """
+    assert str(sys).strip() == expected_system.strip()

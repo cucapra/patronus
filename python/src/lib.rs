@@ -9,8 +9,8 @@ pub use sim::{Simulator, interpreter};
 use std::path::PathBuf;
 
 use ::patronus::btor2;
-use ::patronus::expr::SerializableIrNode;
-use pyo3::exceptions::PyValueError;
+use ::patronus::expr::{SerializableIrNode, TypeCheck, WidthInt};
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
 #[pyclass]
@@ -19,6 +19,15 @@ pub struct Output(::patronus::system::Output);
 
 #[pymethods]
 impl Output {
+    #[new]
+    fn create(name: &str, expr: ExprRef) -> Self {
+        let output = ::patronus::system::Output {
+            name: ContextGuardWrite::default().deref_mut().string(name.into()),
+            expr: expr.0,
+        };
+        Self(output)
+    }
+
     #[getter]
     fn name(&self) -> String {
         ContextGuardRead::default().deref()[self.0.name].to_string()
@@ -36,6 +45,46 @@ pub struct State(::patronus::system::State);
 
 #[pymethods]
 impl State {
+    #[new]
+    #[pyo3(signature = (name, width=None, init=None, next=None))]
+    fn create(
+        name: &str,
+        width: Option<WidthInt>,
+        init: Option<ExprRef>,
+        next: Option<ExprRef>,
+    ) -> PyResult<Self> {
+        let mut ctx_guard = ContextGuardWrite::default();
+        let ctx = ctx_guard.deref_mut();
+        let init_width = init.as_ref().and_then(|i| ctx[i.0].get_bv_type(ctx));
+        let next_width = next.as_ref().and_then(|n| ctx[n.0].get_bv_type(ctx));
+        let width = width.or(init_width).or(next_width);
+        if let Some(width) = width {
+            if let Some(iw) = init_width
+                && iw != width
+            {
+                Err(PyRuntimeError::new_err(format!(
+                    "Width of init expression ({iw}) does not match width of {name} ({width})"
+                )))
+            } else if let Some(nw) = next_width
+                && nw != width
+            {
+                Err(PyRuntimeError::new_err(format!(
+                    "Width of next expression ({nw}) does not match width of {name} ({width})"
+                )))
+            } else {
+                let symbol = ctx.bv_symbol(name, width);
+                let state = ::patronus::system::State {
+                    symbol,
+                    init: init.map(|i| i.0),
+                    next: next.map(|n| n.0),
+                };
+                Ok(Self(state))
+            }
+        } else {
+            Err(PyRuntimeError::new_err("No width provided!"))
+        }
+    }
+
     #[getter]
     fn symbol(&self) -> ExprRef {
         ExprRef(self.0.symbol)
@@ -143,9 +192,19 @@ impl TransitionSystem {
         self.0.bad_states.iter().map(|e| ExprRef(*e)).collect()
     }
 
+    #[setter(bad_states)]
+    fn set_bad_states(&mut self, bad_states: Vec<ExprRef>) {
+        self.0.bad_states = bad_states.into_iter().map(|e| e.0).collect();
+    }
+
     #[getter]
     fn constraints(&self) -> Vec<ExprRef> {
         self.0.constraints.iter().map(|e| ExprRef(*e)).collect()
+    }
+
+    #[setter(constraints)]
+    fn set_constraints(&mut self, constraints: Vec<ExprRef>) {
+        self.0.constraints = constraints.into_iter().map(|e| e.0).collect();
     }
 
     fn __str__(&self) -> String {

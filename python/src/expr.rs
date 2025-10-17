@@ -55,6 +55,10 @@ impl ExprRef {
         })
     }
 
+    fn __eq__(&self, other: &Self) -> PyResult<Self> {
+        bv_bin_op(self, other, "equal", |ctx, a, b| ctx.equal(a, b))
+    }
+
     fn __add__(&self, other: &Self) -> PyResult<Self> {
         bv_bin_op(self, other, "add", |ctx, a, b| ctx.add(a, b))
     }
