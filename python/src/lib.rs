@@ -1,11 +1,13 @@
 mod ctx;
 mod expr;
 mod sim;
+mod smt;
 
 pub use ctx::Context;
 use ctx::{ContextGuardRead, ContextGuardWrite};
 pub use expr::*;
 pub use sim::{Simulator, interpreter};
+pub use smt::*;
 use std::path::PathBuf;
 
 use ::patronus::btor2;
@@ -259,5 +261,7 @@ fn patronus(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> PyRe
     m.add_function(wrap_pyfunction!(bit_vec, m)?)?;
     m.add_function(wrap_pyfunction!(bit_vec_val, m)?)?;
     m.add_function(wrap_pyfunction!(if_expr, m)?)?;
+    // smt
+    m.add_function(wrap_pyfunction!(solver, m)?)?;
     Ok(())
 }

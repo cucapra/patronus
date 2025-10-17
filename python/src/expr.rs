@@ -5,10 +5,9 @@ use num_bigint::BigInt;
 use patronus::expr::{TypeCheck, WidthInt};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use std::fmt::format;
 
 #[pyclass]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct ExprRef(pub(crate) patronus::expr::ExprRef);
 
 /// Helper for binary ops that require a and b to be bitvectors of the same width

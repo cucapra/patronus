@@ -88,3 +88,23 @@ state count_s : bv<8>
   [next] ite(en, add(count, 8'b00000001), count)
     """
     assert str(sys).strip() == expected_system.strip()
+
+
+def test_call_smt_solver():
+    a = BitVec('a', 3)
+    b = BitVec('b', 3)
+    s = Solver('z3')
+    r = s.check(a < b)
+    assert str(r) == "sat"
+
+    r = s.check(a < b, a > b)
+    assert str(r) == "unsat"
+
+    # to generate a model, we need to actually add the assertion!
+    s.add(a < b)
+    s.check()
+    m = s.model()
+    assert len(m) == 2
+    assert isinstance(m[a], int)
+    assert isinstance(m[b], int)
+    assert m[a] < m[b]
