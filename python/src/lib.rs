@@ -6,12 +6,14 @@
 
 mod ctx;
 mod expr;
+mod mc;
 mod sim;
 mod smt;
 
 pub use ctx::Context;
 use ctx::{ContextGuardRead, ContextGuardWrite};
 pub use expr::*;
+pub use mc::*;
 pub use sim::{Simulator, interpreter};
 pub use smt::*;
 use std::path::PathBuf;
@@ -229,6 +231,10 @@ impl TransitionSystem {
             .find(|s| ctx.get_symbol_name(s.symbol).unwrap() == key)
             .map(|s| State(*s))
     }
+
+    fn to_btor2_str(&self) -> String {
+        btor2::serialize_to_str(ContextGuardRead::default().deref(), &self.0)
+    }
 }
 
 #[pyfunction]
@@ -269,5 +275,9 @@ fn patronus(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> PyRe
     m.add_function(wrap_pyfunction!(if_expr, m)?)?;
     // smt
     m.add_function(wrap_pyfunction!(solver, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_smtlib_expr, m)?)?;
+    // mc
+    m.add_class::<SmtModelChecker>()?;
+    m.add_class::<ModelCheckResult>()?;
     Ok(())
 }

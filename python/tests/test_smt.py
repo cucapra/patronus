@@ -27,3 +27,19 @@ def test_call_smt_solver():
     assert isinstance(m[b], int)
     assert m[a] < m[b]
 
+
+def test_parse_smt_lib_expr():
+    symbols = {
+        'x_0': BitVec('x_0', 32),
+        'y_0': BitVec('y_0', 32),
+        'x_1': BitVec('x_1', 32),
+    }
+    a = parse_smtlib_expr("(= x_1 (bvadd x_0 y_0))", symbols)
+    assert str(a) == "eq(x_1, add(x_0, y_0))"
+
+
+@pytest.mark.skip(reason="parsing commands is not implemented yet")
+def test_parse_smt_lib_commands():
+    parse_smtlib_cmd("(set-logic QF_BV)")
+    parse_smtlib_cmd("(set-option :produce-models true)")
+    parse_smtlib_cmd("(declare-const x_0 (_ BitVec 32))")

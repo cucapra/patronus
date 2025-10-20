@@ -38,6 +38,11 @@ state _state_0 : bv<3>
     """
     assert expected_system.strip() == str(sys).strip()
 
+@pytest.mark.skip(reason="btor2 serialization is not yet implemented in paronus")
+def btor2_serialize():
+    sys = parse_btor2_str(COUNT_2, "count2")
+    assert sys.to_btor2_str().strip() == COUNT_2.strip()
+
 def test_transition_system_fields():
     sys = parse_btor2_str(COUNT_2, "count2")
     assert sys.inputs == []

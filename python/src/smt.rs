@@ -6,7 +6,7 @@ use crate::ExprRef;
 use crate::ctx::{ContextGuardRead, ContextGuardWrite};
 use baa::{BitVecOps, Value};
 use num_bigint::BigInt;
-use patronus::expr::{Context, ForEachChild, TypeCheck};
+use patronus::expr::{Context, TypeCheck};
 use patronus::mc::get_smt_value;
 use patronus::smt::*;
 use pyo3::exceptions::PyRuntimeError;
@@ -170,20 +170,45 @@ impl CheckSatResult {
 #[pyfunction]
 #[pyo3(name = "Solver")]
 pub fn solver(name: &str) -> PyResult<SolverCtx> {
+    let solver = name_to_solver(name)?;
+    Ok(SolverCtx::new(solver.start(None).map_err(convert_smt_err)?))
+}
+
+pub(crate) fn name_to_solver(name: &str) -> PyResult<SmtLibSolver> {
     match name.to_ascii_lowercase().as_str() {
-        "z3" => Ok(SolverCtx::new(Z3.start(None).map_err(convert_smt_err)?)),
-        "bitwuzla" => Ok(SolverCtx::new(
-            BITWUZLA.start(None).map_err(convert_smt_err)?,
-        )),
-        "yices" | "yices2" | "yices2-smt" => {
-            Ok(SolverCtx::new(YICES2.start(None).map_err(convert_smt_err)?))
-        }
+        "z3" => Ok(Z3),
+        "bitwuzla" => Ok(BITWUZLA),
+        "yices" | "yices2" | "yices2-smt" => Ok(YICES2),
         _ => Err(PyRuntimeError::new_err(format!(
             "Unknonw or unsupported solver: {name}"
         ))),
     }
 }
 
-fn convert_smt_err(e: Error) -> PyErr {
+#[pyfunction]
+#[pyo3(signature = (value, symbols=None))]
+pub fn parse_smtlib_expr(
+    value: &str,
+    symbols: Option<FxHashMap<String, ExprRef>>,
+) -> PyResult<ExprRef> {
+    let symbols = symbols
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(k, v)| (k, v.0))
+        .collect();
+    parse_expr(
+        ContextGuardWrite::default().deref_mut(),
+        &symbols,
+        value.as_bytes(),
+    )
+    .map_err(convert_smt_parse_err)
+    .map(ExprRef)
+}
+
+pub(crate) fn convert_smt_err(e: Error) -> PyErr {
+    PyRuntimeError::new_err(format!("smt: {e}"))
+}
+
+fn convert_smt_parse_err(e: SmtParserError) -> PyErr {
     PyRuntimeError::new_err(format!("smt: {e}"))
 }
