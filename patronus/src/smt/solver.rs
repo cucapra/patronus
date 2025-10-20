@@ -416,6 +416,15 @@ pub const YICES2: SmtLibSolver = SmtLibSolver {
     supports_const_array: false,
 };
 
+pub const Z3: SmtLibSolver = SmtLibSolver {
+    name: "z3",
+    args: &["-in"],
+    options: &[],
+    supports_uf: true,
+    supports_check_assuming: true,
+    supports_const_array: true,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;

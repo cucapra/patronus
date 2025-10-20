@@ -1,3 +1,7 @@
+// Copyright 2025 Cornell University
+// released under BSD 3-Clause License
+// author: Kevin Laeufer <laeufer@cornell.edu>
+
 use crate::ExprRef;
 use crate::ctx::{ContextGuardRead, ContextGuardWrite};
 use baa::{BitVecOps, Value};

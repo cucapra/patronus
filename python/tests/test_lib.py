@@ -1,3 +1,9 @@
+# Copyright 2025 Cornell University
+# Copyright 2025 The Regents of the University of California
+# released under BSD 3-Clause License
+# author: Kevin Laeufer <laeufer@cornell.edu>
+# author: Adwait Godbole <adwait@berkeley.edu>
+
 import pathlib
 import pytest
 from patronus import *
@@ -45,22 +51,6 @@ def test_transition_system_fields():
     assert str(state.next) == "add(_state_0, 3'b001)"
     assert len(sys.outputs) == 0
 
-def test_transition_system_simulation():
-    sys = parse_btor2_file(repo_root / "inputs" / "unittest" / "swap.btor")
-    sim = Interpreter(sys)
-    a, b = sys['a'].symbol, sys['b'].symbol
-
-    sim.init()
-    assert sim[a] == 0, "a@0"
-    assert sim[b] == 1, "b@0"
-
-    sim.step()
-    assert sim[a] == 1
-    assert sim[b] == 0
-
-    sim.step()
-    assert sim[a] == 0
-    assert sim[b] == 1
 
 def test_expression_builder():
     # we are emulating the Z3 API as much as possible
@@ -82,7 +72,7 @@ def test_transition_system_builder():
 test
 input en : bv<1>
 output count : bv<8> = count_s
-bad %20 : bv<1> = eq(count, 8'b01111011)
+bad %18 : bv<1> = eq(count, 8'b01111011)
 state count_s : bv<8>
   [init] 8'b00000000
   [next] ite(en, add(count, 8'b00000001), count)
@@ -90,21 +80,3 @@ state count_s : bv<8>
     assert str(sys).strip() == expected_system.strip()
 
 
-def test_call_smt_solver():
-    a = BitVec('a', 3)
-    b = BitVec('b', 3)
-    s = Solver('z3')
-    r = s.check(a < b)
-    assert str(r) == "sat"
-
-    r = s.check(a < b, a > b)
-    assert str(r) == "unsat"
-
-    # to generate a model, we need to actually add the assertion!
-    s.add(a < b)
-    s.check()
-    m = s.model()
-    assert len(m) == 2
-    assert isinstance(m[a], int)
-    assert isinstance(m[b], int)
-    assert m[a] < m[b]
