@@ -18,20 +18,20 @@ pub use sim::{Simulator, interpreter};
 pub use smt::*;
 use std::path::PathBuf;
 
-use ::patronus::btor2;
-use ::patronus::expr::{SerializableIrNode, TypeCheck, WidthInt};
+use patronus::btor2;
+use patronus::expr::{SerializableIrNode, TypeCheck, WidthInt};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
 #[pyclass]
 #[derive(Clone)]
-pub struct Output(::patronus::system::Output);
+pub struct Output(patronus::system::Output);
 
 #[pymethods]
 impl Output {
     #[new]
     fn create(name: &str, expr: ExprRef) -> Self {
-        let output = ::patronus::system::Output {
+        let output = patronus::system::Output {
             name: ContextGuardWrite::default().deref_mut().string(name.into()),
             expr: expr.0,
         };
@@ -51,7 +51,7 @@ impl Output {
 
 #[pyclass]
 #[derive(Clone)]
-pub struct State(::patronus::system::State);
+pub struct State(patronus::system::State);
 
 #[pymethods]
 impl State {
@@ -83,7 +83,7 @@ impl State {
                 )))
             } else {
                 let symbol = ctx.bv_symbol(name, width);
-                let state = ::patronus::system::State {
+                let state = patronus::system::State {
                     symbol,
                     init: init.map(|i| i.0),
                     next: next.map(|n| n.0),
@@ -111,17 +111,17 @@ impl State {
 
     #[getter]
     fn next(&self) -> Option<ExprRef> {
-        self.0.next.map(|e| ExprRef(e))
+        self.0.next.map(ExprRef)
     }
 
     #[getter]
     fn init(&self) -> Option<ExprRef> {
-        self.0.init.map(|e| ExprRef(e))
+        self.0.init.map(ExprRef)
     }
 }
 
 #[pyclass]
-pub struct TransitionSystem(::patronus::system::TransitionSystem);
+pub struct TransitionSystem(patronus::system::TransitionSystem);
 
 #[pymethods]
 impl TransitionSystem {
@@ -135,7 +135,7 @@ impl TransitionSystem {
         bad_states: Option<Vec<ExprRef>>,
         constraints: Option<Vec<ExprRef>>,
     ) -> Self {
-        Self(::patronus::system::TransitionSystem {
+        Self(patronus::system::TransitionSystem {
             name: name.to_string(),
             states: states
                 .map(|v| v.into_iter().map(|e| e.0).collect())
@@ -202,7 +202,7 @@ impl TransitionSystem {
 
     fn add_output(&mut self, name: String, expr: ExprRef) {
         let name_id = ContextGuardWrite::default().deref_mut().string(name.into());
-        self.0.outputs.push(::patronus::system::Output {
+        self.0.outputs.push(patronus::system::Output {
             name: name_id,
             expr: expr.0,
         });
@@ -281,7 +281,7 @@ impl TransitionSystem {
 pub fn parse_btor2_str(content: &str, name: Option<&str>) -> PyResult<TransitionSystem> {
     let mut ctx_guard = ContextGuardWrite::default();
     let ctx = ctx_guard.deref_mut();
-    match btor2::parse_str(ctx, &content, name) {
+    match btor2::parse_str(ctx, content, name) {
         Some(sys) => Ok(TransitionSystem(sys)),
         None => Err(PyValueError::new_err("failed to parse btor")),
     }
@@ -298,8 +298,8 @@ pub fn parse_btor2_file(filename: PathBuf) -> PyResult<TransitionSystem> {
 }
 
 #[pymodule]
-#[pyo3(name = "patronus")]
-fn patronus(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> PyResult<()> {
+#[pyo3(name = "patronpy")]
+fn patronpy(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> PyResult<()> {
     m.add_class::<TransitionSystem>()?;
     m.add_class::<ExprRef>()?;
     m.add_class::<Output>()?;

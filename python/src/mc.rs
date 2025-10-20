@@ -64,7 +64,7 @@ impl ModelCheckResult {
     fn inits(&self) -> Option<Model> {
         match &self.0 {
             patronus::mc::ModelCheckResult::Success => None,
-            patronus::mc::ModelCheckResult::Fail(w) => {
+            patronus::mc::ModelCheckResult::Fail(_w) => {
                 todo!()
             }
         }

@@ -7,9 +7,8 @@ use ::patronus::expr::SerializableIrNode;
 use baa::BitVecValue;
 use num_bigint::BigInt;
 use patronus::expr::{SparseExprMap, TypeCheck, WidthInt};
-use pyo3::exceptions::{PyRuntimeError, PyTypeError};
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::PySlice;
 use std::ops::DerefMut;
 use std::sync::{LazyLock, RwLock};
 

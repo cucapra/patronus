@@ -42,7 +42,7 @@ wheels = [
 ]
 
 [[package]]
-name = "patronus"
+name = "patronpy"
 source = { editable = "." }
 
 [package.dev-dependencies]
