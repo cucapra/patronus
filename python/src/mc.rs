@@ -37,7 +37,11 @@ impl SmtModelChecker {
     }
 
     fn check(&self, sys: &TransitionSystem, k_max: u64) -> PyResult<ModelCheckResult> {
-        Err(PyRuntimeError::new_err("TODO"))
-        // self.0.check(ContextGuardWrite::default().deref_mut(), &sys.0, k_max).map(ModelCheckResult).map_err(convert_smt_err)
+        let mut ctx_guard = ContextGuardWrite::default();
+        let ctx = ctx_guard.deref_mut();
+        self.0
+            .check(ctx, &sys.0, k_max)
+            .map(ModelCheckResult)
+            .map_err(convert_smt_err)
     }
 }

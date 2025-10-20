@@ -42,6 +42,12 @@ impl<S: Solver<std::fs::File>> SmtModelChecker<S> {
         k_max: u64,
     ) -> Result<ModelCheckResult> {
         assert!(k_max > 0 && k_max <= 2000, "unreasonable k_max={}", k_max);
+
+        // if there are no assertions, there cannot be an error!
+        if sys.bad_states.is_empty() {
+            return Ok(ModelCheckResult::Success);
+        }
+
         let replay_file = if self.opts.save_smt_replay {
             Some(std::fs::File::create("replay.smt")?)
         } else {
