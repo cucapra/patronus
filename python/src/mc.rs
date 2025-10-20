@@ -2,19 +2,14 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::ctx::{ContextGuardRead, ContextGuardWrite};
+use crate::ctx::ContextGuardWrite;
 use crate::smt::{convert_smt_err, name_to_solver};
-use crate::{ExprRef, TransitionSystem};
+use crate::{Model, TransitionSystem};
 use patronus::smt::SmtLibSolver;
-use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use std::fs::File;
 
 #[pyclass]
 pub struct SmtModelChecker(::patronus::mc::SmtModelChecker<SmtLibSolver>);
-
-#[pyclass]
-pub struct ModelCheckResult(::patronus::mc::ModelCheckResult);
 
 #[pymethods]
 impl SmtModelChecker {
@@ -43,5 +38,40 @@ impl SmtModelChecker {
             .check(ctx, &sys.0, k_max)
             .map(ModelCheckResult)
             .map_err(convert_smt_err)
+    }
+}
+
+#[pyclass]
+pub struct ModelCheckResult(::patronus::mc::ModelCheckResult);
+
+#[pymethods]
+impl ModelCheckResult {
+    fn __str__(&self) -> String {
+        match &self.0 {
+            patronus::mc::ModelCheckResult::Success => "unsat".to_string(),
+            patronus::mc::ModelCheckResult::Fail(_) => "sat".to_string(),
+        }
+    }
+
+    fn __len__(&self) -> usize {
+        match &self.0 {
+            patronus::mc::ModelCheckResult::Success => 0,
+            patronus::mc::ModelCheckResult::Fail(w) => w.inputs.len(),
+        }
+    }
+
+    #[getter]
+    fn inits(&self) -> Option<Model> {
+        match &self.0 {
+            patronus::mc::ModelCheckResult::Success => None,
+            patronus::mc::ModelCheckResult::Fail(w) => {
+                todo!()
+            }
+        }
+    }
+
+    #[getter]
+    fn inputs(&self) -> Vec<Model> {
+        todo!()
     }
 }

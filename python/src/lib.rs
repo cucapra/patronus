@@ -177,6 +177,19 @@ impl TransitionSystem {
         self.0.inputs = inputs.into_iter().map(|e| e.0).collect();
     }
 
+    fn add_input(&mut self, symbol: ExprRef) -> PyResult<()> {
+        let is_symbol = ContextGuardRead::default().deref()[symbol.0].is_symbol();
+        if !is_symbol {
+            Err(PyRuntimeError::new_err(format!(
+                "{} is not a symbol",
+                symbol.__str__()
+            )))
+        } else {
+            self.0.inputs.push(symbol.0);
+            Ok(())
+        }
+    }
+
     #[getter]
     fn outputs(&self) -> Vec<Output> {
         self.0.outputs.iter().map(|e| Output(*e)).collect()
@@ -185,6 +198,14 @@ impl TransitionSystem {
     #[setter(outputs)]
     fn set_outputs(&mut self, outputs: Vec<Output>) {
         self.0.outputs = outputs.into_iter().map(|e| e.0).collect();
+    }
+
+    fn add_output(&mut self, name: String, expr: ExprRef) {
+        let name_id = ContextGuardWrite::default().deref_mut().string(name.into());
+        self.0.outputs.push(::patronus::system::Output {
+            name: name_id,
+            expr: expr.0,
+        });
     }
 
     #[getter]
@@ -202,6 +223,18 @@ impl TransitionSystem {
         self.0.bad_states.iter().map(|e| ExprRef(*e)).collect()
     }
 
+    fn add_bad_state(&mut self, name: String, expr: ExprRef) {
+        self.0.bad_states.push(expr.0);
+        let name_id = ContextGuardWrite::default().deref_mut().string(name.into());
+        self.0.names[expr.0] = Some(name_id);
+    }
+
+    fn add_assertion(&mut self, name: &str, expr: ExprRef) {
+        let not_name = format!("not_{name}");
+        let not_expr = ContextGuardWrite::default().deref_mut().not(expr.0);
+        self.add_bad_state(not_name, ExprRef(not_expr));
+    }
+
     #[setter(bad_states)]
     fn set_bad_states(&mut self, bad_states: Vec<ExprRef>) {
         self.0.bad_states = bad_states.into_iter().map(|e| e.0).collect();
@@ -215,6 +248,12 @@ impl TransitionSystem {
     #[setter(constraints)]
     fn set_constraints(&mut self, constraints: Vec<ExprRef>) {
         self.0.constraints = constraints.into_iter().map(|e| e.0).collect();
+    }
+
+    fn add_constraint(&mut self, name: String, expr: ExprRef) {
+        self.0.constraints.push(expr.0);
+        let name_id = ContextGuardWrite::default().deref_mut().string(name.into());
+        self.0.names[expr.0] = Some(name_id);
     }
 
     fn __str__(&self) -> String {
@@ -273,6 +312,11 @@ fn patronus(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> PyRe
     m.add_function(wrap_pyfunction!(bit_vec, m)?)?;
     m.add_function(wrap_pyfunction!(bit_vec_val, m)?)?;
     m.add_function(wrap_pyfunction!(if_expr, m)?)?;
+    m.add_function(wrap_pyfunction!(simplify, m)?)?;
+    m.add_function(wrap_pyfunction!(zext, m)?)?;
+    m.add_function(wrap_pyfunction!(sext, m)?)?;
+    m.add_function(wrap_pyfunction!(extract, m)?)?;
+    m.add_function(wrap_pyfunction!(slice, m)?)?;
     // smt
     m.add_function(wrap_pyfunction!(solver, m)?)?;
     m.add_function(wrap_pyfunction!(parse_smtlib_expr, m)?)?;
