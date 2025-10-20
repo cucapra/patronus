@@ -142,6 +142,24 @@ impl Index<StringRef> for Context {
     }
 }
 
+impl Context {
+    /// Returns the number of interned expressions in this context.
+    pub fn num_exprs(&self) -> usize {
+        self.exprs.len()
+    }
+
+    /// Returns a reference to the expression for the given reference.
+    /// Panics if the reference is invalid (use indices in range 0..num_exprs()).
+    pub fn get_expr(&self, r: ExprRef) -> &Expr {
+        &self[r]
+    }
+
+    /// Returns the zero-based intern index of the given expression reference.
+    pub fn expr_index(&self, r: ExprRef) -> usize {
+        r.index()
+    }
+}
+
 /// Convenience methods to construct IR nodes.
 impl Context {
     // helper functions to construct expressions

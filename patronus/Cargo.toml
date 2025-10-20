@@ -1,6 +1,6 @@
 [package]
 name = "patronus"
-version = "0.34.1"
+version.workspace = true
 description = "Hardware bug-finding toolkit."
 homepage = "https://kevinlaeufer.com"
 keywords = ["RTL", "btor", "model-checking", "SMT", "bit-vector"]
