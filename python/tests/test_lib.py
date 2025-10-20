@@ -6,7 +6,7 @@
 
 import pathlib
 import pytest
-from patronpy import *
+from pypatronus import *
 
 
 repo_root = (pathlib.Path(__file__) / '..' / '..' / '..').resolve()

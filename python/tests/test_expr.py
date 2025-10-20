@@ -2,7 +2,7 @@
 # released under BSD 3-Clause License
 # author: Kevin Laeufer <laeufer@cornell.edu>
 
-from patronpy import *
+from pypatronus import *
 
 def test_simplify():
     # by default this uses a global simplifier

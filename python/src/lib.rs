@@ -298,8 +298,8 @@ pub fn parse_btor2_file(filename: PathBuf) -> PyResult<TransitionSystem> {
 }
 
 #[pymodule]
-#[pyo3(name = "patronpy")]
-fn patronpy(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> PyResult<()> {
+#[pyo3(name = "pypatronus")]
+fn pypatronus(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> PyResult<()> {
     m.add_class::<TransitionSystem>()?;
     m.add_class::<ExprRef>()?;
     m.add_class::<Output>()?;
