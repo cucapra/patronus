@@ -69,31 +69,31 @@ jobs:
       - name: Update Rust to ${{ matrix.toolchain }}
         run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
       - name: Build
-        run: cargo build --verbose --release -p bmc
-      - name: bmc Quiz1
+        run: cargo build --verbose --release -p mc
+      - name: mc Quiz1
         run: |
           cargo run --release -p bmc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz1.btor > Quiz1.wit
           btorsim inputs/chiseltest/Quiz1.btor Quiz1.wit
-      - name: bmc Quiz1 (with additional assumption)
+      - name: mc Quiz1 (with additional assumption)
         run: |
           cargo run --release -p bmc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz1.unsat.btor
-      - name: bmc const array example
+      - name: mc const array example
         if: ${{ matrix.solver != 'yices2' }} # yices2 returns memory values that cannot be parsed
         run: |
           cargo run --release -p bmc -- --solver=${{ matrix.solver }} inputs/chiseltest/const_array_example.btor > const_array_example.wit
           btorsim inputs/chiseltest/const_array_example.btor const_array_example.wit
-      - name: bmc Quiz2
+      - name: mc Quiz2
         run: |
           cargo run --release -p bmc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz2.sat.btor > Quiz2.sat.wit
           btorsim inputs/chiseltest/Quiz2.sat.btor Quiz2.sat.wit
-      - name: bmc Quiz2 (with counter reset value)
+      - name: mc Quiz2 (with counter reset value)
         run: |
           cargo run --release -p bmc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz2.unsat.btor
-      - name: bmc Quiz4
+      - name: mc Quiz4
         run: |
           cargo run --release -p bmc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz4.sat.btor > Quiz4.sat.wit
           btorsim inputs/chiseltest/Quiz4.sat.btor Quiz4.sat.wit
-      - name: bmc Quiz4 (with counter reset value)
+      - name: mc Quiz4 (with counter reset value)
         run: |
           cargo run --release -p bmc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz4.unsat.btor
 

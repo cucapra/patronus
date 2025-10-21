@@ -5,14 +5,14 @@
 
 use clap::{Parser, ValueEnum};
 use patronus::expr::*;
-use patronus::mc::bmc;
+use patronus::mc::{ModelCheckResult, bmc, pdr};
 use patronus::smt::*;
 use patronus::system::transform::simplify_expressions;
 use patronus::*;
 use std::fs::File;
 
 #[derive(Parser, Debug)]
-#[command(name = "bmc")]
+#[command(name = "mc")]
 #[command(author = "Kevin Laeufer <laeufer@berkeley.edu>")]
 #[command(version)]
 #[command(about = "Performs bounded model checking on a btor2 file.", long_about = None)]
@@ -24,6 +24,10 @@ struct Args {
         help = "the SMT solver to use"
     )]
     solver: SolverChoice,
+    #[arg(short, long, help = "skip bmc")]
+    no_bmc: bool,
+    #[arg(short, long, help = "perform pdr")]
+    pdr: bool,
     #[arg(short, long)]
     verbose: bool,
     #[arg(short, long)]
@@ -67,33 +71,55 @@ fn main() {
         SolverChoice::Z3 => Z3,
         SolverChoice::CVC5 => CVC5,
     };
-    if args.verbose {
-        println!("Checking up to {k_max} using {}.", solver.name());
-    }
-    let dump_file = if args.dump_smt {
-        Some(File::create("replay.smt").unwrap())
-    } else {
-        None
-    };
-    let mut smt_ctx = solver.start(dump_file).expect("failed to start solver");
-    let res = bmc(
-        &mut ctx,
-        &mut smt_ctx,
-        &sys,
-        check_constraints,
-        check_bad_states_individually,
-        k_max,
-    )
-    .unwrap();
-    match res {
-        mc::ModelCheckResult::Success => {
-            println!("unsat");
+
+    if !args.no_bmc {
+        if args.verbose {
+            println!("Checking up to {k_max} with BMC using {}.", solver.name());
         }
-        mc::ModelCheckResult::Unknown => {
-            println!("unknown");
-        }
-        mc::ModelCheckResult::Fail(wit) => {
+        let dump_file = if args.dump_smt {
+            Some(File::create("replay.bmc.smt").unwrap())
+        } else {
+            None
+        };
+        let mut smt_ctx = solver.start(dump_file).expect("failed to start solver");
+        let res = bmc(
+            &mut ctx,
+            &mut smt_ctx,
+            &sys,
+            check_constraints,
+            check_bad_states_individually,
+            k_max,
+        )
+        .unwrap();
+        if let mc::ModelCheckResult::Fail(wit) = res {
             btor2::print_witness(&mut std::io::stdout(), &wit).unwrap();
+            return;
         }
+    }
+    if args.pdr {
+        if args.verbose {
+            println!("Checking with PDR using {}.", solver.name());
+        }
+        let dump_file = if args.dump_smt {
+            Some(File::create("replay.pdr.smt").unwrap())
+        } else {
+            None
+        };
+        let mut smt_ctx = solver.start(dump_file).expect("failed to start solver");
+        let res = pdr(&mut ctx, &mut smt_ctx, &sys).unwrap();
+        match res {
+            ModelCheckResult::Success => {
+                println!("unsat");
+            }
+            ModelCheckResult::Unknown => {
+                println!("unknown");
+            }
+            ModelCheckResult::Fail(wit) => {
+                btor2::print_witness(&mut std::io::stdout(), &wit).unwrap();
+            }
+        }
+    } else {
+        // if we get here, then BMC did not find a counter example and we are not running PDR
+        println!("unkown");
     }
 }
