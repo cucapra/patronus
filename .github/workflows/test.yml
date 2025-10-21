@@ -72,30 +72,30 @@ jobs:
         run: cargo build --verbose --release -p mc
       - name: mc Quiz1
         run: |
-          cargo run --release -p bmc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz1.btor > Quiz1.wit
+          cargo run --release -p mc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz1.btor > Quiz1.wit
           btorsim inputs/chiseltest/Quiz1.btor Quiz1.wit
       - name: mc Quiz1 (with additional assumption)
         run: |
-          cargo run --release -p bmc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz1.unsat.btor
+          cargo run --release -p mc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz1.unsat.btor
       - name: mc const array example
         if: ${{ matrix.solver != 'yices2' }} # yices2 returns memory values that cannot be parsed
         run: |
-          cargo run --release -p bmc -- --solver=${{ matrix.solver }} inputs/chiseltest/const_array_example.btor > const_array_example.wit
+          cargo run --release -p mc -- --solver=${{ matrix.solver }} inputs/chiseltest/const_array_example.btor > const_array_example.wit
           btorsim inputs/chiseltest/const_array_example.btor const_array_example.wit
       - name: mc Quiz2
         run: |
-          cargo run --release -p bmc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz2.sat.btor > Quiz2.sat.wit
+          cargo run --release -p mc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz2.sat.btor > Quiz2.sat.wit
           btorsim inputs/chiseltest/Quiz2.sat.btor Quiz2.sat.wit
       - name: mc Quiz2 (with counter reset value)
         run: |
-          cargo run --release -p bmc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz2.unsat.btor
+          cargo run --release -p mc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz2.unsat.btor
       - name: mc Quiz4
         run: |
-          cargo run --release -p bmc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz4.sat.btor > Quiz4.sat.wit
+          cargo run --release -p mc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz4.sat.btor > Quiz4.sat.wit
           btorsim inputs/chiseltest/Quiz4.sat.btor Quiz4.sat.wit
       - name: mc Quiz4 (with counter reset value)
         run: |
-          cargo run --release -p bmc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz4.unsat.btor
+          cargo run --release -p mc -- --solver=${{ matrix.solver }} inputs/chiseltest/Quiz4.unsat.btor
 
   sim:
     name: Test Simulator Tool
