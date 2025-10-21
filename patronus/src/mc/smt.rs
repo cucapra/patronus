@@ -23,14 +23,14 @@ pub struct SmtModelCheckerOptions {
     pub save_smt_replay: bool,
 }
 
-pub struct SmtModelChecker<S: Solver<std::fs::File>> {
+pub struct SmtModelChecker<S: Solver> {
     solver: S,
     opts: SmtModelCheckerOptions,
 }
 
 type Result<T> = crate::smt::Result<T>;
 
-impl<S: Solver<std::fs::File>> SmtModelChecker<S> {
+impl<S: Solver> SmtModelChecker<S> {
     pub fn new(solver: S, opts: SmtModelCheckerOptions) -> Self {
         Self { solver, opts }
     }

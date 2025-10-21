@@ -5,6 +5,7 @@
 use crate::expr::{Context, ExprRef};
 use crate::smt::parser::{SmtParserError, parse_get_value_response};
 use crate::smt::serialize::serialize_cmd;
+use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter};
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
@@ -83,10 +84,10 @@ pub trait SolverMetaData {
 }
 
 /// Allows an SMT solver to start a Context.
-pub trait Solver<R: Write + Send>: SolverMetaData {
+pub trait Solver: SolverMetaData {
     type Context: SolverContext;
     /// Launch a new instance of this solver.
-    fn start(&self, replay_file: Option<R>) -> Result<Self::Context>;
+    fn start(&self, replay_file: Option<File>) -> Result<Self::Context>;
 }
 
 /// Interface to a running SMT Solver with everything executing as blocking I/O.
@@ -136,9 +137,9 @@ impl SolverMetaData for SmtLibSolver {
     }
 }
 
-impl<R: Write + Send> Solver<R> for SmtLibSolver {
-    type Context = SmtLibSolverCtx<R>;
-    fn start(&self, replay_file: Option<R>) -> Result<Self::Context> {
+impl Solver for SmtLibSolver {
+    type Context = SmtLibSolverCtx;
+    fn start(&self, replay_file: Option<File>) -> Result<Self::Context> {
         let mut proc = Command::new(self.name)
             .args(self.args)
             .stdin(Stdio::piped())
@@ -156,7 +157,7 @@ impl<R: Write + Send> Solver<R> for SmtLibSolver {
             stderr,
             stack_depth: 0,
             response: String::new(),
-            replay_file,
+            replay_file: replay_file.map(BufWriter::new),
             has_error: false,
             solver_args: self.args.iter().map(|a| a.to_string()).collect(),
             solver_options: self.options.iter().map(|a| a.to_string()).collect(),
@@ -175,7 +176,7 @@ impl<R: Write + Send> Solver<R> for SmtLibSolver {
 }
 
 /// Launches an SMT solver and communicates through `stdin` using SMTLib commands.
-pub struct SmtLibSolverCtx<R: Write + Send> {
+pub struct SmtLibSolverCtx {
     name: String,
     proc: std::process::Child,
     stdin: BufWriter<std::process::ChildStdin>,
@@ -183,7 +184,7 @@ pub struct SmtLibSolverCtx<R: Write + Send> {
     stderr: std::process::ChildStderr,
     stack_depth: usize,
     response: String,
-    replay_file: Option<R>,
+    replay_file: Option<BufWriter<File>>,
     /// keeps track of whether there was an error from the solver which might make regular shutdown
     /// impossible
     has_error: bool,
@@ -196,7 +197,7 @@ pub struct SmtLibSolverCtx<R: Write + Send> {
     supports_const_array: bool,
 }
 
-impl<R: Write + Send> SmtLibSolverCtx<R> {
+impl SmtLibSolverCtx {
     #[inline]
     fn write_cmd(&mut self, ctx: Option<&Context>, cmd: &SmtCommand) -> Result<()> {
         if let Some(rf) = self.replay_file.as_mut() {
@@ -282,14 +283,14 @@ fn count_parens(s: &str) -> i64 {
     })
 }
 
-impl<R: Write + Send> Drop for SmtLibSolverCtx<R> {
+impl Drop for SmtLibSolverCtx {
     fn drop(&mut self) {
         shut_down_solver(self);
     }
 }
 
 /// internal method to try to cleanly shut down the solver process
-fn shut_down_solver<R: Write + Send>(solver: &mut SmtLibSolverCtx<R>) {
+fn shut_down_solver(solver: &mut SmtLibSolverCtx) {
     // try to close the child process as not to leak resources
     if solver.write_cmd(None, &SmtCommand::Exit).is_ok() {
         let _status = solver
@@ -300,7 +301,7 @@ fn shut_down_solver<R: Write + Send>(solver: &mut SmtLibSolverCtx<R>) {
     // we don't care whether the solver crashed or returned success, as long as it is cleaned up
 }
 
-impl<R: Write + Send> SolverMetaData for SmtLibSolverCtx<R> {
+impl SolverMetaData for SmtLibSolverCtx {
     fn name(&self) -> &str {
         &self.name
     }
@@ -317,7 +318,7 @@ impl<R: Write + Send> SolverMetaData for SmtLibSolverCtx<R> {
     }
 }
 
-impl<R: Write + Send> SolverContext for SmtLibSolverCtx<R> {
+impl SolverContext for SmtLibSolverCtx {
     fn restart(&mut self) -> Result<()> {
         shut_down_solver(self);
 

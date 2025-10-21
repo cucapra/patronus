@@ -27,7 +27,7 @@ impl SerializableIrNode for Expr {
 /// Internal serialize function for expressions.
 /// The `serialize_child` function determines whether the child expression is serialized
 /// recursively or not. This can be used in order to limit the expression depth or the kinds
-/// of expressions that should be serialied.
+/// of expressions that should be serialized.
 pub(crate) fn serialize_expr<F, W>(
     expr: &Expr,
     ctx: &Context,

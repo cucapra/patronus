@@ -12,16 +12,15 @@ use patronus::smt::*;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::fs::File;
 
 #[pyclass]
 pub struct SolverCtx {
-    underlying: SmtLibSolverCtx<File>,
+    underlying: SmtLibSolverCtx,
     declared_symbols: Vec<FxHashMap<String, patronus::expr::ExprRef>>,
 }
 
 impl SolverCtx {
-    fn new(underlying: SmtLibSolverCtx<File>) -> Self {
+    fn new(underlying: SmtLibSolverCtx) -> Self {
         Self {
             underlying,
             declared_symbols: vec![FxHashMap::default()],
