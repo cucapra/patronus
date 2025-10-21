@@ -10,209 +10,171 @@ use crate::smt::*;
 use crate::system::analysis::{UseCountInt, Uses, analyze_for_serialization, count_expr_uses};
 use crate::system::{State, TransitionSystem};
 use baa::*;
-use rustc_hash::FxHashSet;
-use std::collections::HashMap;
-
-#[derive(Debug, Clone, Copy)]
-pub struct SmtModelCheckerOptions {
-    /// Perform additional checking to ensure that the assumptions are satisfiable.
-    pub check_constraints: bool,
-    /// Perform one SMT solver check per assertion instead of combining them into a single check.
-    pub check_bad_states_individually: bool,
-    /// If true, the communication with the SMT solver will be logged into a `replay.smt` file.
-    pub save_smt_replay: bool,
-}
-
-pub struct SmtModelChecker<S: Solver> {
-    solver: S,
-    opts: SmtModelCheckerOptions,
-}
+use rustc_hash::{FxHashMap, FxHashSet};
 
 type Result<T> = crate::smt::Result<T>;
 
-impl<S: Solver> SmtModelChecker<S> {
-    pub fn new(solver: S, opts: SmtModelCheckerOptions) -> Self {
-        Self { solver, opts }
+/// Runs up to [k_max] steps of BMC.
+///
+/// * [check_constraints] perform additional checking to ensure that
+///   the assumptions are satisfiable.
+/// * [check_bad_states_individually] perform one SMT solver check per assertion instead of
+///   combining them into a single check.
+pub fn bmc(
+    ctx: &mut Context,
+    smt_ctx: &mut impl SolverContext,
+    sys: &TransitionSystem,
+    check_constraints: bool,
+    check_bad_states_individually: bool,
+    k_max: u64,
+) -> Result<ModelCheckResult> {
+    assert!(k_max > 0 && k_max <= 2000, "unreasonable k_max={}", k_max);
+
+    // if there are no assertions, there cannot be an error!
+    if sys.bad_states.is_empty() {
+        return Ok(ModelCheckResult::Success);
     }
 
-    pub fn check(
-        &self,
-        ctx: &mut Context,
-        sys: &TransitionSystem,
-        k_max: u64,
-    ) -> Result<ModelCheckResult> {
-        assert!(k_max > 0 && k_max <= 2000, "unreasonable k_max={}", k_max);
+    // z3 only supports the non-standard as-const array syntax when the logic is set to ALL
+    let logic = if smt_ctx.name() == "z3" {
+        Logic::All
+    } else if smt_ctx.supports_uf() {
+        Logic::QfAufbv
+    } else {
+        Logic::QfAbv
+    };
+    smt_ctx.set_logic(logic)?;
 
-        // if there are no assertions, there cannot be an error!
-        if sys.bad_states.is_empty() {
-            return Ok(ModelCheckResult::Success);
+    // TODO: maybe add support for the more compact SMT encoding
+    let mut enc = UnrollSmtEncoding::new(ctx, sys, false);
+    enc.define_header(smt_ctx)?;
+    enc.init_at(ctx, smt_ctx, 0)?;
+
+    let constraints = sys.constraints.clone();
+    let bad_states = sys.bad_states.clone();
+
+    for k in 0..=k_max {
+        // assume all constraints hold in this step
+        for expr_ref in constraints.iter() {
+            let expr = enc.get_at(ctx, *expr_ref, k);
+            smt_ctx.assert(&ctx, expr)?;
         }
 
-        let replay_file = if self.opts.save_smt_replay {
-            Some(std::fs::File::create("replay.smt")?)
-        } else {
-            None
-        };
-        let mut smt_ctx = self.solver.start(replay_file)?;
+        // make sure the constraints are not contradictory
+        if check_constraints {
+            let res = smt_ctx.check_sat()?;
+            assert_eq!(
+                res,
+                CheckSatResponse::Sat,
+                "Found unsatisfiable constraints in cycle {}",
+                k
+            );
+        }
 
-        // z3 only supports the non-standard as-const array syntax when the logic is set to ALL
-        let logic = if self.solver.name() == "z3" {
-            Logic::All
-        } else if self.solver.supports_uf() {
-            Logic::QfAufbv
-        } else {
-            Logic::QfAbv
-        };
-        smt_ctx.set_logic(logic)?;
-
-        // TODO: maybe add support for the more compact SMT encoding
-        let mut enc = UnrollSmtEncoding::new(ctx, sys, false);
-        enc.define_header(&mut smt_ctx)?;
-        enc.init_at(ctx, &mut smt_ctx, 0)?;
-
-        let constraints = sys.constraints.clone();
-        let bad_states = sys.bad_states.clone();
-
-        for k in 0..=k_max {
-            // assume all constraints hold in this step
-            for expr_ref in constraints.iter() {
+        if check_bad_states_individually {
+            for (_bs_id, expr_ref) in bad_states.iter().enumerate() {
                 let expr = enc.get_at(ctx, *expr_ref, k);
-                smt_ctx.assert(&ctx, expr)?;
-            }
-
-            // make sure the constraints are not contradictory
-            if self.opts.check_constraints {
-                let res = smt_ctx.check_sat()?;
-                assert_eq!(
-                    res,
-                    CheckSatResponse::Sat,
-                    "Found unsatisfiable constraints in cycle {}",
-                    k
-                );
-            }
-
-            if self.opts.check_bad_states_individually {
-                for (_bs_id, expr_ref) in bad_states.iter().enumerate() {
-                    let expr = enc.get_at(ctx, *expr_ref, k);
-                    let res = check_assuming(&ctx, &mut smt_ctx, [expr])?;
-
-                    // count expression uses
-                    let use_counts = count_expr_uses(ctx, sys);
-                    if res == CheckSatResponse::Sat {
-                        let wit = self.get_witness(
-                            sys,
-                            ctx,
-                            &use_counts,
-                            &mut smt_ctx,
-                            &enc,
-                            k,
-                            &bad_states,
-                        )?;
-                        return Ok(ModelCheckResult::Fail(wit));
-                    }
-                    check_assuming_end(&mut smt_ctx)?;
-                }
-            } else {
-                let all_bads = bad_states
-                    .iter()
-                    .map(|expr_ref| enc.get_at(ctx, *expr_ref, k))
-                    .collect::<Vec<_>>();
-                let any_bad = all_bads.into_iter().reduce(|a, b| ctx.or(a, b)).unwrap();
-                let res = check_assuming(&ctx, &mut smt_ctx, [any_bad])?;
+                let res = check_assuming(&ctx, smt_ctx, [expr])?;
 
                 // count expression uses
                 let use_counts = count_expr_uses(ctx, sys);
                 if res == CheckSatResponse::Sat {
-                    let wit = self.get_witness(
-                        sys,
-                        ctx,
-                        &use_counts,
-                        &mut smt_ctx,
-                        &enc,
-                        k,
-                        &bad_states,
-                    )?;
+                    let wit = get_witness(sys, ctx, &use_counts, smt_ctx, &enc, k, &bad_states)?;
                     return Ok(ModelCheckResult::Fail(wit));
                 }
-                check_assuming_end(&mut smt_ctx)?;
+                check_assuming_end(smt_ctx)?;
             }
+        } else {
+            let all_bads = bad_states
+                .iter()
+                .map(|expr_ref| enc.get_at(ctx, *expr_ref, k))
+                .collect::<Vec<_>>();
+            let any_bad = all_bads.into_iter().reduce(|a, b| ctx.or(a, b)).unwrap();
+            let res = check_assuming(&ctx, smt_ctx, [any_bad])?;
 
-            // advance
-            enc.unroll(ctx, &mut smt_ctx)?;
+            // count expression uses
+            let use_counts = count_expr_uses(ctx, sys);
+            if res == CheckSatResponse::Sat {
+                let wit = get_witness(sys, ctx, &use_counts, smt_ctx, &enc, k, &bad_states)?;
+                return Ok(ModelCheckResult::Fail(wit));
+            }
+            check_assuming_end(smt_ctx)?;
         }
 
-        // we have not found any assertion violations
-        Ok(ModelCheckResult::Success)
+        // advance
+        enc.unroll(ctx, smt_ctx)?;
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn get_witness(
-        &self,
-        sys: &TransitionSystem,
-        ctx: &mut Context,
-        _use_counts: &[UseCountInt], // TODO: analyze array expressions in order to record which indices are accessed
-        smt_ctx: &mut impl SolverContext,
-        enc: &UnrollSmtEncoding,
-        k_max: u64,
-        bad_states: &[ExprRef],
-    ) -> Result<Witness> {
-        let mut wit = Witness::default();
+    // we have not found any assertion violations
+    Ok(ModelCheckResult::Success)
+}
 
-        // which bad states did we hit?
-        for (bad_idx, expr) in bad_states.iter().enumerate() {
-            let sym_at = enc.get_at(ctx, *expr, k_max);
-            let value = get_smt_value(ctx, smt_ctx, sym_at)?;
-            let value = match value {
-                Value::Array(_) => unreachable!("should always be a bitvector!"),
-                Value::BitVec(v) => v,
-            };
-            if !value.is_zero() {
-                // was the bad state condition fulfilled?
-                wit.failed_safety.push(bad_idx as u32);
+#[allow(clippy::too_many_arguments)]
+fn get_witness(
+    sys: &TransitionSystem,
+    ctx: &mut Context,
+    _use_counts: &[UseCountInt], // TODO: analyze array expressions in order to record which indices are accessed
+    smt_ctx: &mut impl SolverContext,
+    enc: &UnrollSmtEncoding,
+    k_max: u64,
+    bad_states: &[ExprRef],
+) -> Result<Witness> {
+    let mut wit = Witness::default();
+
+    // which bad states did we hit?
+    for (bad_idx, expr) in bad_states.iter().enumerate() {
+        let sym_at = enc.get_at(ctx, *expr, k_max);
+        let value = get_smt_value(ctx, smt_ctx, sym_at)?;
+        let value = match value {
+            Value::Array(_) => unreachable!("should always be a bitvector!"),
+            Value::BitVec(v) => v,
+        };
+        if !value.is_zero() {
+            // was the bad state condition fulfilled?
+            wit.failed_safety.push(bad_idx as u32);
+        }
+    }
+
+    // collect initial values
+    for (state_cnt, state) in sys.states.iter().enumerate() {
+        let sym_at = enc.get_at(ctx, state.symbol, 0);
+        let value = get_smt_value(ctx, smt_ctx, sym_at)?;
+        // we assume that state ids are monotonically increasing with +1
+        assert_eq!(wit.init.len(), state_cnt);
+        // convert to a witness value
+        let wit_value = match value {
+            Value::Array(v) => {
+                // TODO: narrow down the relevant indices
+                let indices = (0..v.num_elements())
+                    .map(|ii| BitVecValue::from_u64(ii as u64, v.index_width()))
+                    .collect::<Vec<_>>();
+                InitValue::Array(v, indices)
             }
-        }
+            Value::BitVec(v) => InitValue::BitVec(v),
+        };
+        wit.init.push(wit_value);
+        // also save state name
+        wit.init_names
+            .push(Some(ctx.get_symbol_name(state.symbol).unwrap().to_string()))
+    }
 
-        // collect initial values
-        for (state_cnt, state) in sys.states.iter().enumerate() {
-            let sym_at = enc.get_at(ctx, state.symbol, 0);
-            let value = get_smt_value(ctx, smt_ctx, sym_at)?;
-            // we assume that state ids are monotonically increasing with +1
-            assert_eq!(wit.init.len(), state_cnt);
-            // convert to a witness value
-            let wit_value = match value {
-                Value::Array(v) => {
-                    // TODO: narrow down the relevant indices
-                    let indices = (0..v.num_elements())
-                        .map(|ii| BitVecValue::from_u64(ii as u64, v.index_width()))
-                        .collect::<Vec<_>>();
-                    InitValue::Array(v, indices)
-                }
-                Value::BitVec(v) => InitValue::BitVec(v),
-            };
-            wit.init.push(wit_value);
-            // also save state name
-            wit.init_names
-                .push(Some(ctx.get_symbol_name(state.symbol).unwrap().to_string()))
-        }
+    // save input names
+    for input in sys.inputs.iter() {
+        wit.input_names
+            .push(Some(ctx.get_symbol_name(*input).unwrap().to_string()));
+    }
 
-        // save input names
+    for k in 0..=k_max {
+        let mut input_values = Vec::default();
         for input in sys.inputs.iter() {
-            wit.input_names
-                .push(Some(ctx.get_symbol_name(*input).unwrap().to_string()));
+            let sym_at = enc.get_at(ctx, *input, k);
+            let value = get_smt_value(ctx, smt_ctx, sym_at)?;
+            input_values.push(Some(value));
         }
-
-        for k in 0..=k_max {
-            let mut input_values = Vec::default();
-            for input in sys.inputs.iter() {
-                let sym_at = enc.get_at(ctx, *input, k);
-                let value = get_smt_value(ctx, smt_ctx, sym_at)?;
-                input_values.push(Some(value));
-            }
-            wit.inputs.push(input_values);
-        }
-
-        Ok(wit)
+        wit.inputs.push(input_values);
     }
+
+    Ok(wit)
 }
 
 #[inline]
@@ -249,7 +211,7 @@ pub fn get_smt_value(
     expr: ExprRef,
 ) -> Result<Value> {
     let value_expr = smt_ctx.get_value(ctx, expr)?;
-    let value = eval_expr(ctx, &HashMap::new(), value_expr);
+    let value = eval_expr(ctx, &FxHashMap::default(), value_expr);
     Ok(value)
 }
 

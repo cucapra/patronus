@@ -426,6 +426,15 @@ pub const Z3: SmtLibSolver = SmtLibSolver {
     supports_const_array: true,
 };
 
+pub const CVC5: SmtLibSolver = SmtLibSolver {
+    name: "cvc5",
+    args: &[],
+    options: &[],
+    supports_uf: true,
+    supports_check_assuming: true,
+    supports_const_array: true,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;

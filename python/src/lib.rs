@@ -321,7 +321,7 @@ fn pypatronus(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> Py
     m.add_function(wrap_pyfunction!(solver, m)?)?;
     m.add_function(wrap_pyfunction!(parse_smtlib_expr, m)?)?;
     // mc
-    m.add_class::<SmtModelChecker>()?;
+    m.add_function(wrap_pyfunction!(bmc, m)?)?;
     m.add_class::<ModelCheckResult>()?;
     Ok(())
 }

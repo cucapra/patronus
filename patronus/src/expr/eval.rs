@@ -9,7 +9,6 @@ use baa::{
 };
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
-use std::collections::HashMap;
 
 /// Returns a value for an expression if it is available.
 pub trait GetExprValue {
@@ -110,7 +109,7 @@ impl From<&[(ExprRef, ArrayValue)]> for SymbolValueStore {
     }
 }
 
-impl GetExprValue for HashMap<ExprRef, BitVecValue> {
+impl GetExprValue for FxHashMap<ExprRef, BitVecValue> {
     fn get_bv(&self, _ctx: &Context, symbol: ExprRef) -> Option<BitVecValue> {
         self.get(&symbol).cloned()
     }

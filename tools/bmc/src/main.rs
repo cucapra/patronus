@@ -5,8 +5,10 @@
 
 use clap::{Parser, ValueEnum};
 use patronus::expr::*;
+use patronus::mc::bmc;
 use patronus::smt::*;
 use patronus::*;
+use std::fs::File;
 
 #[derive(Parser, Debug)]
 #[command(name = "bmc")]
@@ -33,6 +35,8 @@ struct Args {
 pub enum SolverChoice {
     Bitwuzla,
     Yices2,
+    Z3,
+    CVC5,
 }
 
 fn main() {
@@ -45,23 +49,32 @@ fn main() {
         println!();
     }
     let k_max = 25;
-    let checker_opts = mc::SmtModelCheckerOptions {
-        check_constraints: true,
-        check_bad_states_individually: true,
-        save_smt_replay: args.dump_smt,
-    };
+    let check_constraints = true;
+    let check_bad_states_individually = false;
     let solver = match args.solver {
         SolverChoice::Bitwuzla => BITWUZLA,
         SolverChoice::Yices2 => YICES2,
+        SolverChoice::Z3 => Z3,
+        SolverChoice::CVC5 => CVC5,
     };
     if args.verbose {
-        println!(
-            "Checking up to {k_max} using {} and the following options:\n{checker_opts:?}",
-            solver.name()
-        );
+        println!("Checking up to {k_max} using {}.", solver.name());
     }
-    let checker = mc::SmtModelChecker::new(solver, checker_opts);
-    let res = checker.check(&mut ctx, &sys, k_max).unwrap();
+    let dump_file = if args.dump_smt {
+        Some(File::create("replay.smt").unwrap())
+    } else {
+        None
+    };
+    let mut smt_ctx = solver.start(dump_file).expect("failed to start solver");
+    let res = bmc(
+        &mut ctx,
+        &mut smt_ctx,
+        &sys,
+        check_constraints,
+        check_bad_states_individually,
+        k_max,
+    )
+    .unwrap();
     match res {
         mc::ModelCheckResult::Success => {
             println!("unsat");
