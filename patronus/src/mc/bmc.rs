@@ -244,8 +244,14 @@ pub trait TransitionSystemEncoding {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         step: u64,
-    ) -> Result<()>;
-    fn unroll(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()>;
+    ) -> Result<u64>;
+    fn unroll(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<u64>;
+    /// Creates a new state which is completely unconstrained
+    fn unroll_no_constraints(
+        &mut self,
+        ctx: &mut Context,
+        smt_ctx: &mut impl SolverContext,
+    ) -> Result<u64>;
     /// Allows access to inputs, states, constraints and bad_state expressions.
     fn get_at(&self, ctx: &Context, expr: ExprRef, k: u64) -> ExprRef;
 }
@@ -435,7 +441,7 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         step: u64,
-    ) -> Result<()> {
+    ) -> Result<u64> {
         // delete old mutable state
         self.symbols_at.clear();
         // remember current step and starting offset
@@ -475,10 +481,10 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
             (info.uses.other > 0 || info.is_input) && (info.uses.init == 0)
         })?;
 
-        Ok(())
+        Ok(step)
     }
 
-    fn unroll(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()> {
+    fn unroll(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<u64> {
         let prev_step = self.current_step.unwrap();
         let next_step = prev_step + 1;
         self.create_signal_symbols_in_step(ctx, next_step);
@@ -517,7 +523,38 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
 
         // update step count
         self.current_step = Some(next_step);
-        Ok(())
+        Ok(next_step)
+    }
+
+    fn unroll_no_constraints(
+        &mut self,
+        ctx: &mut Context,
+        smt_ctx: &mut impl SolverContext,
+    ) -> Result<u64> {
+        let prev_step = self.current_step.unwrap();
+        let next_step = prev_step + 1;
+        self.create_signal_symbols_in_step(ctx, next_step);
+
+        // define next state
+        for state in self.states.iter() {
+            let name = name_at(ctx.get_symbol_name(state.symbol).unwrap(), next_step);
+            let name = ctx.string(name.into());
+            let tpe = state.symbol.get_type(ctx);
+            let symbol_at = ctx.symbol(name, tpe);
+            // treat each state as if there wasn't a next function
+            smt_ctx.declare_const(ctx, symbol_at)?;
+        }
+
+        // define other signals and inputs
+        // we always define all inputs, even if they are only used in the "next" expression
+        // since our witness extraction relies on them being available
+        self.define_signals(ctx, smt_ctx, next_step, &|info: &SmtSignalInfo| {
+            info.uses.other > 0 || info.is_input
+        })?;
+
+        // update step count
+        self.current_step = Some(next_step);
+        Ok(next_step)
     }
 
     fn get_at(&self, _ctx: &Context, expr: ExprRef, step: u64) -> ExprRef {

@@ -301,7 +301,13 @@ impl Context {
     }
     pub fn and(&mut self, a: ExprRef, b: ExprRef) -> ExprRef {
         debug_assert_eq!(a.get_bv_type(self).unwrap(), b.get_bv_type(self).unwrap());
-        self.add_expr(Expr::BVAnd(a, b, b.get_bv_type(self).unwrap()))
+        if self[a].is_true() {
+            b
+        } else if self[b].is_true() {
+            a
+        } else {
+            self.add_expr(Expr::BVAnd(a, b, b.get_bv_type(self).unwrap()))
+        }
     }
     pub fn or(&mut self, a: ExprRef, b: ExprRef) -> ExprRef {
         debug_assert_eq!(a.get_bv_type(self).unwrap(), b.get_bv_type(self).unwrap());
