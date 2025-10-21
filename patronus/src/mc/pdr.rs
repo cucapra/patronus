@@ -4,7 +4,10 @@
 
 use crate::expr::*;
 use crate::mc::bmc::start_bmc_or_pdr;
-use crate::mc::{ModelCheckResult, TransitionSystemEncoding, UnrollSmtEncoding};
+use crate::mc::{
+    ModelCheckResult, TransitionSystemEncoding, UnrollSmtEncoding, check_assuming,
+    check_assuming_end,
+};
 use crate::smt::*;
 use crate::system::TransitionSystem;
 
@@ -37,8 +40,48 @@ pub fn pdr(
     let s0_is_init = state_equality(ctx, sys, &mut enc, init_step, s0);
     let implies_init = ctx.implies(state.frames[0].label, s0_is_init);
     smt.assert(ctx, implies_init)?;
+    let init_label = state.frames[0].label;
+
+    // check to see if property violated in initial state
+    let any_bad_init = any_bad_at(ctx, sys, &mut enc, init_step);
+    match check_assuming(ctx, smt, [any_bad_init])? {
+        CheckSatResponse::Sat => {
+            todo!("generate a witness and return a failure!")
+        }
+        CheckSatResponse::Unsat => {}
+        CheckSatResponse::Unknown => {}
+    }
+    check_assuming_end(smt)?;
+
+    // step 1
+    state.push_frame(ctx, smt)?;
+    let any_bad_s1 = any_bad_at(ctx, sys, &mut enc, s1);
+    match check_assuming(ctx, smt, [init_label, any_bad_s1])? {
+        CheckSatResponse::Sat => {
+            todo!("generate a witness and return a failure!")
+        }
+        CheckSatResponse::Unsat => {}
+        CheckSatResponse::Unknown => {}
+    }
+    check_assuming_end(smt)?;
+
+    // next steps
 
     Ok(ModelCheckResult::Unknown)
+}
+
+fn any_bad_at(
+    ctx: &mut Context,
+    sys: &TransitionSystem,
+    enc: &mut impl TransitionSystemEncoding,
+    step: u64,
+) -> ExprRef {
+    let bads: Vec<_> = sys
+        .bad_states
+        .iter()
+        .map(|b| enc.get_at(ctx, *b, step))
+        .collect();
+    ctx.reduce_or(bads.into_iter())
 }
 
 fn state_equality(

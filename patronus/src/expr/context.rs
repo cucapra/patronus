@@ -309,10 +309,32 @@ impl Context {
             self.add_expr(Expr::BVAnd(a, b, b.get_bv_type(self).unwrap()))
         }
     }
+    pub fn reduce_and(&mut self, es: impl Iterator<Item = ExprRef>) -> ExprRef {
+        let mut out = self.true_expr_ref;
+        for e in es {
+            out = self.and(out, e);
+        }
+        out
+    }
     pub fn or(&mut self, a: ExprRef, b: ExprRef) -> ExprRef {
         debug_assert_eq!(a.get_bv_type(self).unwrap(), b.get_bv_type(self).unwrap());
-        self.add_expr(Expr::BVOr(a, b, b.get_bv_type(self).unwrap()))
+        if self[a].is_false() {
+            b
+        } else if self[b].is_false() {
+            a
+        } else {
+            self.add_expr(Expr::BVOr(a, b, b.get_bv_type(self).unwrap()))
+        }
     }
+
+    pub fn reduce_or(&mut self, es: impl Iterator<Item = ExprRef>) -> ExprRef {
+        let mut out = self.false_expr_ref;
+        for e in es {
+            out = self.or(out, e);
+        }
+        out
+    }
+
     pub fn xor(&mut self, a: ExprRef, b: ExprRef) -> ExprRef {
         debug_assert_eq!(a.get_bv_type(self).unwrap(), b.get_bv_type(self).unwrap());
         self.add_expr(Expr::BVXor(a, b, b.get_bv_type(self).unwrap()))
