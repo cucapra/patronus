@@ -3,6 +3,7 @@
 // author: Kevin Laeufer <laeufer@berkeley.edu>
 
 mod bmc;
+mod pdr;
 mod types;
 
 pub use bmc::{

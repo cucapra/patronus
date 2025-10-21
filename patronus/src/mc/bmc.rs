@@ -1,5 +1,5 @@
 // Copyright 2023 The Regents of the University of California
-// Copyright 2024 Cornell University
+// Copyright 2024-2025 Cornell University
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
@@ -30,24 +30,10 @@ pub fn bmc(
 ) -> Result<ModelCheckResult> {
     assert!(k_max > 0 && k_max <= 2000, "unreasonable k_max={}", k_max);
 
-    // if there are no assertions, there cannot be an error!
-    if sys.bad_states.is_empty() {
-        return Ok(ModelCheckResult::Success);
-    }
-
-    // z3 only supports the non-standard as-const array syntax when the logic is set to ALL
-    let logic = if smt_ctx.name() == "z3" {
-        Logic::All
-    } else if smt_ctx.supports_uf() {
-        Logic::QfAufbv
-    } else {
-        Logic::QfAbv
+    let mut enc = match start_bmc_or_pdr(ctx, smt_ctx, sys)? {
+        (r, None) => return Ok(r),
+        (_, Some(enc)) => enc,
     };
-    smt_ctx.set_logic(logic)?;
-
-    // TODO: maybe add support for the more compact SMT encoding
-    let mut enc = UnrollSmtEncoding::new(ctx, sys, false);
-    enc.define_header(smt_ctx)?;
     enc.init_at(ctx, smt_ctx, 0)?;
 
     let constraints = sys.constraints.clone();
@@ -109,13 +95,43 @@ pub fn bmc(
     Ok(ModelCheckResult::Success)
 }
 
+pub(crate) fn start_bmc_or_pdr<S: SolverContext>(
+    ctx: &mut Context,
+    smt_ctx: &mut S,
+    sys: &TransitionSystem,
+) -> Result<(
+    ModelCheckResult,
+    Option<impl TransitionSystemEncoding + use<S>>,
+)> {
+    // if there are no assertions, there cannot be an error!
+    if sys.bad_states.is_empty() {
+        return Ok((ModelCheckResult::Success, None));
+    }
+
+    // z3 only supports the non-standard as-const array syntax when the logic is set to ALL
+    let logic = if smt_ctx.name() == "z3" {
+        Logic::All
+    } else if smt_ctx.supports_uf() {
+        Logic::QfAufbv
+    } else {
+        Logic::QfAbv
+    };
+    smt_ctx.set_logic(logic)?;
+
+    // TODO: maybe add support for the more compact SMT encoding
+    let mut enc = UnrollSmtEncoding::new(ctx, sys, false);
+    enc.define_header(smt_ctx)?;
+
+    Ok((ModelCheckResult::Unknown, Some(enc)))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn get_witness(
     sys: &TransitionSystem,
     ctx: &mut Context,
     _use_counts: &[UseCountInt], // TODO: analyze array expressions in order to record which indices are accessed
     smt_ctx: &mut impl SolverContext,
-    enc: &UnrollSmtEncoding,
+    enc: &impl TransitionSystemEncoding,
     k_max: u64,
     bad_states: &[ExprRef],
 ) -> Result<Witness> {
@@ -217,6 +233,7 @@ pub fn get_smt_value(
 
 pub enum ModelCheckResult {
     Success,
+    Unknown,
     Fail(Witness),
 }
 

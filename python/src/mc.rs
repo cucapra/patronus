@@ -45,6 +45,7 @@ impl ModelCheckResult {
     fn __str__(&self) -> String {
         match &self.0 {
             patronus::mc::ModelCheckResult::Success => "unsat".to_string(),
+            patronus::mc::ModelCheckResult::Unknown => "unknown".to_string(),
             patronus::mc::ModelCheckResult::Fail(_) => "sat".to_string(),
         }
     }
@@ -52,6 +53,7 @@ impl ModelCheckResult {
     fn __len__(&self) -> usize {
         match &self.0 {
             patronus::mc::ModelCheckResult::Success => 0,
+            patronus::mc::ModelCheckResult::Unknown => 0,
             patronus::mc::ModelCheckResult::Fail(w) => w.inputs.len(),
         }
     }
@@ -60,6 +62,7 @@ impl ModelCheckResult {
     fn inits(&self) -> Option<Model> {
         match &self.0 {
             patronus::mc::ModelCheckResult::Success => None,
+            patronus::mc::ModelCheckResult::Unknown => None,
             patronus::mc::ModelCheckResult::Fail(_w) => {
                 todo!()
             }

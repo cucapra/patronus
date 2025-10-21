@@ -79,6 +79,9 @@ fn main() {
         mc::ModelCheckResult::Success => {
             println!("unsat");
         }
+        mc::ModelCheckResult::Unknown => {
+            println!("unknown");
+        }
         mc::ModelCheckResult::Fail(wit) => {
             btor2::print_witness(&mut std::io::stdout(), &wit).unwrap();
         }
