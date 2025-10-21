@@ -1,5 +1,5 @@
 // Copyright 2023 The Regents of the University of California
-// Copyright 2024 Cornell University
+// Copyright 2024-2025 Cornell University
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
@@ -7,6 +7,7 @@ use clap::{Parser, ValueEnum};
 use patronus::expr::*;
 use patronus::mc::bmc;
 use patronus::smt::*;
+use patronus::system::transform::simplify_expressions;
 use patronus::*;
 use std::fs::File;
 
@@ -26,6 +27,8 @@ struct Args {
     #[arg(short, long)]
     verbose: bool,
     #[arg(short, long)]
+    skip_simplify: bool,
+    #[arg(short, long)]
     dump_smt: bool,
     #[arg(value_name = "BTOR2", index = 1)]
     filename: String,
@@ -41,7 +44,14 @@ pub enum SolverChoice {
 
 fn main() {
     let args = Args::parse();
-    let (mut ctx, sys) = btor2::parse_file(&args.filename).expect("Failed to load btor2 file!");
+    let (mut ctx, mut sys) = btor2::parse_file(&args.filename).expect("Failed to load btor2 file!");
+    if !args.skip_simplify {
+        if args.verbose {
+            println!("simplifying...")
+        };
+        // replace_anonymous_inputs_with_zero(&mut ctx, &mut sys);
+        simplify_expressions(&mut ctx, &mut sys);
+    }
     if args.verbose {
         println!("Loaded: {}", sys.name);
         println!("{}", sys.serialize_to_str(&ctx));
