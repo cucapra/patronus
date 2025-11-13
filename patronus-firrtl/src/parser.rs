@@ -1,5 +1,7 @@
+use cranelift_entity::PrimaryMap;
 use lalrpop_util::lalrpop_mod;
 use patronus::expr::{StringRef, WidthInt};
+use rustc_hash::FxBuildHasher;
 use std::num::NonZeroU32;
 
 lalrpop_mod!(firrtl);
@@ -15,6 +17,9 @@ pub struct Module {
     name: StringRef,
     ports: Vec<Port>,
     body: StmtId,
+    stmts: PrimaryMap<StmtId, Stmt>,
+    exprs: PrimaryMap<ExprId, Expr>,
+    strings: indexmap::IndexSet<String, FxBuildHasher>,
 }
 
 #[derive(Debug, Clone)]

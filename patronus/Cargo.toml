@@ -12,7 +12,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-indexmap = "2.7.0"
+indexmap.workspace = true
 codespan-reporting = "0.11.1"
 lazy_static = "1.4.0"
 smallvec = { version = "1.x", features = ["union"] }

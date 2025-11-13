@@ -21,6 +21,7 @@ boolean_expression = "0.4.4"
 clap =  { version = "4.x", features = ["derive"] }
 patronus = {path = "patronus"}
 thiserror = "2.0.6"
+indexmap = "2.12.0"
 
 # speed up execution of tests using insta
 [profile.dev.package]
