@@ -1,0 +1,19 @@
+[package]
+name = "patronus-firrtl"
+version = "0.1.0"
+description = "firrtl frontend"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+patronus = { path = "../patronus" }
+baa.workspace = true
+rustc-hash.workspace = true
+lalrpop-util = { version = "0.22.2", features = ["lexer"]  }
+
+[build-dependencies]
+lalrpop = { version = "0.22.2"}
