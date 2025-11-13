@@ -3,7 +3,6 @@ use std::str::FromStr;
 grammar;
 
 
-pub Module 
 
 pub Term: i32 = {
     <n:Num> => n,
