@@ -11,3 +11,4 @@ pub mod mc;
 pub mod sim;
 pub mod smt;
 pub mod system;
+mod auto;
