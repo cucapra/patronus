@@ -1,3 +1,7 @@
+use crate::ir::*;
+use chumsky::Parser;
+use chumsky::prelude::*;
+
 /// Quick scan over the FIRRTL to find the name of the circuit and the string slice for each module.
 fn find_modules(source: &str) -> (&str, Vec<&str>) {
     let mut circuit = "";
@@ -35,6 +39,17 @@ fn find_modules(source: &str) -> (&str, Vec<&str>) {
     (circuit, modules)
 }
 
+#[derive(Clone, Debug, PartialEq)]
+enum Token<'src> {
+    Id(&'src str),
+}
+fn lexer<'src>() -> impl Parser<'src, &'src str, Vec<Token<'src>>> {}
+
+fn expr_parser<'a>(m: &mut Module) -> impl Parser<'a, &'a str, ExprId> {
+    let id = regex(r"[a-zA-Z_][a-zA-Z_0-9$]*").to(|name| m.push(Expr::Id));
+    id
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -47,4 +62,7 @@ mod tests {
         assert_eq!(modules.len(), 1);
         assert_eq!(modules[0].lines().next().unwrap().trim(), "module AddNot:");
     }
+
+    #[test]
+    fn parse_expr() {}
 }

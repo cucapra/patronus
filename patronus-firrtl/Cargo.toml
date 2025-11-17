@@ -15,5 +15,5 @@ baa.workspace = true
 rustc-hash.workspace = true
 indexmap.workspace = true
 cranelift-entity = "0.121.2"
-chumsky = "0.11.2"
+chumsky = { version = "0.11.2", features = ["regex"] }
 

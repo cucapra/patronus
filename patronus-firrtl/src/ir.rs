@@ -6,6 +6,7 @@ use cranelift_entity::{EntityRef, PrimaryMap};
 use patronus::expr::{StringRef, WidthInt};
 use rustc_hash::FxBuildHasher;
 use std::num::NonZeroU32;
+use std::ops::Index;
 
 #[derive(Debug)]
 pub struct Circuit {
@@ -101,7 +102,9 @@ pub enum ReadUnderWrite {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum Expr {}
+pub enum Expr {
+    Reference(StringRef),
+}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Type {
@@ -148,5 +151,40 @@ impl ExprId {
     }
     pub fn index(&self) -> usize {
         (self.0.get() - 1) as usize
+    }
+}
+
+impl Index<ExprId> for Module {
+    type Output = Expr;
+
+    fn index(&self, index: ExprId) -> &Self::Output {
+        &self.exprs[index]
+    }
+}
+
+impl Index<StmtId> for Module {
+    type Output = Stmt;
+
+    fn index(&self, index: StmtId) -> &Self::Output {
+        &self.stmts[index]
+    }
+}
+
+pub trait PushEntity<Element: ?Sized> {
+    type Id: ?Sized + Clone + Copy;
+    fn push(&mut self, element: Element) -> Self::Id;
+}
+
+impl PushEntity<Expr> for Module {
+    type Id = ExprId;
+    fn push(&mut self, element: Expr) -> Self::Id {
+        self.exprs.push(element)
+    }
+}
+
+impl PushEntity<Stmt> for Module {
+    type Id = StmtId;
+    fn push(&mut self, element: Stmt) -> Self::Id {
+        self.stmts.push(element)
     }
 }
