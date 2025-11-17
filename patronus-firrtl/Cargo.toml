@@ -14,8 +14,6 @@ patronus = { path = "../patronus" }
 baa.workspace = true
 rustc-hash.workspace = true
 indexmap.workspace = true
-lalrpop-util = { version = "0.22.2", features = ["lexer"]  }
 cranelift-entity = "0.121.2"
+chumsky = "0.11.2"
 
-[build-dependencies]
-lalrpop = { version = "0.22.2"}
