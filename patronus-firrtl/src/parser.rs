@@ -1,6 +1,7 @@
 use crate::ir::*;
 use chumsky::Parser;
 use chumsky::prelude::*;
+use logos::Logos;
 
 /// Quick scan over the FIRRTL to find the name of the circuit and the string slice for each module.
 fn find_modules(source: &str) -> (&str, Vec<&str>) {
@@ -39,37 +40,115 @@ fn find_modules(source: &str) -> (&str, Vec<&str>) {
     (circuit, modules)
 }
 
-#[derive(Clone, Debug, PartialEq)]
-enum Token<'src> {
-    Id(&'src str),
-    FileInfo(&'src str),
-    WhiteSpace(usize),
-    NewLine,
-}
-fn lexer<'src>() -> impl Parser<'src, &'src str, Vec<Token<'src>>> {
-    let id = regex(r"[a-zA-Z_][a-zA-Z_0-9$]*").map(Token::Id);
-    //let file_info = regex(r"@\[\s*([^\]]*)\s*\]").map(Token::FileInfo);
-    // let whitespace = one_of(" \t\r\n");
-    let file_info = just("@[")
-        .ignore_then(
-            none_of(']')
-                .repeated()
-                .at_least(1)
-                .to_slice()
-                .map(|s: &str| Token::FileInfo(s.trim())),
-        )
-        .then_ignore(just(']'));
+// #[derive(Clone, Debug, PartialEq)]
+// enum Token<'src> {
+//     Id(&'src str),
+//     RelaxedId(&'src str),
+//     FileInfo(&'src str),
+//     UnsignedInt(&'src str),
+//     SignedInt(&'src str),
+//     HexLit(&'src str),
+//     BinaryLit(&'src str),
+//     Keyword(&'src str),
+//     Indent,
+//     Dedent,
+// }
 
-    let token = id.or(file_info);
+// const KEYWORDS: [&str; 51] = [
+//     "circuit",
+//     "module",
+//     "extmodule",
+//     "parameter",
+//     "input",
+//     "output",
+//     "UInt",
+//     "SInt",
+//     "Clock",
+//     "Reset",
+//     "AsyncReset",
+//     "Analog",
+//     "Fixed",
+//     "Interval",
+//     "flip",
+//     "wire",
+//     "reg",
+//     "with",
+//     "reset",
+//     "mem",
+//     "depth",
+//     "reader",
+//     "writer",
+//     "readwriter",
+//     "inst",
+//     "of",
+//     "node",
+//     "is",
+//     "invalid",
+//     "when",
+//     "else",
+//     "stop",
+//     "printf",
+//     "skip",
+//     "old",
+//     "new",
+//     "undefined",
+//     "mux",
+//     "validif",
+//     "cmem",
+//     "smem",
+//     "mport",
+//     "infer",
+//     "read",
+//     "write",
+//     "rdwr",
+//     "attach",
+//     "assert",
+//     "assume",
+//     "cover",
+//     "version"
+// ];
 
-    token.repeated().collect()
-}
+// fn lexer<'src>() -> impl Parser<'src, &'src str, Vec<Token<'src>>> {
+//     let id = regex(r"[a-zA-Z_][a-zA-Z_0-9$]*").map(Token::Id);
+//     let relaxed_id = regex(r"[a-zA-Z_0-9$]+").map(Token::RelaxedId);
+//     //let file_info = regex(r"@\[\s*([^\]]*)\s*\]").map(Token::FileInfo);
+//     // let whitespace = one_of(" \t\r\n");
+//     let file_info = just("@[")
+//         .ignore_then(
+//             none_of(']')
+//                 .repeated()
+//                 .at_least(1)
+//                 .to_slice()
+//                 .map(|s: &str| Token::FileInfo(s.trim())),
+//         )
+//         .then_ignore(just(']'));
+//     let keywords = one_of(KEYWORDS.iter()).map(Token::Keyword);
+//
+//     // important: check ID first
+//     let token = keywords.or(id).or(relaxed_id).or(file_info);
+//
+//     token.repeated().collect()
+// }
 
 // fn expr_parser<'a>(m: &mut Module) -> impl Parser<'a, &'a str, ExprId> {
 //     // let id = regex(r"[a-zA-Z_][a-zA-Z_0-9$]*").to(|name| m.push(Expr::Id));
 //     // id
 //     todo!()
 // }
+
+#[derive(Logos, Debug, PartialEq, Eq, Hash, Clone)]
+enum Token {
+    #[token(
+        "(circuit)|(module)|(extmodule)|(parameter)|(input)|(output)|(UInt)|(SInt)|(Clock)|(Reset)|(AsyncReset)|(Analog)|(Fixed)|(Interval)|(flip)|(wire)|(reg)|(with)|(reset)|(mem)|(depth)|(reader)|(writer)|(readwriter)|(inst)|(of)|(node)|(is)|(invalid)|(when)|(else)|(stop)|(printf)|(skip)|(old)|(new)|(undefined)|(mux)|(validif)|(cmem)|(smem)|(mport)|(infer)|(read)|(write)|(rdwr)|(attach)|(assert)|(assume)|(cover)|(version)"
+    )]
+    Keyword,
+    #[regex("[a-zA-Z_][a-zA-Z_0-9$]*", priority = 3)]
+    Id,
+    #[regex("[a-zA-Z_0-9$]+")]
+    RelaxedId,
+    #[regex(r"@\[\s*([^\]]*)\s*\]")]
+    FileInfo,
+}
 
 #[cfg(test)]
 mod tests {
@@ -82,12 +161,20 @@ mod tests {
         assert_eq!(circuit, "AddNot");
         assert_eq!(modules.len(), 1);
         assert_eq!(modules[0].lines().next().unwrap().trim(), "module AddNot:");
+
+        //let lexed = lexer().parse(modules[0]).unwrap();
+        //println!("{:?}", lexed);
     }
 
     #[test]
     fn parse_token() {
-        assert_eq!(lexer().parse("x1").unwrap(), [Token::Id("x1")]);
-        assert_eq!(lexer().parse("@[test]").unwrap(), [Token::FileInfo("test")]);
+        let lex = |s: &str| Token::lexer(s).map(|i| i.unwrap()).collect::<Vec<_>>();
+        assert_eq!(lex("x1"), [Token::Id]);
+        assert_eq!(lex("11"), [Token::RelaxedId]);
+        assert_eq!(lex("@[test]"), [Token::FileInfo]);
+        let mut lexer = Token::lexer("@[test]");
+        lexer.next().unwrap().unwrap();
+        assert_eq!(lexer.slice(), "test");
     }
 
     #[test]
