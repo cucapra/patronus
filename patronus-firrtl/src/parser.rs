@@ -42,13 +42,34 @@ fn find_modules(source: &str) -> (&str, Vec<&str>) {
 #[derive(Clone, Debug, PartialEq)]
 enum Token<'src> {
     Id(&'src str),
+    FileInfo(&'src str),
+    WhiteSpace(usize),
+    NewLine,
 }
-fn lexer<'src>() -> impl Parser<'src, &'src str, Vec<Token<'src>>> {}
+fn lexer<'src>() -> impl Parser<'src, &'src str, Vec<Token<'src>>> {
+    let id = regex(r"[a-zA-Z_][a-zA-Z_0-9$]*").map(Token::Id);
+    //let file_info = regex(r"@\[\s*([^\]]*)\s*\]").map(Token::FileInfo);
+    // let whitespace = one_of(" \t\r\n");
+    let file_info = just("@[")
+        .ignore_then(
+            none_of(']')
+                .repeated()
+                .at_least(1)
+                .to_slice()
+                .map(|s: &str| Token::FileInfo(s.trim())),
+        )
+        .then_ignore(just(']'));
 
-fn expr_parser<'a>(m: &mut Module) -> impl Parser<'a, &'a str, ExprId> {
-    let id = regex(r"[a-zA-Z_][a-zA-Z_0-9$]*").to(|name| m.push(Expr::Id));
-    id
+    let token = id.or(file_info);
+
+    token.repeated().collect()
 }
+
+// fn expr_parser<'a>(m: &mut Module) -> impl Parser<'a, &'a str, ExprId> {
+//     // let id = regex(r"[a-zA-Z_][a-zA-Z_0-9$]*").to(|name| m.push(Expr::Id));
+//     // id
+//     todo!()
+// }
 
 #[cfg(test)]
 mod tests {
@@ -61,6 +82,12 @@ mod tests {
         assert_eq!(circuit, "AddNot");
         assert_eq!(modules.len(), 1);
         assert_eq!(modules[0].lines().next().unwrap().trim(), "module AddNot:");
+    }
+
+    #[test]
+    fn parse_token() {
+        assert_eq!(lexer().parse("x1").unwrap(), [Token::Id("x1")]);
+        assert_eq!(lexer().parse("@[test]").unwrap(), [Token::FileInfo("test")]);
     }
 
     #[test]
