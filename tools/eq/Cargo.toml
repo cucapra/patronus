@@ -1,0 +1,16 @@
+[package]
+name = "eq"
+version = "0.1.0"
+description = "An equivalence checking tool based on the patronus library."
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+patronus.workspace = true
+clap.workspace = true
+rustc-hash.workspace = true
+baa.workspace = true
