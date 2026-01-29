@@ -36,6 +36,7 @@ pub enum Logic {
     All,
     QfAufbv,
     QfAbv,
+    QfBv,
 }
 
 impl Logic {
@@ -44,6 +45,7 @@ impl Logic {
             Logic::All => "ALL",
             Logic::QfAufbv => "QF_AUFBV",
             Logic::QfAbv => "QF_ABV",
+            Logic::QfBv => "QF_BV",
         }
     }
 }

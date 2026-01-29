@@ -76,8 +76,8 @@ fn read_cmd(
     let mut cmd_str = String::new();
     inp.read_line(&mut cmd_str)?;
 
-    // skip lines that are just comments
-    while is_comment(&cmd_str) {
+    // skip lines that are just comments or empty
+    while is_comment(&cmd_str) || cmd_str.trim().is_empty() {
         cmd_str.clear();
         inp.read_line(&mut cmd_str)?;
     }

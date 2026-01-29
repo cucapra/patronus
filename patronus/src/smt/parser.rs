@@ -311,6 +311,7 @@ pub fn parse_command(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Resul
 
 fn parse_logic(lexer: &mut Lexer) -> Result<Logic> {
     match value_token(lexer)? {
+        b"QF_BV" => Ok(Logic::QfBv),
         b"QF_ABV" => Ok(Logic::QfAbv),
         b"QF_AUFBV" => Ok(Logic::QfAufbv),
         b"ALL" => Ok(Logic::All),
