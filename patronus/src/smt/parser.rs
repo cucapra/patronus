@@ -170,6 +170,8 @@ fn parse_expr_or_type(
     // keep track of how many closing parenthesis without an opening one are encountered
     let mut orphan_closing_count = 0u64;
     for token in lexer {
+        dbg!(&token, &stack);
+
         match token {
             Token::Open => {
                 if orphan_closing_count > 0 {
@@ -182,42 +184,43 @@ fn parse_expr_or_type(
                     stack.pop().unwrap();
                     // special open to signify a let scope
                     stack.push(Open(true));
-                }
-                // find the closest Open
-                if let Some(p) = stack.iter().rev().position(|i| matches!(i, Open(_))) {
-                    let open_pos = stack.len() - 1 - p;
-                    let pattern = &stack[open_pos + 1..];
+                } else {
+                    // find the closest Open
+                    if let Some(p) = stack.iter().rev().position(|i| matches!(i, Open(_))) {
+                        let open_pos = stack.len() - 1 - p;
+                        let pattern = &stack[open_pos + 1..];
 
-                    // special case for a `(let ((` prefix which needs to be followed by a definition
-                    let let_def_prefix = open_pos >= 2
-                        && matches!(
-                            &stack[open_pos - 2..open_pos + 1],
-                            [Let, Open(false), Open(false)]
-                        );
-                    if let_def_prefix {
-                        if let [Sym(name), PExpr(e)] = pattern {
-                            let name = std::str::from_utf8(name)?;
-                            st.push_let(name.into(), *e);
-                            // remove pattern and prefix from the stack and replace with let scope token
-                            stack.truncate(open_pos - 2);
-                            stack.push(LetScopeOpenMissingClose);
+                        // special case for a `(let ((` prefix which needs to be followed by a definition
+                        let let_def_prefix = open_pos >= 2
+                            && matches!(
+                                &stack[open_pos - 2..open_pos + 1],
+                                [Let, Open(false), Open(false)]
+                            );
+                        if let_def_prefix {
+                            if let [Sym(name), PExpr(e)] = pattern {
+                                let name = std::str::from_utf8(name)?;
+                                st.push_let(name.into(), *e);
+                                // remove pattern and prefix from the stack and replace with let scope token
+                                stack.truncate(open_pos - 2);
+                                stack.push(LetScopeOpenMissingClose);
+                            } else {
+                                return Err(SmtParserError::Pattern(format!(
+                                    "Unexpected pattern following `(let (`(: {pattern:?}"
+                                )));
+                            }
                         } else {
-                            return Err(SmtParserError::Pattern(format!(
-                                "Unexpected pattern following `(let (`(: {pattern:?}"
-                            )));
+                            let result = parse_pattern(ctx, st, pattern)?;
+                            // if this is the end of a let scope, we need to pop the definition
+                            if matches!(stack[open_pos], Open(true)) {
+                                st.pop_let();
+                            }
+                            stack.truncate(open_pos);
+                            stack.push(result);
                         }
                     } else {
-                        let result = parse_pattern(ctx, st, pattern)?;
-                        // if this is the end of a let scope, we need to pop the definition
-                        if matches!(stack[open_pos], Open(true)) {
-                            st.pop_let();
-                        }
-                        stack.truncate(open_pos);
-                        stack.push(result);
+                        // no matching open parenthesis
+                        orphan_closing_count += 1;
                     }
-                } else {
-                    // no matching open parenthesis
-                    orphan_closing_count += 1;
                 }
             }
             Token::Value(value) => {
@@ -916,14 +919,29 @@ impl<'a> Iterator for Lexer<'a> {
             };
         }
 
-        debug_assert!(matches!(self.state, Searching), "{:?}", self.state);
-        debug_assert_eq!(
-            self.pos,
-            self.input.len(),
-            "{}",
-            String::from_utf8_lossy(self.input)
-        );
-        None
+        // finish parsing at the end of string
+        match self.state {
+            ParsingToken(start) => {
+                self.pos = self.input.len();
+                Some(Token::Value(&self.input[start..self.pos]))
+            }
+            ParsingComment(start) => {
+                self.pos = self.input.len();
+                Some(Token::Comment(&self.input[start..self.pos]))
+            }
+            Searching => {
+                debug_assert_eq!(
+                    self.pos,
+                    self.input.len(),
+                    "{}",
+                    String::from_utf8_lossy(self.input)
+                );
+                None
+            }
+            other => {
+                todo!("smt lexer: handle being in state `{other:?}` at the end of the input");
+            }
+        }
     }
 }
 
@@ -994,13 +1012,24 @@ mod tests {
         );
     }
 
+    fn test_parse_expr(ctx: &mut Context, input: &str) -> Result<ExprRef> {
+        let symbols = FxHashMap::default();
+        parse_expr(ctx, &symbols, input.as_bytes())
+    }
+
+    #[test]
+    fn test_parse_simple_expr() {
+        let mut ctx = Context::default();
+        let smt_expr = test_parse_expr(&mut ctx, "true").unwrap();
+        assert!(ctx[smt_expr].is_true());
+        let smt_expr = test_parse_expr(&mut ctx, "false").unwrap();
+        assert!(ctx[smt_expr].is_false());
+    }
+
     #[test]
     fn test_parse_let_expr() {
         let mut ctx = Context::default();
-        let symbols = FxHashMap::default();
-
-        let smt_str = "(let ((abc #b1)) abc)";
-        let smt_expr = parse_expr(&mut ctx, &symbols, smt_str.as_bytes()).unwrap();
+        let smt_expr = test_parse_expr(&mut ctx, "(let ((abc #b1)) abc)").unwrap();
         assert!(ctx[smt_expr].is_true());
     }
 
