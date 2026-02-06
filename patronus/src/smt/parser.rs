@@ -481,6 +481,9 @@ fn parse_pattern<'a>(
     use ParserItem::*;
 
     let item = match pattern {
+        // an already parsed expression that just got pattern matches
+        // (this can happen for simple expressions)
+        [PExpr(e)] => PExpr(*e),
         ///////////////////////////////////////////////////////////////////////////////////////////
         // Expressions
         ///////////////////////////////////////////////////////////////////////////////////////////
