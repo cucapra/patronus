@@ -2,7 +2,9 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::expr::{ArrayType, Context, ExprRef, SerializableIrNode, Type, TypeCheck, WidthInt};
+use crate::expr::{
+    ArrayType, Context, ExprRef, SerializableIrNode, StringRef, Type, TypeCheck, WidthInt,
+};
 use crate::smt::{Logic, SmtCommand};
 use regex::bytes::RegexSet;
 use rustc_hash::FxHashMap;
@@ -75,7 +77,8 @@ type SymbolTable = FxHashMap<String, ExprRef>;
 
 pub fn parse_expr(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Result<ExprRef> {
     let mut lexer = Lexer::new(input);
-    let expr = parse_expr_internal(ctx, st, &mut lexer)?;
+    let mut nested = NestedSymbolTable::new(st);
+    let expr = parse_expr_internal(ctx, &mut nested, &mut lexer)?;
     let token_after_expr = lexer.next_no_comment();
     if token_after_expr.is_some() {
         Err(SmtParserError::ExprSuffix(format!("{token_after_expr:?}")))
@@ -84,14 +87,68 @@ pub fn parse_expr(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Result<E
     }
 }
 
-fn parse_expr_internal(ctx: &mut Context, st: &SymbolTable, lexer: &mut Lexer) -> Result<ExprRef> {
+#[derive(Debug)]
+struct NestedSymbolTable<'a> {
+    /// top-level symbol table, for symbols defined outside the current expression being parsed
+    top: &'a SymbolTable,
+    /// any symbols defined inside the expression, query this one first
+    lets: FxHashMap<String, ExprRef>,
+    /// all we need to know in order to be able to undo let bindings correctly
+    undo_stack: Vec<LetUndo>,
+}
+
+#[derive(Debug)]
+enum LetUndo {
+    Remove(String),
+    Replace(String, ExprRef),
+}
+
+impl<'a> NestedSymbolTable<'a> {
+    fn new(top: &'a SymbolTable) -> Self {
+        Self {
+            top,
+            lets: Default::default(),
+            undo_stack: vec![],
+        }
+    }
+
+    fn get(&self, name: &str) -> Option<ExprRef> {
+        self.lets.get(name).or_else(|| self.top.get(name)).cloned()
+    }
+
+    fn push_let(&mut self, name: std::borrow::Cow<str>, expr: ExprRef) {
+        // check to see how we will have to modify the lets table to restore it to its previous state
+        let undo = match self.lets.get(name.as_ref()) {
+            None => LetUndo::Remove(name.to_string()),
+            Some(old) => LetUndo::Replace(name.to_string(), *old),
+        };
+        self.undo_stack.push(undo);
+
+        // modify table
+        self.lets.insert(name.into_owned(), expr);
+    }
+
+    fn pop_let(&mut self) {
+        debug_assert!(!self.lets.is_empty() && !self.undo_stack.is_empty());
+        match self.undo_stack.pop().unwrap() {
+            LetUndo::Remove(k) => self.lets.remove(&k),
+            LetUndo::Replace(k, v) => self.lets.insert(k, v),
+        };
+    }
+}
+
+fn parse_expr_internal(
+    ctx: &mut Context,
+    st: &mut NestedSymbolTable,
+    lexer: &mut Lexer,
+) -> Result<ExprRef> {
     match parse_expr_or_type(ctx, st, lexer)? {
         ExprOrType::E(e) => Ok(e),
         ExprOrType::T(t) => Err(SmtParserError::TypeInsteadOfExpr(format!("{t:?}"))),
     }
 }
 
-fn parse_type(ctx: &mut Context, st: &SymbolTable, lexer: &mut Lexer) -> Result<Type> {
+fn parse_type(ctx: &mut Context, st: &mut NestedSymbolTable, lexer: &mut Lexer) -> Result<Type> {
     match parse_expr_or_type(ctx, st, lexer)? {
         ExprOrType::T(t) => Ok(t),
         ExprOrType::E(e) => Err(SmtParserError::ExprInsteadOfType(e.serialize_to_str(ctx))),
@@ -105,7 +162,7 @@ enum ExprOrType {
 
 fn parse_expr_or_type(
     ctx: &mut Context,
-    st: &SymbolTable,
+    st: &mut NestedSymbolTable,
     lexer: &mut Lexer,
 ) -> Result<ExprOrType> {
     use ParserItem::*;
@@ -118,16 +175,46 @@ fn parse_expr_or_type(
                 if orphan_closing_count > 0 {
                     return Err(SmtParserError::ClosingParenWithoutOpening);
                 }
-                stack.push(Open);
+                stack.push(Open(false));
             }
             Token::Close => {
+                if matches!(stack.last(), Some(LetScopeOpenMissingClose)) {
+                    stack.pop().unwrap();
+                    // special open to signify a let scope
+                    stack.push(Open(true));
+                }
                 // find the closest Open
-                if let Some(p) = stack.iter().rev().position(|i| matches!(i, Open)) {
+                if let Some(p) = stack.iter().rev().position(|i| matches!(i, Open(_))) {
                     let open_pos = stack.len() - 1 - p;
                     let pattern = &stack[open_pos + 1..];
-                    let result = parse_pattern(ctx, st, pattern)?;
-                    stack.truncate(open_pos);
-                    stack.push(result);
+
+                    // special case for a `(let ((` prefix which needs to be followed by a definition
+                    let let_def_prefix = open_pos >= 2
+                        && matches!(
+                            &stack[open_pos - 2..open_pos + 1],
+                            [Let, Open(false), Open(false)]
+                        );
+                    if let_def_prefix {
+                        if let [Sym(name), PExpr(e)] = pattern {
+                            let name = std::str::from_utf8(name)?;
+                            st.push_let(name.into(), *e);
+                            // remove pattern and prefix from the stack and replace with let scope token
+                            stack.truncate(open_pos - 2);
+                            stack.push(LetScopeOpenMissingClose);
+                        } else {
+                            return Err(SmtParserError::Pattern(format!(
+                                "Unexpected pattern following `(let (`(: {pattern:?}"
+                            )));
+                        }
+                    } else {
+                        let result = parse_pattern(ctx, st, pattern)?;
+                        // if this is the end of a let scope, we need to pop the definition
+                        if matches!(stack[open_pos], Open(true)) {
+                            st.pop_let();
+                        }
+                        stack.truncate(open_pos);
+                        stack.push(result);
+                    }
                 } else {
                     // no matching open parenthesis
                     orphan_closing_count += 1;
@@ -174,8 +261,9 @@ pub fn parse_get_value_response(ctx: &mut Context, input: &[u8]) -> Result<ExprR
     skip_expr(&mut lexer)?;
 
     // parse next expr
-    let mut st = FxHashMap::default();
-    let expr = parse_expr_internal(ctx, &mut st, &mut lexer)?;
+    let st = FxHashMap::default();
+    let mut nested = NestedSymbolTable::new(&st);
+    let expr = parse_expr_internal(ctx, &mut nested, &mut lexer)?;
     skip_close_parens(&mut lexer)?;
     skip_close_parens(&mut lexer)?;
     Ok(expr)
@@ -233,12 +321,14 @@ pub fn parse_command(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Resul
                 }
             }
             b"assert" => {
-                let expr = parse_expr_internal(ctx, st, &mut lexer)?;
+                let mut nested = NestedSymbolTable::new(st);
+                let expr = parse_expr_internal(ctx, &mut nested, &mut lexer)?;
                 SmtCommand::Assert(expr)
             }
             b"declare-const" => {
                 let name = String::from_utf8_lossy(value_token(&mut lexer)?);
-                let tpe = parse_type(ctx, st, &mut lexer)?;
+                let mut nested = NestedSymbolTable::new(st);
+                let tpe = parse_type(ctx, &mut nested, &mut lexer)?;
                 let name_ref = ctx.string(name);
                 let sym = ctx.symbol(name_ref, tpe);
                 SmtCommand::DeclareConst(sym)
@@ -248,15 +338,17 @@ pub fn parse_command(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Resul
                 let name = String::from_utf8_lossy(value_token(&mut lexer)?);
                 skip_open_parens(&mut lexer)?;
                 skip_close_parens(&mut lexer)?;
-                let tpe = parse_type(ctx, st, &mut lexer)?;
+                let mut nested = NestedSymbolTable::new(st);
+                let tpe = parse_type(ctx, &mut nested, &mut lexer)?;
                 let name_ref = ctx.string(name);
                 let sym = ctx.symbol(name_ref, tpe);
                 SmtCommand::DeclareConst(sym)
             }
             b"define-const" => {
                 let name = String::from_utf8_lossy(value_token(&mut lexer)?);
-                let tpe = parse_type(ctx, st, &mut lexer)?;
-                let value = parse_expr_internal(ctx, st, &mut lexer)?;
+                let mut nested = NestedSymbolTable::new(st);
+                let tpe = parse_type(ctx, &mut nested, &mut lexer)?;
+                let value = parse_expr_internal(ctx, &mut nested, &mut lexer)?;
                 // TODO: turn this into a proper error
                 debug_assert_eq!(ctx[value].get_type(ctx), tpe);
                 let name_ref = ctx.string(name);
@@ -268,8 +360,9 @@ pub fn parse_command(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Resul
                 let name = String::from_utf8_lossy(value_token(&mut lexer)?);
                 skip_open_parens(&mut lexer)?;
                 skip_close_parens(&mut lexer)?;
-                let tpe = parse_type(ctx, st, &mut lexer)?;
-                let value = parse_expr_internal(ctx, st, &mut lexer)?;
+                let mut nested = NestedSymbolTable::new(st);
+                let tpe = parse_type(ctx, &mut nested, &mut lexer)?;
+                let value = parse_expr_internal(ctx, &mut nested, &mut lexer)?;
                 // TODO: turn this into a proper error
                 debug_assert_eq!(ctx[value].get_type(ctx), tpe);
                 let name_ref = ctx.string(name);
@@ -277,7 +370,8 @@ pub fn parse_command(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Resul
                 SmtCommand::DefineConst(sym, value)
             }
             b"check-sat-assuming" => {
-                let expressions = vec![parse_expr_internal(ctx, st, &mut lexer)?];
+                let mut nested = NestedSymbolTable::new(st);
+                let expressions = vec![parse_expr_internal(ctx, &mut nested, &mut lexer)?];
                 // TODO: deal with more than one expression
                 SmtCommand::CheckSatAssuming(expressions)
             }
@@ -291,7 +385,8 @@ pub fn parse_command(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Resul
                 }
             }
             b"get-value" => {
-                let expr = parse_expr_internal(ctx, st, &mut lexer)?;
+                let mut nested = NestedSymbolTable::new(st);
+                let expr = parse_expr_internal(ctx, &mut nested, &mut lexer)?;
                 SmtCommand::GetValue(expr)
             }
             _ => {
@@ -366,17 +461,17 @@ fn skip_expr(lexer: &mut Lexer) -> Result<()> {
     ))
 }
 
-fn lookup_sym(st: &SymbolTable, name: &[u8]) -> Result<ExprRef> {
+fn lookup_sym(st: &mut NestedSymbolTable, name: &[u8]) -> Result<ExprRef> {
     let name = std::str::from_utf8(name)?;
     match st.get(name) {
-        Some(s) => Ok(*s),
+        Some(s) => Ok(s),
         None => Err(SmtParserError::UnknownSymbol(name.to_string())),
     }
 }
 
 fn parse_pattern<'a>(
     ctx: &mut Context,
-    st: &SymbolTable,
+    st: &mut NestedSymbolTable,
     pattern: &[ParserItem<'a>],
 ) -> Result<ParserItem<'a>> {
     use NAry::*;
@@ -520,7 +615,7 @@ fn parse_pattern<'a>(
 }
 
 fn bin_op<'a>(
-    st: &SymbolTable,
+    st: &mut NestedSymbolTable,
     name: &str,
     args: &[ParserItem<'a>],
     mut op: impl FnMut(ExprRef, ExprRef) -> ExprRef,
@@ -580,7 +675,7 @@ fn parse_width(value: &[u8]) -> Result<WidthInt> {
 }
 
 /// errors if the item cannot be directly converted to an expression
-fn expr(st: &SymbolTable, item: &ParserItem<'_>) -> Result<ExprRef> {
+fn expr(st: &mut NestedSymbolTable, item: &ParserItem<'_>) -> Result<ExprRef> {
     match item {
         ParserItem::PExpr(e) => Ok(*e),
         ParserItem::Sym(name) => lookup_sym(st, name),
@@ -591,7 +686,7 @@ fn expr(st: &SymbolTable, item: &ParserItem<'_>) -> Result<ExprRef> {
 /// Parses things that can be represented by a single token.
 fn early_parse_single_token<'a>(
     ctx: &mut Context,
-    st: &SymbolTable,
+    st: &mut NestedSymbolTable,
     value: &'a [u8],
 ) -> Result<ParserItem<'a>> {
     if let Some(match_id) = NUM_LIT_REGEX.matches(value).into_iter().next() {
@@ -617,6 +712,7 @@ fn early_parse_single_token<'a>(
     } else {
         match value {
             b"Bool" => Ok(ParserItem::PType(Type::BV(1))),
+            b"let" => Ok(ParserItem::Let),
             other => {
                 let symbol = lookup_sym(st, other).ok().map(ParserItem::PExpr);
                 Ok(symbol.unwrap_or(ParserItem::Sym(value)))
@@ -627,8 +723,8 @@ fn early_parse_single_token<'a>(
 
 /// represents intermediate parser results
 enum ParserItem<'a> {
-    /// opening parenthesis
-    Open,
+    /// `Open(false)`: opening parenthesis, `Open(true)`: `(let (( ... ))` scope start
+    Open(bool),
     /// parsed expression
     PExpr(ExprRef),
     /// parsed type
@@ -643,12 +739,16 @@ enum ParserItem<'a> {
     SExt(WidthInt),
     /// extract (aka slice) function
     Extract(WidthInt, WidthInt),
+    /// let expression
+    Let,
+    /// start of a let scope, e.g., `(let ((...)`
+    LetScopeOpenMissingClose,
 }
 
 impl<'a> Debug for ParserItem<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParserItem::Open => write!(f, "("),
+            ParserItem::Open(false) => write!(f, "("),
             ParserItem::PExpr(e) => write!(f, "{e:?}"),
             ParserItem::PType(t) => write!(f, "{t:?}"),
             ParserItem::Sym(v) => write!(f, "S({})", String::from_utf8_lossy(v)),
@@ -656,6 +756,9 @@ impl<'a> Debug for ParserItem<'a> {
             ParserItem::ZExt(by) => write!(f, "ZExt({by})"),
             ParserItem::SExt(by) => write!(f, "SExt({by})"),
             ParserItem::Extract(hi, lo) => write!(f, "Slice({hi}, {lo})"),
+            ParserItem::Let => write!(f, "let"),
+            ParserItem::LetScopeOpenMissingClose => write!(f, "(let (( ... )"),
+            ParserItem::Open(true) => write!(f, "(let (( ... ))"),
         }
     }
 }
@@ -889,6 +992,16 @@ mod tests {
             expr.serialize_to_str(&ctx),
             "([32'x00000033] x 2^5)[5'b01110 := 32'x00000000][5'b01110 := 32'x00000011]"
         );
+    }
+
+    #[test]
+    fn test_parse_let_expr() {
+        let mut ctx = Context::default();
+        let symbols = FxHashMap::default();
+
+        let smt_str = "(let ((abc #b1)) abc)";
+        let smt_expr = parse_expr(&mut ctx, &symbols, smt_str.as_bytes()).unwrap();
+        assert!(ctx[smt_expr].is_true());
     }
 
     #[test]
