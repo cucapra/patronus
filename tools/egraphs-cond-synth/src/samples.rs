@@ -2,7 +2,7 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use egg::{ENodeOrVar, Id, Language, PatternAst, RecExpr, Var, rewrite};
+use egg::{ENodeOrVar, Id, Language, PatternAst, RecExpr, Var};
 use indicatif::ProgressBar;
 use patronus::expr::traversal::TraversalCmd;
 use patronus::expr::{Context, ExprRef, WidthInt};
@@ -114,7 +114,7 @@ fn check_rule(
     }
 
     let lhs_expr = to_smt(&mut ctx, lhs, lhs_info, assignment);
-    let rhs_expr = to_smt(&mut ctx, rhs, &rhs_info, assignment);
+    let rhs_expr = to_smt(&mut ctx, rhs, rhs_info, assignment);
 
     smt_ctx.push().unwrap();
     let resp = check_eq(&mut ctx, smt_ctx, lhs_expr, rhs_expr);
@@ -135,7 +135,7 @@ pub fn check_eq(
 ) -> CheckSatResponse {
     let is_eq = ctx.equal(lhs_expr, rhs_expr);
     let is_not_eq = ctx.not(is_eq);
-    declare_vars(smt_ctx, &ctx, is_not_eq);
+    declare_vars(smt_ctx, ctx, is_not_eq);
     smt_ctx.assert(ctx, is_not_eq).unwrap();
     smt_ctx.check_sat().unwrap()
 }

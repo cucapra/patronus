@@ -3,8 +3,8 @@
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
 use crate::expr::*;
+use crate::mc::ModelCheckResult;
 use crate::mc::bmc::start_bmc_or_pdr;
-use crate::mc::{ModelCheckResult, TransitionSystemEncoding, UnrollSmtEncoding};
 use crate::smt::*;
 use crate::system::TransitionSystem;
 
@@ -14,7 +14,7 @@ pub fn pdr(
     smt_ctx: &mut impl SolverContext,
     sys: &TransitionSystem,
 ) -> Result<ModelCheckResult> {
-    let mut enc = match start_bmc_or_pdr(ctx, smt_ctx, sys)? {
+    let _enc = match start_bmc_or_pdr(ctx, smt_ctx, sys)? {
         (r, None) => return Ok(r),
         (_, Some(enc)) => enc,
     };

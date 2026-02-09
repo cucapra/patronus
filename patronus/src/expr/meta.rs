@@ -67,7 +67,7 @@ impl<T: Default + Clone + Debug> Index<ExprRef> for SparseExprMap<T> {
 impl<T: Default + Clone + Debug> IndexMut<ExprRef> for SparseExprMap<T> {
     #[inline]
     fn index_mut(&mut self, e: ExprRef) -> &mut Self::Output {
-        self.inner.entry(e).or_insert(T::default())
+        self.inner.entry(e).or_default()
     }
 }
 

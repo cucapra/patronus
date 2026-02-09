@@ -4,7 +4,7 @@
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
 use baa::{BitVecOps, BitVecValue, Value, WidthInt};
-use clap::{Parser, ValueEnum, arg};
+use clap::{Parser, ValueEnum};
 use patronus::expr::*;
 use patronus::sim::*;
 use patronus::system::*;
@@ -105,7 +105,7 @@ fn main() {
             // TODO: maybe filter
             if expr.get_type(&ctx).is_bit_vector() {
                 // we do not print arrays
-                signals_to_print.push((name.clone(), expr.clone()));
+                signals_to_print.push((name.clone(), *expr));
             }
         }
         signals_to_print.sort_by_key(|(name, _)| name.clone());
@@ -169,7 +169,7 @@ fn do_step(
             if cell_id == input.0 {
                 // apply input
                 let trimmed = cell.trim();
-                if trimmed.to_ascii_lowercase() != "x" {
+                if !trimmed.eq_ignore_ascii_case("x") {
                     let value = u64::from_str_radix(trimmed, 10).unwrap();
                     let width = input.3;
                     sim.set(input.1, &BitVecValue::from_u64(value, width));

@@ -43,7 +43,7 @@ pub fn bmc(
         // assume all constraints hold in this step
         for expr_ref in constraints.iter() {
             let expr = enc.get_at(ctx, *expr_ref, k);
-            smt_ctx.assert(&ctx, expr)?;
+            smt_ctx.assert(ctx, expr)?;
         }
 
         // make sure the constraints are not contradictory
@@ -58,9 +58,9 @@ pub fn bmc(
         }
 
         if check_bad_states_individually {
-            for (_bs_id, expr_ref) in bad_states.iter().enumerate() {
+            for expr_ref in bad_states.iter() {
                 let expr = enc.get_at(ctx, *expr_ref, k);
-                let res = check_assuming(&ctx, smt_ctx, [expr])?;
+                let res = check_assuming(ctx, smt_ctx, [expr])?;
 
                 // count expression uses
                 let use_counts = count_expr_uses(ctx, sys);
@@ -76,7 +76,7 @@ pub fn bmc(
                 .map(|expr_ref| enc.get_at(ctx, *expr_ref, k))
                 .collect::<Vec<_>>();
             let any_bad = all_bads.into_iter().reduce(|a, b| ctx.or(a, b)).unwrap();
-            let res = check_assuming(&ctx, smt_ctx, [any_bad])?;
+            let res = check_assuming(ctx, smt_ctx, [any_bad])?;
 
             // count expression uses
             let use_counts = count_expr_uses(ctx, sys);
@@ -119,7 +119,7 @@ pub(crate) fn start_bmc_or_pdr<S: SolverContext>(
     smt_ctx.set_logic(logic)?;
 
     // TODO: maybe add support for the more compact SMT encoding
-    let mut enc = UnrollSmtEncoding::new(ctx, sys, false);
+    let enc = UnrollSmtEncoding::new(ctx, sys, false);
     enc.define_header(smt_ctx)?;
 
     Ok((ModelCheckResult::Unknown, Some(enc)))
@@ -366,10 +366,10 @@ impl UnrollSmtEncoding {
                 let name = ctx.string(name_at(&ctx[info.name], step).into());
                 let symbol_at = ctx.symbol(name, tpe);
                 if ctx[*expr].is_symbol() {
-                    smt_ctx.declare_const(&ctx, symbol_at)?;
+                    smt_ctx.declare_const(ctx, symbol_at)?;
                 } else {
                     let value = self.expr_in_step(ctx, *expr, step);
-                    smt_ctx.define_const(&ctx, symbol_at, value)?;
+                    smt_ctx.define_const(ctx, symbol_at, value)?;
                 }
             }
         }
