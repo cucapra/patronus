@@ -2,9 +2,7 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::expr::{
-    ArrayType, Context, ExprRef, SerializableIrNode, StringRef, Type, TypeCheck, WidthInt,
-};
+use crate::expr::{ArrayType, Context, ExprRef, SerializableIrNode, Type, TypeCheck, WidthInt};
 use crate::smt::{Logic, SmtCommand};
 use regex::bytes::RegexSet;
 use rustc_hash::FxHashMap;
@@ -175,49 +173,36 @@ fn parse_expr_or_type(
                 if orphan_closing_count > 0 {
                     return Err(SmtParserError::ClosingParenWithoutOpening);
                 }
-                stack.push(Open(false));
+
+                // Open parenthesis tokens get consumed into a Let
+                // - "let (" becomes `Let(1)`
+                // - "let ((" becomes `Let(2)`
+                if let Some(Let(parens)) = stack.last() {
+                    debug_assert!(
+                        *parens < 2,
+                        "We never expect parens to exceed two. But could that happen?"
+                    );
+                    *stack.last_mut().unwrap() = Let(parens + 1);
+                } else {
+                    stack.push(Open(false));
+                }
             }
             Token::Close => {
-                if matches!(stack.last(), Some(LetScopeOpenMissingClose)) {
-                    stack.pop().unwrap();
-                    // special open to signify a let scope
-                    stack.push(Open(true));
-                } else {
-                    // find the closest Open
-                    if let Some(p) = stack.iter().rev().position(|i| matches!(i, Open(_))) {
-                        let open_pos = stack.len() - 1 - p;
-                        let pattern = &stack[open_pos + 1..];
-
-                        // special case for a `(let ((` prefix which needs to be followed by a definition
-                        let let_def_prefix = open_pos >= 3
-                            && matches!(
-                                &stack[open_pos - 3..open_pos + 1],
-                                [Open(false), Let, Open(false), Open(false)]
-                            );
-                        if let_def_prefix {
-                            if let [Sym(name), PExpr(e)] = pattern {
-                                let name = std::str::from_utf8(name)?;
-                                st.push_let(name.into(), *e);
-                                // remove pattern and prefix from the stack and replace with let scope token
-                                stack.truncate(open_pos - 3);
-                                stack.push(LetScopeOpenMissingClose);
-                            } else {
-                                return Err(SmtParserError::Pattern(format!(
-                                    "Unexpected pattern following `(let (`(: {pattern:?}"
-                                )));
-                            }
-                        } else {
+                match stack.last() {
+                    // `let (( ... )` -> `let (( ... ))`
+                    Some(LetScopeOpenMissingClose) => *stack.last_mut().unwrap() = Open(true),
+                    _ => {
+                        // find the closest Open
+                        if let Some(p) = stack.iter().rev().position(|i| matches!(i, Open(_))) {
+                            let open_pos = stack.len() - 1 - p;
+                            let pattern = &stack[open_pos + 1..];
                             let result = parse_pattern(ctx, st, pattern)?;
-                            // if this is the end of a let scope, we need to pop the definition
-                            if matches!(stack[open_pos], Open(true)) {
-                                st.pop_let();
-                            }
                             stack.truncate(open_pos);
                             stack.push(result);
+                        } else {
+                            // no matching open parenthesis
+                            orphan_closing_count += 1;
                         }
-                    } else {
-                        // no matching open parenthesis
-                        orphan_closing_count += 1;
                     }
                 }
             }
@@ -225,8 +210,14 @@ fn parse_expr_or_type(
                 if orphan_closing_count > 0 {
                     return Err(SmtParserError::ClosingParenWithoutOpening);
                 }
-                // we eagerly parse expressions and types that are represented by a single token
-                stack.push(early_parse_single_token(ctx, st, value)?);
+                // If this token follows a `let ((` we expect the name of a new symbols
+                // which we do _not_ want to substitute with an existing entry from the symbol table
+                if matches!(stack.last(), Some(Let(2))) {
+                    stack.push(early_parse_single_token(ctx, None, value)?);
+                } else {
+                    // we eagerly parse expressions and types that are represented by a single token
+                    stack.push(early_parse_single_token(ctx, Some(st), value)?);
+                }
             }
             Token::EscapedValue(value) => {
                 if orphan_closing_count > 0 {
@@ -611,6 +602,13 @@ fn parse_pattern<'a>(
         [Sym(b"_"), Sym(b"extract"), Sym(hi), Sym(lo)] => {
             Extract(parse_width(hi)?, parse_width(lo)?)
         }
+        // Let Definitions
+        [Let(2), Sym(name), PExpr(value)] => {
+            let name = std::str::from_utf8(name)?;
+            st.push_let(name.into(), *value);
+            // consume definition and implicit `)` token
+            LetScopeOpenMissingClose
+        }
         other => {
             return Err(SmtParserError::Pattern(format!("{other:?}")));
         }
@@ -690,7 +688,7 @@ fn expr(st: &mut NestedSymbolTable, item: &ParserItem<'_>) -> Result<ExprRef> {
 /// Parses things that can be represented by a single token.
 fn early_parse_single_token<'a>(
     ctx: &mut Context,
-    st: &mut NestedSymbolTable,
+    st: Option<&mut NestedSymbolTable>,
     value: &'a [u8],
 ) -> Result<ParserItem<'a>> {
     if let Some(match_id) = NUM_LIT_REGEX.matches(value).into_iter().next() {
@@ -716,9 +714,11 @@ fn early_parse_single_token<'a>(
     } else {
         match value {
             b"Bool" => Ok(ParserItem::PType(Type::BV(1))),
-            b"let" => Ok(ParserItem::Let),
+            b"let" => Ok(ParserItem::Let(0)),
             other => {
-                let symbol = lookup_sym(st, other).ok().map(ParserItem::PExpr);
+                let symbol = st
+                    .and_then(|st| lookup_sym(st, other).ok())
+                    .map(ParserItem::PExpr);
                 Ok(symbol.unwrap_or(ParserItem::Sym(value)))
             }
         }
@@ -743,8 +743,8 @@ enum ParserItem<'a> {
     SExt(WidthInt),
     /// extract (aka slice) function
     Extract(WidthInt, WidthInt),
-    /// let expression
-    Let,
+    /// let expression w/ opening parenthesis count
+    Let(u8),
     /// start of a let scope, e.g., `(let ((...)`
     LetScopeOpenMissingClose,
 }
@@ -760,7 +760,13 @@ impl<'a> Debug for ParserItem<'a> {
             ParserItem::ZExt(by) => write!(f, "ZExt({by})"),
             ParserItem::SExt(by) => write!(f, "SExt({by})"),
             ParserItem::Extract(hi, lo) => write!(f, "Slice({hi}, {lo})"),
-            ParserItem::Let => write!(f, "let"),
+            ParserItem::Let(parens) => {
+                write!(f, "let")?;
+                for _ in 0..*parens {
+                    write!(f, "(")?;
+                }
+                Ok(())
+            }
             ParserItem::LetScopeOpenMissingClose => write!(f, "(let (( ... )"),
             ParserItem::Open(true) => write!(f, "(let (( ... ))"),
         }
@@ -1032,6 +1038,11 @@ mod tests {
         let mut ctx = Context::default();
         let smt_expr = test_parse_expr(&mut ctx, "(let ((abc #b1)) abc)").unwrap();
         assert!(ctx[smt_expr].is_true());
+
+        // test shadowing
+        let smt_expr =
+            test_parse_expr(&mut ctx, "(let ((abc #b1)) (let ((abc #b0)) abc))").unwrap();
+        assert!(ctx[smt_expr].is_false());
     }
 
     #[test]
