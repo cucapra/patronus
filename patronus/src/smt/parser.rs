@@ -2,7 +2,9 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::expr::{ArrayType, Context, ExprRef, SerializableIrNode, Type, TypeCheck, WidthInt};
+use crate::expr::{
+    ArrayType, Context, ExprRef, SerializableIrNode, StringRef, Type, TypeCheck, WidthInt,
+};
 use crate::smt::{Logic, SmtCommand};
 use regex::bytes::RegexSet;
 use rustc_hash::FxHashMap;
@@ -113,6 +115,7 @@ fn parse_expr_or_type(
     // keep track of how many closing parenthesis without an opening one are encountered
     let mut orphan_closing_count = 0u64;
     for token in lexer {
+        println!("{token:?}");
         match token {
             Token::Open => {
                 if orphan_closing_count > 0 {
@@ -124,8 +127,17 @@ fn parse_expr_or_type(
                 // find the closest Open
                 if let Some(p) = stack.iter().rev().position(|i| matches!(i, Open)) {
                     let open_pos = stack.len() - 1 - p;
+                    // check to see if there is a [Let, Open, Open] prefix, which means that we are
+                    // dealing with a let definition
+                    let is_let_def = open_pos >= 2
+                        && matches!(&stack[open_pos - 2..open_pos + 1], [Let, Open, Open]);
                     let pattern = &stack[open_pos + 1..];
-                    let result = parse_pattern(ctx, st, pattern)?;
+                    println!("{pattern:?}");
+                    let result = if is_let_def {
+                        parse_let_definition(ctx, pattern)?
+                    } else {
+                        parse_pattern(ctx, st, pattern)?
+                    };
                     stack.truncate(open_pos);
                     stack.push(result);
                 } else {
@@ -138,7 +150,8 @@ fn parse_expr_or_type(
                     return Err(SmtParserError::ClosingParenWithoutOpening);
                 }
                 // we eagerly parse expressions and types that are represented by a single token
-                stack.push(early_parse_single_token(ctx, st, value)?);
+                let parsed = early_parse_single_token(ctx, st, value)?;
+                stack.push(parsed);
             }
             Token::EscapedValue(value) => {
                 if orphan_closing_count > 0 {
@@ -374,6 +387,25 @@ fn lookup_sym(st: &SymbolTable, name: &[u8]) -> Result<ExprRef> {
     }
 }
 
+fn parse_let_definition<'a>(
+    ctx: &mut Context,
+    pattern: &[ParserItem<'a>],
+) -> Result<ParserItem<'a>> {
+    use NAry::*;
+    use ParserItem::*;
+
+    let item = match pattern {
+        [Sym(name), PExpr(e)] => LetDefinition(name, *e),
+        other => {
+            return Err(SmtParserError::Pattern(format!(
+                "Unexpected pattern after `(let ((`: {other:?}"
+            )));
+        }
+    };
+
+    Ok(item)
+}
+
 fn parse_pattern<'a>(
     ctx: &mut Context,
     st: &SymbolTable,
@@ -512,6 +544,8 @@ fn parse_pattern<'a>(
         [Sym(b"_"), Sym(b"extract"), Sym(hi), Sym(lo)] => {
             Extract(parse_width(hi)?, parse_width(lo)?)
         }
+        // Pass through single let definitions
+        [LetDefinition(name, e)] => LetDefinition(name, *e),
         other => {
             return Err(SmtParserError::Pattern(format!("{other:?}")));
         }
@@ -617,6 +651,7 @@ fn early_parse_single_token<'a>(
     } else {
         match value {
             b"Bool" => Ok(ParserItem::PType(Type::BV(1))),
+            b"let" => Ok(ParserItem::Let),
             other => {
                 let symbol = lookup_sym(st, other).ok().map(ParserItem::PExpr);
                 Ok(symbol.unwrap_or(ParserItem::Sym(value)))
@@ -643,12 +678,18 @@ enum ParserItem<'a> {
     SExt(WidthInt),
     /// extract (aka slice) function
     Extract(WidthInt, WidthInt),
+    /// let function
+    Let,
+    /// symbol defined by a let function
+    LetDefinition(&'a [u8], ExprRef),
 }
 
 impl<'a> Debug for ParserItem<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             ParserItem::Open => write!(f, "("),
+            ParserItem::Let => write!(f, "let"),
+            ParserItem::LetDefinition(n, e) => write!(f, "{n:?} = {e:?}"),
             ParserItem::PExpr(e) => write!(f, "{e:?}"),
             ParserItem::PType(t) => write!(f, "{t:?}"),
             ParserItem::Sym(v) => write!(f, "S({})", String::from_utf8_lossy(v)),
@@ -889,6 +930,15 @@ mod tests {
             expr.serialize_to_str(&ctx),
             "([32'x00000033] x 2^5)[5'b01110 := 32'x00000000][5'b01110 := 32'x00000011]"
         );
+    }
+
+    #[test]
+    fn test_let() {
+        let smt_str = "(let ((name false)) name)";
+        let mut ctx = Context::default();
+        let symbols = FxHashMap::default();
+        let expr = parse_expr(&mut ctx, &symbols, smt_str.as_bytes()).unwrap();
+        assert_eq!(expr, ctx.get_false());
     }
 
     #[test]

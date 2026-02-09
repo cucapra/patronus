@@ -94,7 +94,10 @@ fn read_cmd(
     }
 
     // debug print
-    let cmd = parse_command(ctx, st, cmd_str.as_bytes()).expect("failed to parse command");
+    let cmd = match parse_command(ctx, st, cmd_str.as_bytes()) {
+        Ok(cmd) => cmd,
+        Err(error) => panic!("{error}"),
+    };
 
     // add symbols to table
     match cmd {
