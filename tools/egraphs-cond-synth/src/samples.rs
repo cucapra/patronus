@@ -557,7 +557,7 @@ pub fn instantiate_pattern<L: Language>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egg::Analysis;
+    use egg::{Analysis, rewrite};
     use patronus::expr::TypeCheck;
 
     fn extract_patterns<L: Language, A: Analysis<L>>(
