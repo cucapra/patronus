@@ -1,6 +1,7 @@
 // Copyright 2023 The Regents of the University of California
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@berkeley.edu>
+mod analysis;
 mod context;
 mod eval;
 mod foreach;
@@ -13,6 +14,7 @@ mod transform;
 pub mod traversal;
 mod types;
 
+pub use analysis::{UseCountInt, count_expr_uses, update_expr_child_uses};
 pub use context::{Builder, Context, ExprRef, StringRef};
 pub use eval::{SymbolValueStore, eval_array_expr, eval_bv_expr, eval_expr};
 pub use foreach::ForEachChild;

@@ -7,9 +7,7 @@ use super::{State, TransitionSystem};
 use crate::expr::*;
 use rustc_hash::FxHashSet;
 
-pub type UseCountInt = u16;
-
-pub fn count_expr_uses(ctx: &Context, sys: &TransitionSystem) -> Vec<UseCountInt> {
+pub fn count_system_expr_uses(ctx: &Context, sys: &TransitionSystem) -> Vec<UseCountInt> {
     internal_count_expr_uses(ctx, sys, false)
 }
 
@@ -48,7 +46,7 @@ fn internal_count_expr_uses(
             }
         }
 
-        count_uses(ctx, expr, &mut use_count, &mut todo);
+        update_expr_child_uses(ctx, expr, &mut use_count, &mut todo);
     }
 
     use_count.into_vec()
@@ -133,40 +131,6 @@ fn cone_of_influence_impl(
     out
 }
 
-/// Counts how often expressions are used. This version _does not_ follow any state symbols.
-fn simple_count_expr_uses(ctx: &Context, roots: Vec<ExprRef>) -> impl ExprMap<UseCountInt> {
-    let mut use_count = SparseExprMap::default();
-    let mut todo = roots;
-
-    // ensure that all roots start with count 1
-    for expr in todo.iter() {
-        use_count[*expr] = 1;
-    }
-
-    while let Some(expr) = todo.pop() {
-        count_uses(ctx, expr, &mut use_count, &mut todo);
-    }
-
-    use_count
-}
-
-#[inline]
-fn count_uses(
-    ctx: &Context,
-    expr: ExprRef,
-    use_count: &mut impl ExprMap<UseCountInt>,
-    todo: &mut Vec<ExprRef>,
-) {
-    ctx[expr].for_each_child(|child| {
-        let count = use_count[*child];
-        let is_first_use = count == 0;
-        use_count[*child] = count.saturating_add(1);
-        if is_first_use {
-            todo.push(*child);
-        }
-    });
-}
-
 #[derive(Debug, Clone)]
 pub struct RootInfo {
     pub expr: ExprRef,
@@ -224,12 +188,12 @@ fn determine_simples_uses(
     sys: &TransitionSystem,
     include_output: bool,
 ) -> impl ExprMap<Uses> {
-    let init = simple_count_expr_uses(ctx, sys.get_init_exprs());
-    let next = simple_count_expr_uses(ctx, sys.get_next_exprs());
+    let init = count_expr_uses(ctx, sys.get_init_exprs());
+    let next = count_expr_uses(ctx, sys.get_next_exprs());
     let other = if include_output {
-        simple_count_expr_uses(ctx, sys.get_assert_assume_output_exprs())
+        count_expr_uses(ctx, sys.get_assert_assume_output_exprs())
     } else {
-        simple_count_expr_uses(ctx, sys.get_assert_assume_exprs())
+        count_expr_uses(ctx, sys.get_assert_assume_exprs())
     };
 
     // collect all expressions

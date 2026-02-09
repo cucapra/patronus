@@ -14,6 +14,9 @@ pub fn serialize_expr(out: &mut impl Write, ctx: &Context, expr: ExprRef) -> Res
     // we need to visit each expression "number of children + 1" times
     let mut todo: Vec<(ExprRef, u32, bool)> = vec![(expr, 0, false)];
 
+    // analyze uses to print out DAG in linear size using let expressions
+    // let uses =
+
     while let Some((e, pc, must_be_bit_vec)) = todo.pop() {
         let expr = &ctx[e];
         let result_is_1_bit = e.get_bv_type(ctx) == Some(1);
@@ -512,4 +515,7 @@ mod tests {
         let bv_lit = ctx.bit_vec_val(3, 3);
         assert_eq!(s_expr(&ctx, bv_lit), "#b011");
     }
+
+    #[test]
+    fn test_serialize_dag() {}
 }

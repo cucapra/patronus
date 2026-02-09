@@ -7,7 +7,7 @@ use crate::expr::*;
 use crate::mc::Witness;
 use crate::mc::types::InitValue;
 use crate::smt::*;
-use crate::system::analysis::{UseCountInt, Uses, analyze_for_serialization, count_expr_uses};
+use crate::system::analysis::{Uses, analyze_for_serialization, count_system_expr_uses};
 use crate::system::{State, TransitionSystem};
 use baa::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -63,7 +63,7 @@ pub fn bmc(
                 let res = check_assuming(ctx, smt_ctx, [expr])?;
 
                 // count expression uses
-                let use_counts = count_expr_uses(ctx, sys);
+                let use_counts = count_system_expr_uses(ctx, sys);
                 if res == CheckSatResponse::Sat {
                     let wit = get_witness(sys, ctx, &use_counts, smt_ctx, &enc, k, &bad_states)?;
                     return Ok(ModelCheckResult::Fail(wit));
@@ -79,7 +79,7 @@ pub fn bmc(
             let res = check_assuming(ctx, smt_ctx, [any_bad])?;
 
             // count expression uses
-            let use_counts = count_expr_uses(ctx, sys);
+            let use_counts = count_system_expr_uses(ctx, sys);
             if res == CheckSatResponse::Sat {
                 let wit = get_witness(sys, ctx, &use_counts, smt_ctx, &enc, k, &bad_states)?;
                 return Ok(ModelCheckResult::Fail(wit));
