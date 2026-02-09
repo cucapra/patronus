@@ -170,8 +170,6 @@ fn parse_expr_or_type(
     // keep track of how many closing parenthesis without an opening one are encountered
     let mut orphan_closing_count = 0u64;
     for token in lexer {
-        dbg!(&token, &stack);
-
         match token {
             Token::Open => {
                 if orphan_closing_count > 0 {
@@ -191,17 +189,17 @@ fn parse_expr_or_type(
                         let pattern = &stack[open_pos + 1..];
 
                         // special case for a `(let ((` prefix which needs to be followed by a definition
-                        let let_def_prefix = open_pos >= 2
+                        let let_def_prefix = open_pos >= 3
                             && matches!(
-                                &stack[open_pos - 2..open_pos + 1],
-                                [Let, Open(false), Open(false)]
+                                &stack[open_pos - 3..open_pos + 1],
+                                [Open(false), Let, Open(false), Open(false)]
                             );
                         if let_def_prefix {
                             if let [Sym(name), PExpr(e)] = pattern {
                                 let name = std::str::from_utf8(name)?;
                                 st.push_let(name.into(), *e);
                                 // remove pattern and prefix from the stack and replace with let scope token
-                                stack.truncate(open_pos - 2);
+                                stack.truncate(open_pos - 3);
                                 stack.push(LetScopeOpenMissingClose);
                             } else {
                                 return Err(SmtParserError::Pattern(format!(
