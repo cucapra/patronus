@@ -1,9 +1,9 @@
 // Copyright 2023 The Regents of the University of California
-// Copyright 2024 Cornell University
+// Copyright 2024-2026 Cornell University
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::expr::{Context, Expr, ExprRef, ForEachChild, Type, TypeCheck};
+use crate::expr::{Context, Expr, ExprRef, ForEachChild, Type, TypeCheck, count_expr_uses};
 use crate::smt::solver::SmtCommand;
 use baa::BitVecOps;
 use std::io::Write;
@@ -15,7 +15,7 @@ pub fn serialize_expr(out: &mut impl Write, ctx: &Context, expr: ExprRef) -> Res
     let mut todo: Vec<(ExprRef, u32, bool)> = vec![(expr, 0, false)];
 
     // analyze uses to print out DAG in linear size using let expressions
-    // let uses =
+    let uses = count_expr_uses(ctx, vec![expr]);
 
     while let Some((e, pc, must_be_bit_vec)) = todo.pop() {
         let expr = &ctx[e];
@@ -218,6 +218,11 @@ pub fn serialize_expr(out: &mut impl Write, ctx: &Context, expr: ExprRef) -> Res
         }
     }
     Ok(())
+}
+
+/// simple expressions like symbols or constants should never by let-bound
+fn is_simple_expr(e: &Expr) -> bool {
+    e.num_children() == 0
 }
 
 /// Returns whether the expressions always consumes bit vectors, even with 1-bit arguments
