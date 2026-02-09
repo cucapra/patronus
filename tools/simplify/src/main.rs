@@ -74,12 +74,16 @@ fn read_cmd(
     st: &mut SymbolTable,
 ) -> std::io::Result<Option<SmtCommand>> {
     let mut cmd_str = String::new();
-    inp.read_line(&mut cmd_str)?;
+    if inp.read_line(&mut cmd_str)? == 0 {
+        return Ok(None); // end of file
+    }
 
     // skip lines that are just comments or empty
     while is_comment(&cmd_str) || cmd_str.trim().is_empty() {
         cmd_str.clear();
-        inp.read_line(&mut cmd_str)?;
+        if inp.read_line(&mut cmd_str)? == 0 {
+            return Ok(None); // end of file
+        }
     }
 
     // ensure that the response contains balanced parentheses
