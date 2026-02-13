@@ -272,6 +272,29 @@ fn test_simplify_concat() {
     );
 }
 
+#[test]
+fn test_simplify_implies() {
+    ts("implies(false, a : bv<1>)", "true");
+    ts("implies(false, true)", "true");
+    ts("implies(false, false)", "true");
+    ts("implies(true, a : bv<1>)", "a : bv<1>");
+    ts("implies(true, true)", "true");
+    ts("implies(true, false)", "false");
+}
+
+#[test]
+fn test_simplify_ugte() {
+    ts("ugte(1'b0, 1'b1)", "false");
+    ts("ugte(1'b1, 1'b0)", "true");
+    ts("ugte(1'b1, 1'b1)", "true");
+    ts("ugte(1'b0, 1'b0)", "true");
+    ts("ugte(3'b101, 3'b011)", "true");
+    ts("ugte(3'b011, 3'b101)", "false");
+    ts("ugte(4'd7, 4'd7)", "true");
+    ts("ugte(4'd15, 4'd10)", "true");
+    ts("ugte(4'd5, 4'd10)", "false");
+}
+
 // from maltese-smt:
 // https://github.com/ucb-bar/maltese-smt/blob/main/test/maltese/smt/SMTSimplifierSpec.scala
 #[test]
@@ -479,6 +502,20 @@ fn test_random_z3_issue_simplification() {
     ts(
         "or(shift_left(and(V : bv<32>, 32'd65535), 32'd17), shift_right(and(V, 32'd65535), 32'd15))",
         "or(concat(V:bv<32>[14:0], 17'x00000), concat(31'x00000000, V[15]))",
+    );
+}
+
+#[test]
+fn test_quiz1_simplification() {
+    // Complex simplification from Quiz1
+    // ugte(1'b0, 1'b1) -> false
+    // not(false) -> true
+    // ugte(true, 1'b1) -> true (both are bitvectors of width 1)
+    // not(true) -> false
+    // implies(false, reset) -> true
+    ts(
+        "implies(not(ugte(not(ugte(1'b0, 1'b1)), 1'b1)), reset: bv<1>)",
+        "true",
     );
 }
 

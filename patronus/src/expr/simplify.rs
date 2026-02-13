@@ -52,6 +52,8 @@ pub(crate) fn simplify(ctx: &mut Context, expr: ExprRef, children: &[ExprRef]) -
         (Expr::BVAnd(..), [a, b]) => simplify_bv_and(ctx, *a, *b),
         (Expr::BVOr(..), [a, b]) => simplify_bv_or(ctx, *a, *b),
         (Expr::BVXor(..), [a, b]) => simplify_bv_xor(ctx, *a, *b),
+        (Expr::BVImplies(..), [a, b]) => simplify_bv_implies(ctx, *a, *b),
+        (Expr::BVGreaterEqual(..), [a, b]) => simplify_bv_greater_equal(ctx, *a, *b),
         (Expr::BVAdd(..), [a, b]) => simplify_bv_add(ctx, *a, *b),
         (Expr::BVMul(..), [a, b]) => simplify_bv_mul(ctx, *a, *b),
         (Expr::BVShiftLeft(_, _, w), [a, b]) => simplify_bv_shift_left(ctx, *a, *b, w),
@@ -330,6 +332,33 @@ fn simplify_bv_xor(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef>
                 _ => None,
             }
         }
+    }
+}
+
+fn simplify_bv_implies(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef> {
+    // implies(a, b) is equivalent to not(a) or b
+    // Check if premise (a) is a constant
+    if let Expr::BVLiteral(va) = ctx[a] {
+        if va.get(ctx).is_false() {
+            // implies(false, _) -> true
+            return Some(ctx.get_true());
+        } else {
+            // implies(true, b) -> b
+            return Some(b);
+        }
+    }
+
+    None
+}
+
+fn simplify_bv_greater_equal(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef> {
+    // If both operands are literals, evaluate on the spot
+    match (&ctx[a], &ctx[b]) {
+        (Expr::BVLiteral(va), Expr::BVLiteral(vb)) => {
+            let result = va.get(ctx).is_greater_or_equal(&vb.get(ctx));
+            Some(ctx.bv_lit(&result.into()))
+        }
+        _ => None,
     }
 }
 
