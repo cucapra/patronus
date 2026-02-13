@@ -237,27 +237,28 @@ fn check_width_consistency(pattern: &Pattern<Arith>) {
     let exprs = pattern.ast.as_ref();
     for e_node_or_var in exprs.iter() {
         if let ENodeOrVar::ENode(expr) = e_node_or_var
-            && is_bin_op(expr) {
-                // w, w_a, s_a, a, w_b, s_b, b
-                let a_width_id = usize::from(expr.children()[1]);
-                let a_id = usize::from(expr.children()[3]);
-                if let Some(a_op_out_width_id) = get_output_width_id(&exprs[a_id]) {
-                    assert_eq!(
-                        a_width_id, a_op_out_width_id,
-                        "In `{expr}`, subexpression `{}` has inconsistent width: {} != {}",
-                        &exprs[a_id], &exprs[a_width_id], &exprs[a_op_out_width_id]
-                    );
-                }
-                let b_width_id = usize::from(expr.children()[4]);
-                let b_id = usize::from(expr.children()[6]);
-                if let Some(b_op_out_width_id) = get_output_width_id(&exprs[b_id]) {
-                    assert_eq!(
-                        b_width_id, b_op_out_width_id,
-                        "In `{expr}`, subexpression `{}` has inconsistent width: {} != {}",
-                        &exprs[b_id], &exprs[b_width_id], &exprs[b_op_out_width_id]
-                    );
-                }
+            && is_bin_op(expr)
+        {
+            // w, w_a, s_a, a, w_b, s_b, b
+            let a_width_id = usize::from(expr.children()[1]);
+            let a_id = usize::from(expr.children()[3]);
+            if let Some(a_op_out_width_id) = get_output_width_id(&exprs[a_id]) {
+                assert_eq!(
+                    a_width_id, a_op_out_width_id,
+                    "In `{expr}`, subexpression `{}` has inconsistent width: {} != {}",
+                    &exprs[a_id], &exprs[a_width_id], &exprs[a_op_out_width_id]
+                );
             }
+            let b_width_id = usize::from(expr.children()[4]);
+            let b_id = usize::from(expr.children()[6]);
+            if let Some(b_op_out_width_id) = get_output_width_id(&exprs[b_id]) {
+                assert_eq!(
+                    b_width_id, b_op_out_width_id,
+                    "In `{expr}`, subexpression `{}` has inconsistent width: {} != {}",
+                    &exprs[b_id], &exprs[b_width_id], &exprs[b_op_out_width_id]
+                );
+            }
+        }
     }
 }
 

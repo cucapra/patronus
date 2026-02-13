@@ -112,9 +112,10 @@ impl<'a> Parser<'a> {
         // get a better name if none could be determined from the file content
         // this better name is often derived from the filename or other meta info
         if self.sys.name.is_empty()
-            && let Some(name) = backup_name {
-                self.sys.name = name.to_string();
-            }
+            && let Some(name) = backup_name
+        {
+            self.sys.name = name.to_string();
+        }
 
         // possibly improve state names through yosys aliases which look like:
         // better_name = zext(__state__, 0)

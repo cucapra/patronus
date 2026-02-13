@@ -10,4 +10,5 @@ pub use bmc::{
     ModelCheckResult, TransitionSystemEncoding, UnrollSmtEncoding, bmc, check_assuming,
     check_assuming_end, get_smt_value,
 };
+pub use pdr::pdr;
 pub use types::{InitValue, Witness};

@@ -20,6 +20,7 @@ pub struct Wavedump {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum WavedumpError {
     FstError(String),
 }

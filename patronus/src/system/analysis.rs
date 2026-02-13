@@ -29,13 +29,14 @@ fn internal_count_expr_uses(
         if let Some(state) = states.get(&expr) {
             // for states, we also want to mark the initial and the next expression as used
             if let Some(init) = state.init
-                && !ignore_init {
-                    let count = use_count[init];
-                    if count == 0 {
-                        use_count[init] = 1;
-                        todo.push(init);
-                    }
+                && !ignore_init
+            {
+                let count = use_count[init];
+                if count == 0 {
+                    use_count[init] = 1;
+                    todo.push(init);
                 }
+            }
             if let Some(next) = state.next {
                 let count = use_count[next];
                 if count == 0 {
@@ -106,14 +107,16 @@ fn cone_of_influence_impl(
         if let Some(state) = states.get(&expr_ref) {
             if follow_init
                 && let Some(c) = state.init
-                    && !visited.contains(&c) {
-                        todo.push(c);
-                    }
+                && !visited.contains(&c)
+            {
+                todo.push(c);
+            }
             if follow_next
                 && let Some(c) = state.next
-                    && !visited.contains(&c) {
-                        todo.push(c);
-                    }
+                && !visited.contains(&c)
+            {
+                todo.push(c);
+            }
         }
 
         // check to see if this is a state or input

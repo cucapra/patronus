@@ -62,9 +62,9 @@ impl Interpreter {
     }
 
     fn dump_signals(&mut self) {
-        if self.wavedump.is_some() {
-            let signals = self.wavedump.as_ref().unwrap().signals();
-            let values: Vec<_> = signals
+        let values: Option<Vec<_>> = self.wavedump.as_ref().map(|wavedump| {
+            wavedump
+                .signals()
                 .into_iter()
                 .map(|e| {
                     if let Value::BitVec(v) = self.get(e) {
@@ -73,10 +73,10 @@ impl Interpreter {
                         None
                     }
                 })
-                .collect();
-            self.wavedump
-                .as_mut()
-                .unwrap()
+                .collect()
+        });
+        if let (Some(values), Some(wavedump)) = (values, self.wavedump.as_mut()) {
+            wavedump
                 .dump_signals(values, self.step_count)
                 .expect("failed to write signal values");
         }

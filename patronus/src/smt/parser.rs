@@ -198,6 +198,10 @@ fn parse_expr_or_type(
                             let open_pos = stack.len() - 1 - p;
                             let pattern = &stack[open_pos + 1..];
                             let result = parse_pattern(ctx, st, pattern)?;
+                            // check to see if we are closing a let scope
+                            if let Open(true) = stack[open_pos] {
+                                st.pop_let();
+                            }
                             stack.truncate(open_pos);
                             stack.push(result);
                         } else {
@@ -1106,6 +1110,15 @@ mod tests {
         let smt_expr =
             test_parse_expr(&mut ctx, "(let ((abc #b1)) (let ((abc #b0)) abc))").unwrap();
         assert!(ctx[smt_expr].is_false());
+
+        // test that shadowing with outer scope
+        let smt_expr = test_parse_expr(
+            &mut ctx,
+            "(let ((abc #b1)) (bvor (let ((abc #b0)) abc) abc))",
+        )
+        .unwrap();
+        // if we did not call pop_let correctly, we would get or(false, false)
+        assert_eq!(smt_expr.serialize_to_str(&ctx), "or(1'b0, 1'b1)");
     }
 
     #[test]

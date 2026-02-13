@@ -183,6 +183,7 @@ impl Expr {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Copy)]
+#[allow(dead_code)]
 pub struct BVType(WidthInt);
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Copy)]
 pub struct ArrayType {

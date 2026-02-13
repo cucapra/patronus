@@ -229,10 +229,11 @@ impl<'a> Parser<'a> {
 
     fn try_parse_width_int(&mut self) -> Option<WidthInt> {
         if let Some(m) = DEC_NUM_REGEX.find(self.inp)
-            && let Ok(num) = m.as_str().parse() {
-                self.consume_m(&m);
-                return Some(num);
-            }
+            && let Ok(num) = m.as_str().parse()
+        {
+            self.consume_m(&m);
+            return Some(num);
+        }
         None
     }
 
