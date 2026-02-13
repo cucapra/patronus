@@ -10,7 +10,7 @@ readme = "Readme.md"
 license = "BSD-3-Clause"
 rust-version = "1.88.0"
 # used by main patronus library and python bindings
-version = "0.35.0"
+version = "0.36.0"
 
 [workspace.dependencies]
 rustc-hash = "2.x"
