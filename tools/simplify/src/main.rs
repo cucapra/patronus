@@ -4,7 +4,7 @@
 
 use clap::Parser;
 use patronus::expr::*;
-use patronus::smt::{SmtCommand, parse_command, serialize_cmd};
+use patronus::smt::{SmtCommand, parse_command, read_command, serialize_cmd};
 use rustc_hash::FxHashMap;
 use std::io::{BufRead, BufReader, BufWriter};
 use std::path::PathBuf;
@@ -40,7 +40,7 @@ fn main() {
     let mut st = FxHashMap::default();
     let mut simplifier = Simplifier::new(SparseExprMap::default());
     while let Some(cmd) =
-        read_cmd(&mut in_reader, &mut ctx, &mut st).expect("failed to read command")
+        read_command(&mut in_reader, &mut ctx, &mut st).expect("failed to read command")
     {
         let cmd = if args.do_not_simplify {
             cmd
@@ -64,66 +64,4 @@ fn simplify<T: ExprMap<Option<ExprRef>>>(
         }
         other => other,
     }
-}
-
-type SymbolTable = FxHashMap<String, ExprRef>;
-
-fn read_cmd(
-    inp: &mut impl BufRead,
-    ctx: &mut Context,
-    st: &mut SymbolTable,
-) -> std::io::Result<Option<SmtCommand>> {
-    let mut cmd_str = String::new();
-    if inp.read_line(&mut cmd_str)? == 0 {
-        return Ok(None); // end of file
-    }
-
-    // skip lines that are just comments or empty
-    while is_comment(&cmd_str) || cmd_str.trim().is_empty() {
-        cmd_str.clear();
-        if inp.read_line(&mut cmd_str)? == 0 {
-            return Ok(None); // end of file
-        }
-    }
-
-    // ensure that the response contains balanced parentheses
-    while count_parens(&cmd_str) > 0 {
-        cmd_str.push(' ');
-        inp.read_line(&mut cmd_str)?;
-    }
-
-    // if we did not get anything, we are probably done
-    if cmd_str.trim().is_empty() {
-        return Ok(None);
-    }
-
-    // debug print
-    let cmd = parse_command(ctx, st, cmd_str.as_bytes()).expect("failed to parse command");
-
-    // add symbols to table
-    match cmd {
-        SmtCommand::DefineConst(sym, _) | SmtCommand::DeclareConst(sym) => {
-            st.insert(ctx.get_symbol_name(sym).unwrap().into(), sym);
-        }
-        _ => {}
-    }
-    Ok(Some(cmd))
-}
-
-fn is_comment(line: &str) -> bool {
-    for c in line.chars() {
-        if !c.is_ascii_whitespace() {
-            return c == ';';
-        }
-    }
-    // all whilespace
-    false
-}
-
-fn count_parens(s: &str) -> i64 {
-    s.chars().fold(0, |count, cc| match cc {
-        '(' => count + 1,
-        ')' => count - 1,
-        _ => count,
-    })
 }

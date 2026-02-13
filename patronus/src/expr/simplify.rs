@@ -1,14 +1,15 @@
 // Copyright 2023 The Regents of the University of California
-// Copyright 2024 Cornell University
+// Copyright 2024-2026 Cornell University
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
 use super::{
-    BVLitValue, Context, Expr, ExprMap, ExprRef, SparseExprMap, TypeCheck, WidthInt,
-    do_transform_expr,
+    BVLitValue, Context, Expr, ExprMap, ExprRef, SerializableIrNode, SparseExprMap, TypeCheck,
+    WidthInt, do_transform_expr, find_symbols,
 };
 use crate::expr::meta::get_fixed_point;
 use crate::expr::transform::ExprTransformMode;
+use crate::smt::{CheckSatResponse, SolverContext};
 use baa::BitVecOps;
 use smallvec::{SmallVec, smallvec};
 
@@ -37,6 +38,68 @@ impl<T: ExprMap<Option<ExprRef>>> Simplifier<T> {
             simplify,
         );
         get_fixed_point(&mut self.cache, e).unwrap()
+    }
+
+    /// Uses an SMT solver to check all simplification steps that have been made with this Simplifier.
+    /// Returns the number of incorrect simplifications.
+    pub fn verify_simplification(
+        &self,
+        ctx: &mut Context,
+        solver: &mut impl SolverContext,
+    ) -> crate::smt::Result<usize> {
+        let mut incorrect = 0;
+        let mut correct = 0;
+        for (key, &value) in self.cache.iter() {
+            if let Some(simplified) = value {
+                let key_symbols = find_symbols(ctx, key);
+                let simpl_symbols = find_symbols(ctx, simplified);
+                let symbols: Vec<_> = key_symbols.union(&simpl_symbols).cloned().collect();
+                solver.push()?;
+                for &sym in symbols.iter() {
+                    solver.declare_const(ctx, sym)?;
+                }
+                let not_eq = ctx.distinct(key, simplified);
+                solver.assert(ctx, not_eq)?;
+                match solver.check_sat()? {
+                    CheckSatResponse::Sat => {
+                        let key_value = solver.get_value(ctx, key)?;
+                        let simplified_value = solver.get_value(ctx, simplified)?;
+                        println!(
+                            "{} ({}) =/= ({}) {}",
+                            key.serialize_to_str(ctx),
+                            key_value.serialize_to_str(ctx),
+                            simplified_value.serialize_to_str(ctx),
+                            simplified.serialize_to_str(ctx)
+                        );
+                        let mut syms = vec![];
+                        for &sym in symbols.iter() {
+                            let value = solver.get_value(ctx, sym)?;
+                            syms.push(format!(
+                                "{}={}",
+                                sym.serialize_to_str(ctx),
+                                value.serialize_to_str(ctx)
+                            ));
+                        }
+                        println!(" w/ {}", syms.join(", "));
+                        incorrect += 1;
+                    }
+                    CheckSatResponse::Unsat => {
+                        correct += 1;
+                    } // OK
+                    CheckSatResponse::Unknown => {} // OK
+                }
+
+                solver.pop()?;
+            }
+        }
+        if incorrect > 0 {
+            println!(
+                "{incorrect} / {} simplifications were incorrect. See log.",
+                incorrect + correct
+            );
+        }
+
+        Ok(incorrect)
     }
 }
 
@@ -256,8 +319,11 @@ fn simplify_bv_and(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef>
                 // a & !a -> 0
                 (Expr::BVNot(inner, w), _) if *inner == b => Some(ctx.zero(*w)),
                 (_, Expr::BVNot(inner, w)) if *inner == a => Some(ctx.zero(*w)),
-                // !a & !b -> a | b
-                (Expr::BVNot(a, _), Expr::BVNot(b, _)) => Some(ctx.or(*a, *b)),
+                // !a & !b -> !(a | b)
+                (Expr::BVNot(a, _), Expr::BVNot(b, _)) => {
+                    let or = ctx.or(*a, *b);
+                    Some(ctx.not(or))
+                }
                 _ => None,
             }
         }
@@ -292,8 +358,11 @@ fn simplify_bv_or(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef> 
                 // a | !a -> 1
                 (Expr::BVNot(inner, w), _) if *inner == b => Some(ctx.ones(*w)),
                 (_, Expr::BVNot(inner, w)) if *inner == a => Some(ctx.ones(*w)),
-                // !a | !b -> a & b
-                (Expr::BVNot(a, _), Expr::BVNot(b, _)) => Some(ctx.and(*a, *b)),
+                // !a | !b -> !(a & b)
+                (Expr::BVNot(a, _), Expr::BVNot(b, _)) => {
+                    let and = ctx.and(*a, *b);
+                    Some(ctx.not(and))
+                }
                 _ => None,
             }
         }

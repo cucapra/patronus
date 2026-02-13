@@ -38,16 +38,6 @@ impl SolverCtx {
     }
 }
 
-fn find_symbols(ctx: &Context, e: patronus::expr::ExprRef) -> FxHashSet<patronus::expr::ExprRef> {
-    let mut out = FxHashSet::default();
-    patronus::expr::traversal::bottom_up(ctx, e, |ctx, e, _| {
-        if ctx[e].is_symbol() {
-            out.insert(e);
-        }
-    });
-    out
-}
-
 #[pymethods]
 impl SolverCtx {
     #[pyo3(signature = (*assertions))]
@@ -86,7 +76,7 @@ impl SolverCtx {
         let ctx = ctx_guard.deref();
         let a = assertion.0;
         // scan the expression for any unknown symbols and declare them
-        let symbols = find_symbols(ctx, a);
+        let symbols = patronus::expr::find_symbols(ctx, a);
         for symbol in symbols.into_iter() {
             let tpe = ctx[symbol].get_type(ctx);
             let name = ctx[symbol].get_symbol_name(ctx).unwrap();

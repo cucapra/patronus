@@ -7,6 +7,6 @@ mod parser;
 mod serialize;
 mod solver;
 
-pub use parser::{SmtParserError, parse_command, parse_expr};
+pub use parser::{SmtParserError, parse_command, parse_expr, read_command};
 pub use serialize::serialize_cmd;
 pub use solver::*;

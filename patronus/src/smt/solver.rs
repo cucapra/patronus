@@ -3,7 +3,7 @@
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
 use crate::expr::{Context, ExprRef};
-use crate::smt::parser::{SmtParserError, parse_get_value_response};
+use crate::smt::parser::{SmtParserError, count_parens, parse_get_value_response};
 use crate::smt::serialize::serialize_cmd;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter};
@@ -275,14 +275,6 @@ impl SmtLibSolverCtx {
             )),
         }
     }
-}
-
-fn count_parens(s: &str) -> i64 {
-    s.chars().fold(0, |count, cc| match cc {
-        '(' => count + 1,
-        ')' => count - 1,
-        _ => count,
-    })
 }
 
 impl Drop for SmtLibSolverCtx {

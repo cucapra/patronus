@@ -1,5 +1,5 @@
 ---
-source: tests/btor2_test.rs
+source: patronus/tests/btor2_test.rs
 expression: sys.serialize_to_str(&ctx)
 ---
 sdram_controller.original
@@ -33,14 +33,14 @@ node %152 : bv<17> = _state_5[state]
 node _logic_not_sdram_controller.no_tri_state.v:315_26 : bv<1> = eq(state_cnt, 4'b0000)
 node _ge_sdram_controller.no_tri_state.v:294_25 : bv<1> = ugte(concat(22'x000000, refresh_cnt), 32'x00000207)
 node _eq_sdram_controller.no_tri_state.v:292_24 : bv<1> = eq(state, 5'b00000)
-node _auto_opt_dff.cc:195:make_patterns_logic_224 : bv<1> = not(or(_eq_sdram_controller.no_tri_state.v:292_24, _logic_not_sdram_controller.no_tri_state.v:315_26))
+node _auto_opt_dff.cc:195:make_patterns_logic_224 : bv<1> = or(_eq_sdram_controller.no_tri_state.v:292_24, _logic_not_sdram_controller.no_tri_state.v:315_26)
 node _procmux_171 : bv<1> = eq(state, 5'b10100)
 state command : bv<8>
   [next] ite(rst_n, ite(_auto_opt_dff.cc:195:make_patterns_logic_224, ite(_eq_sdram_controller.no_tri_state.v:292_24, ite(_ge_sdram_controller.no_tri_state.v:294_25, 8'b10010001, ite(rd_enable, 8'b10011000, ite(wr_enable, 8'b10011000, 8'b10111000))), ite(_logic_not_sdram_controller.no_tri_state.v:315_26, %152[16:9], 8'b00000000)), command), 8'b10111000)
 state state : bv<5>
   [next] ite(rst_n, ite(_auto_opt_dff.cc:195:make_patterns_logic_224, ite(_eq_sdram_controller.no_tri_state.v:292_24, ite(_ge_sdram_controller.no_tri_state.v:294_25, 5'b00001, ite(rd_enable, 5'b10000, ite(wr_enable, 5'b11000, 5'b00000))), ite(_logic_not_sdram_controller.no_tri_state.v:315_26, %152[8:4], 5'b00000)), state), 5'b01000)
 state haddr_r : bv<24>
-  [next] ite(rst_n, ite(not(or(rd_enable, wr_enable)), ite(rd_enable, rd_addr, ite(wr_enable, wr_addr, 24'x000000)), haddr_r), 24'x000000)
+  [next] ite(rst_n, ite(or(rd_enable, wr_enable), ite(rd_enable, rd_addr, ite(wr_enable, wr_addr, 24'x000000)), haddr_r), 24'x000000)
 state busy : bv<1>
   [next] and(rst_n, %39)
 state data_out : bv<16>

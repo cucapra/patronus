@@ -26,7 +26,7 @@ fn serialize_transition_system<W: Write>(
         let name = root.name.map(|n| ctx[n].to_string()).unwrap_or_else(|| {
             sys.names[root.expr]
                 .map(|n| ctx[n].clone())
-                .unwrap_or(format!("%{}", root.expr.index()))
+                .unwrap_or(format!("%{}", usize::from(root.expr)))
         });
         // outputs should not overwrite other names
         if root.kind != SerializeSignalKind::Output || names[root.expr].is_none() {

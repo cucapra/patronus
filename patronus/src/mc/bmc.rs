@@ -279,16 +279,16 @@ struct SmtSignalInfo {
 impl UnrollSmtEncoding {
     pub fn new(ctx: &mut Context, sys: &TransitionSystem, include_outputs: bool) -> Self {
         let ser_info = analyze_for_serialization(ctx, sys, include_outputs);
-        let max_ser_index = ser_info
+        let max_ser_index: usize = ser_info
             .signal_order
             .iter()
-            .map(|s| s.expr.index())
+            .map(|s| s.expr.into())
             .max()
             .unwrap_or_default();
-        let max_state_index = sys
+        let max_state_index: usize = sys
             .states
             .iter()
-            .map(|s| s.symbol.index())
+            .map(|s| s.symbol.into())
             .max()
             .unwrap_or_default();
         let signals_map_len = std::cmp::max(max_ser_index, max_state_index) + 1;
@@ -308,7 +308,7 @@ impl UnrollSmtEncoding {
         {
             signal_order.push(root.expr);
             let name = sys.names[root.expr].unwrap_or({
-                let default_name = format!("__n{}", root.expr.index());
+                let default_name = format!("__n{}", usize::from(root.expr));
                 ctx.string(default_name.into())
             });
             let is_input = input_set.contains(&root.expr);
@@ -320,7 +320,7 @@ impl UnrollSmtEncoding {
                 is_input,
                 is_const: false,
             };
-            signals[root.expr.index()] = Some(info);
+            signals[usize::from(root.expr)] = Some(info);
         }
         for (id, state) in sys.states.iter().enumerate() {
             let id = (id + signal_order.len()) as u16;
@@ -332,7 +332,7 @@ impl UnrollSmtEncoding {
                 is_input: false,
                 is_const: state.is_const(),
             };
-            signals[state.symbol.index()] = Some(info);
+            signals[usize::from(state.symbol)] = Some(info);
         }
         let current_step = None;
         let offset = None;
@@ -356,7 +356,7 @@ impl UnrollSmtEncoding {
         filter: &impl Fn(&SmtSignalInfo) -> bool,
     ) -> Result<()> {
         for expr in self.signal_order.iter() {
-            let info = self.signals[expr.index()].as_ref().unwrap();
+            let info = self.signals[usize::from(*expr)].as_ref().unwrap();
             if info.is_state {
                 continue;
             }
@@ -381,12 +381,12 @@ impl UnrollSmtEncoding {
         let index = (step - offset) as usize;
         assert_eq!(self.symbols_at.len(), index, "Missing or duplicate step!");
         let mut syms = Vec::with_capacity(self.signal_order.len());
-        for signal in self
+        for &signal in self
             .signal_order
             .iter()
             .chain(self.states.iter().map(|s| &s.symbol))
         {
-            let info = self.signals[signal.index()].as_ref().unwrap();
+            let info = self.signals[usize::from(signal)].as_ref().unwrap();
             let name_ref = if info.is_const {
                 info.name
             } else {
@@ -401,7 +401,7 @@ impl UnrollSmtEncoding {
     }
 
     fn signal_sym_in_step(&self, expr: ExprRef, step: u64) -> Option<ExprRef> {
-        if let Some(Some(info)) = self.signals.get(expr.index()) {
+        if let Some(Some(info)) = self.signals.get(usize::from(expr)) {
             let offset = self.offset.expect("Need to call init_at first!");
             let index = (step - offset) as usize;
             Some(self.symbols_at[index][info.id as usize])

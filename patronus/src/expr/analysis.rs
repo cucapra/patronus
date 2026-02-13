@@ -3,7 +3,8 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::expr::{Context, ExprMap, ExprRef, ForEachChild, SparseExprMap};
+use crate::expr::{Context, ExprMap, ExprRef, ForEachChild, SparseExprMap, traversal};
+use rustc_hash::FxHashSet;
 
 pub type UseCountInt = u16;
 
@@ -22,6 +23,17 @@ pub fn count_expr_uses(ctx: &Context, roots: Vec<ExprRef>) -> impl ExprMap<UseCo
     }
 
     use_count
+}
+
+/// Returns all symbols in the given expression.
+pub fn find_symbols(ctx: &Context, e: ExprRef) -> FxHashSet<ExprRef> {
+    let mut out = FxHashSet::default();
+    traversal::bottom_up(ctx, e, |ctx, e, _| {
+        if ctx[e].is_symbol() {
+            out.insert(e);
+        }
+    });
+    out
 }
 
 /// Increments the use counts for all children of the expression `expr` and

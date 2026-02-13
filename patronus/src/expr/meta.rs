@@ -109,17 +109,19 @@ impl<T: Default + Clone + Debug> Index<ExprRef> for DenseExprMetaData<T> {
 
     #[inline]
     fn index(&self, e: ExprRef) -> &Self::Output {
-        self.inner.get(e.index()).unwrap_or(&self.default)
+        let index: usize = e.into();
+        self.inner.get(index).unwrap_or(&self.default)
     }
 }
 
 impl<T: Default + Clone + Debug> IndexMut<ExprRef> for DenseExprMetaData<T> {
     #[inline]
     fn index_mut(&mut self, e: ExprRef) -> &mut Self::Output {
-        if self.inner.len() <= e.index() {
-            self.inner.resize(e.index() + 1, T::default());
+        let index: usize = e.into();
+        if self.inner.len() <= index {
+            self.inner.resize(index + 1, T::default());
         }
-        &mut self.inner[e.index()]
+        &mut self.inner[index]
     }
 }
 
@@ -155,7 +157,7 @@ impl<'a, T> Iterator for ExprMetaDataIter<'a, T> {
         match self.inner.next() {
             None => None,
             Some(value) => {
-                let index_ref = ExprRef::from_index(self.index);
+                let index_ref = self.index.into();
                 self.index += 1;
                 Some((index_ref, value))
             }
@@ -206,7 +208,7 @@ impl ExprSet for DenseExprSet {
 
 #[inline]
 fn index_to_word_and_bit(index: ExprRef) -> (usize, u32) {
-    let index = index.index();
+    let index: usize = index.into();
     let word = index / Word::BITS as usize;
     let bit = index % Word::BITS as usize;
     (word, bit as u32)
@@ -239,9 +241,9 @@ mod tests {
     #[test]
     fn test_get_fixed_point() {
         let mut m = DenseExprMetaData::default();
-        let zero = ExprRef::from_index(0);
-        let one = ExprRef::from_index(1);
-        let two = ExprRef::from_index(2);
+        let zero: ExprRef = 0usize.into();
+        let one: ExprRef = 1usize.into();
+        let two: ExprRef = 2usize.into();
         m[zero] = Some(one);
         m[one] = Some(two);
         m[two] = Some(two);
@@ -257,8 +259,9 @@ mod tests {
     #[test]
     fn test_dense_bool() {
         let mut m = DenseExprSet::default();
-        assert!(!m.contains(&ExprRef::from_index(7)));
-        m.insert(ExprRef::from_index(7));
-        assert!(m.contains(&ExprRef::from_index(7)));
+        let expr_ref_7: ExprRef = 7usize.into();
+        assert!(!m.contains(&expr_ref_7));
+        m.insert(expr_ref_7);
+        assert!(m.contains(&expr_ref_7));
     }
 }

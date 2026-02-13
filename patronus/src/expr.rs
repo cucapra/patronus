@@ -14,7 +14,7 @@ mod transform;
 pub mod traversal;
 mod types;
 
-pub use analysis::{UseCountInt, count_expr_uses, update_expr_child_uses};
+pub use analysis::{UseCountInt, count_expr_uses, find_symbols, update_expr_child_uses};
 pub use context::{Builder, Context, ExprRef, StringRef};
 pub use eval::{SymbolValueStore, eval_array_expr, eval_bv_expr, eval_expr};
 pub use foreach::ForEachChild;

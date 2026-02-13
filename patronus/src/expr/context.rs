@@ -17,7 +17,8 @@
 use crate::expr::TypeCheck;
 use crate::expr::nodes::*;
 use baa::{
-    ArrayOps, BitVecValue, BitVecValueIndex, BitVecValueRef, IndexToRef, SparseArrayValue, Value,
+    ArrayOps, BitVecOps, BitVecValue, BitVecValueIndex, BitVecValueRef, IndexToRef,
+    SparseArrayValue, Value,
 };
 use rustc_hash::FxBuildHasher;
 use std::borrow::Borrow;
@@ -53,18 +54,20 @@ pub struct ExprRef(NonZeroU32);
 impl Debug for ExprRef {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // we need a custom implementation in order to show the zero based index
-        write!(f, "ExprRef({})", self.index())
+        let index: usize = (*self).into();
+        write!(f, "ExprRef({})", index)
     }
 }
 
-impl ExprRef {
-    // TODO: reduce visibility to pub(crate)
-    pub fn from_index(index: usize) -> Self {
-        ExprRef(NonZeroU32::new((index + 1) as u32).unwrap())
+impl From<ExprRef> for usize {
+    fn from(value: ExprRef) -> Self {
+        (value.0.get() - 1) as usize
     }
+}
 
-    pub(crate) fn index(&self) -> usize {
-        (self.0.get() - 1) as usize
+impl From<usize> for ExprRef {
+    fn from(index: usize) -> Self {
+        ExprRef(NonZeroU32::new((index + 1) as u32).unwrap())
     }
 }
 
@@ -87,8 +90,8 @@ impl Default for Context {
             strings: Default::default(),
             exprs: Default::default(),
             values: Default::default(),
-            true_expr_ref: ExprRef::from_index(0),
-            false_expr_ref: ExprRef::from_index(0),
+            true_expr_ref: 0.into(),  // only a placeholder!
+            false_expr_ref: 0.into(), // only a placeholder!
         };
         // create valid cached expressions
         out.false_expr_ref = out.zero(1);
@@ -105,7 +108,7 @@ impl Context {
 
     pub(crate) fn add_expr(&mut self, value: Expr) -> ExprRef {
         let (index, _) = self.exprs.insert_full(value);
-        ExprRef::from_index(index)
+        index.into()
     }
 
     pub fn string(&mut self, value: std::borrow::Cow<str>) -> StringRef {
@@ -127,7 +130,7 @@ impl Index<ExprRef> for Context {
 
     fn index(&self, index: ExprRef) -> &Self::Output {
         self.exprs
-            .get_index(index.index())
+            .get_index(index.into())
             .expect("Invalid ExprRef!")
     }
 }
@@ -142,21 +145,15 @@ impl Index<StringRef> for Context {
     }
 }
 
+/// Convenience methods to inspect IR nodes.
 impl Context {
-    /// Returns the number of interned expressions in this context.
-    pub fn num_exprs(&self) -> usize {
-        self.exprs.len()
-    }
-
-    /// Returns a reference to the expression for the given reference.
-    /// Panics if the reference is invalid (use indices in range 0..num_exprs()).
-    pub fn get_expr(&self, r: ExprRef) -> &Expr {
-        &self[r]
-    }
-
-    /// Returns the zero-based intern index of the given expression reference.
-    pub fn expr_index(&self, r: ExprRef) -> usize {
-        r.index()
+    /// Returns whether `e` represents a bit vector literal `0` of any width.
+    pub fn is_zero(&self, e: ExprRef) -> bool {
+        if let Expr::BVLiteral(value) = self[e] {
+            value.get(self).is_zero()
+        } else {
+            false
+        }
     }
 }
 
@@ -247,6 +244,11 @@ impl Context {
     pub fn ones(&mut self, width: WidthInt) -> ExprRef {
         self.bv_lit(&BitVecValue::ones(width))
     }
+
+    pub fn distinct(&mut self, a: ExprRef, b: ExprRef) -> ExprRef {
+        let is_eq = self.equal(a, b);
+        self.not(is_eq)
+    }
     pub fn equal(&mut self, a: ExprRef, b: ExprRef) -> ExprRef {
         debug_assert_eq!(a.get_type(self), b.get_type(self));
         if a.get_type(self).is_bit_vector() {
@@ -311,6 +313,20 @@ impl Context {
         debug_assert_eq!(a.get_bv_type(self).unwrap(), b.get_bv_type(self).unwrap());
         self.add_expr(Expr::BVXor(a, b, b.get_bv_type(self).unwrap()))
     }
+
+    pub fn xor3(&mut self, a: ExprRef, b: ExprRef, c: ExprRef) -> ExprRef {
+        let x = self.xor(a, b);
+        self.xor(x, c)
+    }
+
+    pub fn majority(&mut self, a: ExprRef, b: ExprRef, c: ExprRef) -> ExprRef {
+        let a_and_b = self.and(a, b);
+        let a_and_c = self.and(a, c);
+        let b_and_c = self.and(b, c);
+        let x = self.or(a_and_b, a_and_c);
+        self.or(x, b_and_c)
+    }
+
     pub fn shift_left(&mut self, a: ExprRef, b: ExprRef) -> ExprRef {
         debug_assert_eq!(a.get_bv_type(self).unwrap(), b.get_bv_type(self).unwrap());
         self.add_expr(Expr::BVShiftLeft(a, b, b.get_bv_type(self).unwrap()))
@@ -514,6 +530,12 @@ impl<'a> Builder<'a> {
     }
     pub fn xor(&self, a: ExprRef, b: ExprRef) -> ExprRef {
         self.ctx.borrow_mut().xor(a, b)
+    }
+    pub fn xor3(&mut self, a: ExprRef, b: ExprRef, c: ExprRef) -> ExprRef {
+        self.ctx.borrow_mut().xor3(a, b, c)
+    }
+    pub fn majority(&mut self, a: ExprRef, b: ExprRef, c: ExprRef) -> ExprRef {
+        self.ctx.borrow_mut().majority(a, b, c)
     }
     pub fn shift_left(&self, a: ExprRef, b: ExprRef) -> ExprRef {
         self.ctx.borrow_mut().shift_left(a, b)

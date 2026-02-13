@@ -282,10 +282,10 @@ fn convert_bin_op(
         width_out,
         width_a,
         sign_a,
-        converted_b,
+        converted_a,
         width_b,
         sign_b,
-        converted_a,
+        converted_b,
     ]))
 }
 

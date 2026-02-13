@@ -8,7 +8,7 @@ authors = ["Kevin Laeufer <laeufer@berkeley.edu>"]
 repository = "https://github.com/cucapra/patronus"
 readme = "Readme.md"
 license = "BSD-3-Clause"
-rust-version = "1.85.0"
+rust-version = "1.88.0"
 # used by main patronus library and python bindings
 version = "0.35.0"
 

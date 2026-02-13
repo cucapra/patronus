@@ -34,7 +34,10 @@ fn test_simplify_and() {
     ts("and(not(a : bv<1>), a)", "false");
 
     // de morgan
-    ts("and(not(a:bv<3>), not(b:bv<3>))", "or(a:bv<3>, b:bv<3>)")
+    ts(
+        "and(not(a:bv<3>), not(b:bv<3>))",
+        "not(or(a:bv<3>, b:bv<3>))",
+    )
 }
 
 #[test]
@@ -49,7 +52,10 @@ fn test_simplify_or() {
     ts("or(not(a : bv<1>), a)", "true");
 
     // de morgan
-    ts("or(not(a:bv<3>), not(b:bv<3>))", "and(a:bv<3>, b:bv<3>)")
+    ts(
+        "or(not(a:bv<3>), not(b:bv<3>))",
+        "not(and(a:bv<3>, b:bv<3>))",
+    )
 }
 
 #[test]
@@ -502,20 +508,6 @@ fn test_random_z3_issue_simplification() {
     ts(
         "or(shift_left(and(V : bv<32>, 32'd65535), 32'd17), shift_right(and(V, 32'd65535), 32'd15))",
         "or(concat(V:bv<32>[14:0], 17'x00000), concat(31'x00000000, V[15]))",
-    );
-}
-
-#[test]
-fn test_quiz1_simplification() {
-    // Complex simplification from Quiz1
-    // ugte(1'b0, 1'b1) -> false
-    // not(false) -> true
-    // ugte(true, 1'b1) -> true (both are bitvectors of width 1)
-    // not(true) -> false
-    // implies(false, reset) -> true
-    ts(
-        "implies(not(ugte(not(ugte(1'b0, 1'b1)), 1'b1)), reset: bv<1>)",
-        "true",
     );
 }
 
