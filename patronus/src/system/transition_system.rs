@@ -65,14 +65,12 @@ impl TransitionSystem {
     }
 
     pub fn update_signal_name(&mut self, old: ExprRef, new: ExprRef) {
-        if old != new {
-            if let Some(old_name) = self.names[old] {
-                if self.names[new].is_none() {
+        if old != new
+            && let Some(old_name) = self.names[old]
+                && self.names[new].is_none() {
                     self.names[new] = Some(old_name);
                     self.names[old] = None;
                 }
-            }
-        }
     }
 
     pub fn add_input(&mut self, ctx: &Context, symbol: ExprRef) {
@@ -143,11 +141,10 @@ impl TransitionSystem {
         // update names
         let old_name_exprs = self.names.non_default_value_keys().collect::<Vec<_>>();
         for old_expr in old_name_exprs.into_iter() {
-            if let Some(new_expr) = update(old_expr) {
-                if new_expr != old_expr {
+            if let Some(new_expr) = update(old_expr)
+                && new_expr != old_expr {
                     self.names[new_expr] = self.names[old_expr];
                 }
-            }
         }
     }
 

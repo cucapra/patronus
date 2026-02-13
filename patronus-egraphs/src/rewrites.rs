@@ -236,8 +236,8 @@ pub struct ArithMatch {
 fn check_width_consistency(pattern: &Pattern<Arith>) {
     let exprs = pattern.ast.as_ref();
     for e_node_or_var in exprs.iter() {
-        if let ENodeOrVar::ENode(expr) = e_node_or_var {
-            if is_bin_op(expr) {
+        if let ENodeOrVar::ENode(expr) = e_node_or_var
+            && is_bin_op(expr) {
                 // w, w_a, s_a, a, w_b, s_b, b
                 let a_width_id = usize::from(expr.children()[1]);
                 let a_id = usize::from(expr.children()[3]);
@@ -258,7 +258,6 @@ fn check_width_consistency(pattern: &Pattern<Arith>) {
                     );
                 }
             }
-        }
     }
 }
 

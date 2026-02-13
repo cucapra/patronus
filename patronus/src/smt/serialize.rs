@@ -198,12 +198,11 @@ pub fn serialize_expr(out: &mut impl Write, ctx: &Context, expr: ExprRef) -> Res
             // we had to serialize some children first => we need a closing parenthesis
             if pc > 0 {
                 // special continuation for zero extend of booleans (for which we use an ite)
-                if let Expr::BVZeroExt { e, by, .. } = expr {
-                    if e.get_type(ctx).is_bool() {
+                if let Expr::BVZeroExt { e, by, .. } = expr
+                    && e.get_type(ctx).is_bool() {
                         let zeros = "0".repeat(*by as usize);
                         write!(out, " #b{}1 #b{}0", zeros, zeros)?;
                     }
-                }
                 // everyone gets a closing parenthesis
                 write!(out, ")")?;
             }

@@ -6,12 +6,12 @@ use crate::ExprRef;
 use crate::ctx::{ContextGuardRead, ContextGuardWrite};
 use baa::{BitVecOps, Value};
 use num_bigint::BigInt;
-use patronus::expr::{Context, TypeCheck};
+use patronus::expr::TypeCheck;
 use patronus::mc::get_smt_value;
 use patronus::smt::*;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 #[pyclass]
 pub struct SolverCtx {
