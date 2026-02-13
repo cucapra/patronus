@@ -1,0 +1,16 @@
+[package]
+name = "patronus-sca"
+version = "0.1.0"
+description = "patronus and symbolic computer algebra"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+patronus = { path = "../patronus" }
+baa = {version = "0.17.1", features = ["bigint"]}
+rustc-hash.workspace = true
+polysub = "0.1.9"
