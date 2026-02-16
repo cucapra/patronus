@@ -36,6 +36,18 @@ pub fn verify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) -> S
     word_poly.add_assign(&output_poly);
     let spec = word_poly;
 
+    // collect all (bit-level) input variables
+    let input_vars: FxHashSet<VarIndex> = inputs
+        .iter()
+        .flat_map(|&e| {
+            let width = e.get_bv_type(ctx).unwrap();
+            let vars: Vec<_> = (0..width)
+                .map(|bit| expr_to_var(extract_bit(ctx, e, bit)))
+                .collect();
+            vars
+        })
+        .collect();
+
     // create todos for all output variables
     let gate_outputs: Vec<_> = (0..width)
         .map(|ii| {
@@ -49,7 +61,7 @@ pub fn verify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) -> S
         .collect();
 
     // now we can perform backwards substitution
-    let result = backwards_sub(ctx, gate_outputs.into(), spec);
+    let result = backwards_sub(ctx, &input_vars, gate_outputs.into(), spec);
 
     if result.is_zero() {
         ScaVerifyResult::Equal
@@ -159,19 +171,18 @@ fn var_to_expr(v: polysub::VarIndex) -> ExprRef {
     usize::from(v).into()
 }
 
-fn is_gate(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::BVNot(_, 1) | Expr::BVAnd(_, _, 1) | Expr::BVOr(_, _, 1) | Expr::BVXor(_, _, 1)
-    )
-}
-
-fn backwards_sub(ctx: &Context, mut todo: Vec<(VarIndex, ExprRef)>, mut spec: Poly) -> Poly {
+fn backwards_sub(
+    ctx: &Context,
+    input_vars: &FxHashSet<VarIndex>,
+    mut todo: Vec<(VarIndex, ExprRef)>,
+    mut spec: Poly,
+) -> Poly {
     let mut var_roots: Vec<_> = todo.iter().map(|(v, _)| *v).collect();
     var_roots.sort();
 
     let m = spec.get_mod();
     let one: DefaultCoef = Coef::from_i64(1, m);
+    let zero: DefaultCoef = Coef::from_i64(0, m);
     let minus_one: DefaultCoef = Coef::from_i64(-1, m);
     let minus_two: DefaultCoef = Coef::from_i64(-2, m);
     // first, we count how often expressions are used
@@ -183,7 +194,7 @@ fn backwards_sub(ctx: &Context, mut todo: Vec<(VarIndex, ExprRef)>, mut spec: Po
 
     while let Some((output_var, gate)) = todo.pop() {
         replaced.push(output_var);
-        // println!("{output_var}: {}", spec.size());
+        println!("{output_var} {:?}: {}", &ctx[gate], spec.size());
 
         let add_children = match ctx[gate].clone() {
             Expr::BVOr(a, b, 1) => {
@@ -232,15 +243,27 @@ fn backwards_sub(ctx: &Context, mut todo: Vec<(VarIndex, ExprRef)>, mut spec: Po
                 spec.replace_var(output_var, &monoms);
                 true
             }
-            Expr::BVSlice { hi, lo, .. } => {
+            Expr::BVSlice { hi, lo, e } => {
                 assert_eq!(hi, lo);
+                assert!(
+                    input_vars.contains(&expr_to_var(e)),
+                    "Not actually an input: {e:?}"
+                );
                 // a bit slice normally marks an input, thus we should be done!
+                false
+            }
+            Expr::BVLiteral(value) => {
+                let value = value.get(ctx);
+                debug_assert_eq!(value.width(), 1);
+                if value.is_true() {
+                    spec.replace_var(output_var, &[(one.clone(), vec![].into())]);
+                } else {
+                    spec.replace_var(output_var, &[(zero.clone(), vec![].into())]);
+                }
                 false
             }
             other => todo!("add support for {other:?}"),
         };
-        // get rid of any ones, TODO: we should eventually write better code and make this unnecessary
-        spec.replace_var(const_true_var, &[(one.clone(), vec![].into())]);
 
         if add_children {
             ctx[gate].for_each_child(|&e| {
@@ -249,8 +272,9 @@ fn backwards_sub(ctx: &Context, mut todo: Vec<(VarIndex, ExprRef)>, mut spec: Po
                 assert!(prev_uses > 0);
                 uses[e] = prev_uses - 1;
                 // did the use count just go down to zero?
-                if prev_uses == 1 && is_gate(&ctx[e]) {
-                    todo.push((expr_to_var(e), e));
+                let var = expr_to_var(e);
+                if prev_uses == 1 && !input_vars.contains(&var) {
+                    todo.push((var, e));
                 }
             });
         }
