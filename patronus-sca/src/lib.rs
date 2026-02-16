@@ -5,15 +5,28 @@
 use baa::{BitVecOps, BitVecValue, BitVecValueRef};
 use patronus::expr::*;
 use polysub::{Coef, Term, VarIndex};
+use rustc_hash::FxHashSet;
 use std::fmt::{Display, Formatter};
 
+pub enum ScaVerifyResult {
+    /// Word and gate level were proven to be equivalent for all inputs.
+    Equal,
+    /// Could not prove or disprove equivalence
+    Unknown,
+    /// Word and gate level are not equivalent, see provided counter example.
+    Unequal(Vec<(ExprRef, BitVecValue)>),
+}
+
 /// Returns a new expressions reference if simplification was possible
-pub fn simplify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) -> Option<ExprRef> {
+pub fn verify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) -> ScaVerifyResult {
     let width = p.word_level.get_bv_type(ctx).unwrap();
     debug_assert_eq!(width, p.gate_level.get_bv_type(ctx).unwrap());
 
     // create a reference polynomial from the word level side
-    let mut word_poly = build_bottom_up_poly(ctx, p.word_level);
+    let mut word_poly = match build_bottom_up_poly(ctx, p.word_level) {
+        None => return ScaVerifyResult::Unknown,
+        Some(p) => p,
+    };
     println!("word-level polynomial: {word_poly}");
 
     // the actual reference polynomial needs to contain the output bits as well
@@ -38,12 +51,33 @@ pub fn simplify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) ->
     let result = backwards_sub(ctx, gate_outputs.into(), spec);
 
     if result.is_zero() {
-        println!("The SAME!");
-        Some(ctx.get_true())
+        ScaVerifyResult::Equal
     } else {
-        println!("DIFFERENT: {result}");
-        Some(ctx.get_false())
+        let witness = extract_witness(ctx, &result);
+        ScaVerifyResult::Unequal(witness)
     }
+}
+
+fn extract_witness(ctx: &Context, p: &Poly) -> Vec<(ExprRef, BitVecValue)> {
+    let monoms = p.sorted_monom_vec();
+
+    // find smallest term
+    let mut smallest_size = monoms.first().unwrap().1.var_count();
+    let mut smallest_index = 0;
+    for (ii, (_, t)) in monoms.iter().enumerate() {
+        if t.var_count() < smallest_size {
+            smallest_size = t.var_count();
+            smallest_index = ii;
+        }
+    }
+
+    // we need to set all vars in the smallest term to 1, everything else to zero
+    let is_one: FxHashSet<_> = monoms[smallest_index]
+        .1
+        .vars()
+        .cloned()
+        .map(var_to_expr)
+        .collect();
 }
 
 /// Extracts a bit from a concatenation. We use this to avoid having to call the full blown
@@ -233,7 +267,9 @@ fn poly_for_bv_literal(value: BitVecValueRef) -> Poly {
     polysub::Polynom::from_monoms(m, vec![monom].into_iter())
 }
 
-fn build_bottom_up_poly(ctx: &mut Context, e: ExprRef) -> Poly {
+/// Returns a polynomial representation of the expression if possible.
+/// Returns `None` if the conversion fails.
+fn build_bottom_up_poly(ctx: &mut Context, e: ExprRef) -> Option<Poly> {
     let poly: Poly = traversal::bottom_up_mut(ctx, e, |ctx, e, children: &[Poly]| {
         match (ctx[e].clone(), children) {
             (Expr::BVSymbol { .. }, _) => poly_for_bv_expr(ctx, e),
@@ -282,7 +318,7 @@ fn build_bottom_up_poly(ctx: &mut Context, e: ExprRef) -> Poly {
             (other, cs) => todo!("{other:?}: {cs:?}"),
         }
     });
-    poly
+    Some(poly)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
