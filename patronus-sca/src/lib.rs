@@ -2,7 +2,7 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use baa::{BitVecMutOps, BitVecOps, BitVecValue, BitVecValueRef};
+use baa::{BitVecOps, BitVecValue, BitVecValueRef};
 use patronus::expr::*;
 use polysub::{Coef, Term, VarIndex};
 use rustc_hash::FxHashSet;
@@ -55,7 +55,16 @@ pub fn verify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) -> S
         ScaVerifyResult::Equal
     } else {
         let witness = extract_witness(ctx, &result, inputs.iter().cloned());
-        ScaVerifyResult::Unequal(witness)
+        // check witness
+        let is_equal = eval_bv_expr(ctx, witness.as_slice(), p.equality);
+        if is_equal.is_true() {
+            println!(
+                "ERROR: the polynomial does not reduce to zero, but we were not able to find a witness to show inequality. Returning Unknown."
+            );
+            ScaVerifyResult::Unknown
+        } else {
+            ScaVerifyResult::Unequal(witness)
+        }
     }
 }
 
@@ -533,7 +542,7 @@ impl<'a, 'b> Display for PrettyPoly<'a, 'b> {
 mod tests {
     use super::*;
     use patronus::expr::{eval_bv_expr, find_symbols};
-    use patronus::smt::{BITWUZLA, Logic, SmtCommand, Solver, SolverContext, read_command};
+    use patronus::smt::{SmtCommand, read_command};
     use rustc_hash::FxHashMap;
     use std::io::BufReader;
 
@@ -718,6 +727,35 @@ mod tests {
 
         let result = verify_word_level_equality(&mut ctx, problem);
         assert_eq!(result, ScaVerifyResult::Equal);
+    }
+
+    #[test]
+    fn test_incorrect_2bit_adder() {
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 2);
+        let b = ctx.bv_symbol("b", 2);
+        let word_level = ctx.add(a, b);
+        let a_0 = ctx.slice(a, 0, 0);
+        let a_1 = ctx.slice(a, 1, 1);
+        let b_0 = ctx.slice(b, 0, 0);
+        let b_1 = ctx.slice(b, 1, 1);
+        let gate_level_0 = ctx.xor(a_0, b_0);
+        let carry_1 = ctx.and(a_0, b_0);
+        let gate_level_1 = ctx.majority(a_1, b_1, carry_1);
+        let gate_level = ctx.concat(gate_level_1, gate_level_0);
+        let equality = ctx.equal(word_level, gate_level);
+
+        let problem = find_sca_simplification_candidates(&ctx, equality)[0];
+
+        // manually check that our problem is actually incorrect
+        assert!(!is_eq_exhaustive(&ctx, problem));
+
+        let result = verify_word_level_equality(&mut ctx, problem);
+        if let ScaVerifyResult::Unequal(w) = result {
+            println!("Witness: {w:?}");
+        } else {
+            assert!(false, "{result:?}");
+        }
     }
 
     #[test]
