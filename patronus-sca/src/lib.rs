@@ -2,12 +2,13 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use baa::{BitVecOps, BitVecValue, BitVecValueRef};
+use baa::{BitVecMutOps, BitVecOps, BitVecValue, BitVecValueRef};
 use patronus::expr::*;
 use polysub::{Coef, Term, VarIndex};
 use rustc_hash::FxHashSet;
 use std::fmt::{Display, Formatter};
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum ScaVerifyResult {
     /// Word and gate level were proven to be equivalent for all inputs.
     Equal,
@@ -23,7 +24,7 @@ pub fn verify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) -> S
     debug_assert_eq!(width, p.gate_level.get_bv_type(ctx).unwrap());
 
     // create a reference polynomial from the word level side
-    let mut word_poly = match build_bottom_up_poly(ctx, p.word_level) {
+    let (mut word_poly, inputs) = match build_bottom_up_poly(ctx, p.word_level) {
         None => return ScaVerifyResult::Unknown,
         Some(p) => p,
     };
@@ -53,18 +54,28 @@ pub fn verify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) -> S
     if result.is_zero() {
         ScaVerifyResult::Equal
     } else {
-        let witness = extract_witness(ctx, &result);
+        let witness = extract_witness(ctx, &result, inputs.iter().cloned());
         ScaVerifyResult::Unequal(witness)
     }
 }
 
-fn extract_witness(ctx: &Context, p: &Poly) -> Vec<(ExprRef, BitVecValue)> {
+/// Try to extract a witness from a non-zero polynomial by finding the term with the smallest
+/// number of variables.
+/// TODO: does this always return a true witness??
+fn extract_witness(
+    ctx: &mut Context,
+    p: &Poly,
+    inputs: impl Iterator<Item = ExprRef>,
+) -> Vec<(ExprRef, BitVecValue)> {
     let monoms = p.sorted_monom_vec();
 
     // find smallest term
     let mut smallest_size = monoms.first().unwrap().1.var_count();
     let mut smallest_index = 0;
     for (ii, (_, t)) in monoms.iter().enumerate() {
+        if smallest_size == 0 {
+            break; // early exit if there is a constant term
+        }
         if t.var_count() < smallest_size {
             smallest_size = t.var_count();
             smallest_index = ii;
@@ -72,12 +83,36 @@ fn extract_witness(ctx: &Context, p: &Poly) -> Vec<(ExprRef, BitVecValue)> {
     }
 
     // we need to set all vars in the smallest term to 1, everything else to zero
-    let is_one: FxHashSet<_> = monoms[smallest_index]
-        .1
-        .vars()
-        .cloned()
-        .map(var_to_expr)
+    let is_one: FxHashSet<_> = monoms[smallest_index].1.vars().cloned().collect();
+
+    // small sanity check for debugging
+    let mut defined_ones = FxHashSet::default();
+
+    let w: Vec<_> = inputs
+        .map(|input| {
+            let width = input.get_bv_type(ctx).unwrap();
+            let mut value = BitVecValue::zero(width);
+            for bit in 0..width {
+                let bit_expr = extract_bit(ctx, input, bit);
+                let bit_var = expr_to_var(bit_expr);
+                if is_one.contains(&bit_var) {
+                    let one = BitVecValue::from_u64(1, width);
+                    let shift_by = BitVecValue::from_u64(bit as u64, width);
+                    let mask = one.shift_left(&shift_by);
+                    value = value.or(&mask);
+                    defined_ones.insert(bit_var);
+                }
+            }
+            (input, value)
+        })
         .collect();
+
+    let ones_not_defined: Vec<_> = is_one.difference(&defined_ones).cloned().collect();
+    assert!(
+        ones_not_defined.is_empty(),
+        "Some variables did not map to inputs."
+    );
+    w
 }
 
 /// Extracts a bit from a concatenation. We use this to avoid having to call the full blown
@@ -267,58 +302,82 @@ fn poly_for_bv_literal(value: BitVecValueRef) -> Poly {
     polysub::Polynom::from_monoms(m, vec![monom].into_iter())
 }
 
-/// Returns a polynomial representation of the expression if possible.
+/// Returns a polynomial representation of the expression + all input expressions if possible.
 /// Returns `None` if the conversion fails.
-fn build_bottom_up_poly(ctx: &mut Context, e: ExprRef) -> Option<Poly> {
-    let poly: Poly = traversal::bottom_up_mut(ctx, e, |ctx, e, children: &[Poly]| {
-        match (ctx[e].clone(), children) {
-            (Expr::BVSymbol { .. }, _) => poly_for_bv_expr(ctx, e),
-            (Expr::BVLiteral(value), _) => poly_for_bv_literal(value.get(ctx)),
-            (Expr::BVConcat(_, _, w), [a, b]) => {
-                // left shift a
-                let shift_by = b.get_mod().bits();
-                let result_width = a.get_mod().bits() + shift_by;
-                debug_assert_eq!(
-                    result_width, w,
-                    "smt expr result type does not match polynomial mod coefficient"
-                );
-                let new_m = polysub::Mod::from_bits(result_width);
-                let shift_coef = Coef::pow2(shift_by, new_m);
-                let mut r: Poly = a.clone();
-                r.change_mod(new_m);
-                r.scale(&shift_coef);
-                // add b
-                let mut b = b.clone();
-                b.change_mod(new_m); // TODO: allow adding without changing the mod of b to avoid this copy
-                r.add_assign(&b);
-                r
+fn build_bottom_up_poly(ctx: &mut Context, e: ExprRef) -> Option<(Poly, Vec<ExprRef>)> {
+    let mut inputs = vec![];
+    let (poly, _overflow) =
+        traversal::bottom_up_mut(ctx, e, |ctx, e, children: &[Option<(Poly, bool)>]| {
+            // have we given up yet?
+            if children.iter().any(|c| c.is_none()) {
+                return None;
             }
-            (Expr::BVZeroExt { by, .. }, [e]) => {
-                let result_width = e.get_mod().bits() + by;
-                let new_m = polysub::Mod::from_bits(result_width);
-                let mut r: Poly = e.clone();
-                r.change_mod(new_m);
-                r
+
+            match (ctx[e].clone(), children) {
+                (Expr::BVSymbol { .. }, _) => {
+                    inputs.push(e);
+                    Some((poly_for_bv_expr(ctx, e), false))
+                }
+                (Expr::BVLiteral(value), _) => Some((poly_for_bv_literal(value.get(ctx)), false)),
+                (Expr::BVConcat(_, _, w), [Some((a, ao)), Some((b, bo))]) => {
+                    // if b may have overflowed, then we cannot perform the concatenation
+                    if *bo {
+                        return None;
+                    }
+
+                    // left shift a
+                    let shift_by = b.get_mod().bits();
+                    let result_width = a.get_mod().bits() + shift_by;
+                    debug_assert_eq!(
+                        result_width, w,
+                        "smt expr result type does not match polynomial mod coefficient"
+                    );
+                    let new_m = polysub::Mod::from_bits(result_width);
+                    let shift_coef = Coef::pow2(shift_by, new_m);
+                    let mut r: Poly = a.clone();
+                    r.change_mod(new_m);
+                    r.scale(&shift_coef);
+                    // add b
+                    let mut b = b.clone();
+                    b.change_mod(new_m); // TODO: allow adding without changing the mod of b to avoid this copy
+                    r.add_assign(&b);
+                    Some((r, *ao || *bo))
+                }
+                (Expr::BVZeroExt { by, .. }, [Some((b, bo))]) => {
+                    // if b may have overflowed, then we cannot perform the concatenation
+                    if *bo {
+                        return None;
+                    }
+
+                    let result_width = b.get_mod().bits() + by;
+                    let new_m = polysub::Mod::from_bits(result_width);
+                    let mut r: Poly = b.clone();
+                    r.change_mod(new_m);
+                    Some((r, *bo))
+                }
+                (Expr::BVAdd(ae, be, w), [Some((a, ao)), Some((b, bo))]) => {
+                    debug_assert_eq!(w, a.get_mod().bits());
+                    debug_assert_eq!(w, b.get_mod().bits());
+                    let mut r = a.clone();
+                    r.add_assign(b);
+                    Some((r, *ao || *bo))
+                }
+                (Expr::BVMul(ae, be, w), [Some((a, ao)), Some((b, bo))]) => {
+                    debug_assert_eq!(w, a.get_mod().bits());
+                    debug_assert_eq!(w, b.get_mod().bits());
+                    let r = a.mul(b);
+                    Some((r, *ao || *bo))
+                }
+                (Expr::BVNegate(_, w), [Some((e, eo))]) => {
+                    println!("TODO: add support for negate!");
+                    None
+                }
+                (other, cs) => todo!("{other:?}: {cs:?}"),
             }
-            (Expr::BVAdd(ae, be, w), [a, b]) => {
-                debug_assert_eq!(w, a.get_mod().bits());
-                debug_assert_eq!(w, b.get_mod().bits());
-                let mut r = a.clone();
-                r.add_assign(b);
-                r
-            }
-            (Expr::BVMul(ae, be, w), [a, b]) => {
-                debug_assert_eq!(w, a.get_mod().bits());
-                debug_assert_eq!(w, b.get_mod().bits());
-                a.mul(b)
-            }
-            (Expr::BVNegate(_, w), [e]) => {
-                todo!()
-            }
-            (other, cs) => todo!("{other:?}: {cs:?}"),
-        }
-    });
-    Some(poly)
+        })?;
+    inputs.sort();
+    inputs.dedup();
+    Some((poly, inputs))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -333,7 +392,7 @@ pub fn find_sca_simplification_candidates(ctx: &Context, e: ExprRef) -> Vec<ScaE
     let _ = traversal::bottom_up(ctx, e, |ctx, e, children: &[AnalysisResult]| {
         // detect equality comparisons of gate and word level expressions
         if let (Expr::BVEqual(ae, be), [a, b]) = (ctx[e].clone(), children) {
-            if a.word.is_some() && b.gate.is_some() {
+            if a.word && b.gate {
                 problems.push(ScaEqualityProblem {
                     equality: e,
                     gate_level: be,
@@ -341,7 +400,7 @@ pub fn find_sca_simplification_candidates(ctx: &Context, e: ExprRef) -> Vec<ScaE
                 });
             }
 
-            if b.word.is_some() && a.gate.is_some() {
+            if b.word && a.gate {
                 problems.push(ScaEqualityProblem {
                     equality: e,
                     gate_level: ae,
@@ -358,140 +417,66 @@ pub fn find_sca_simplification_candidates(ctx: &Context, e: ExprRef) -> Vec<ScaE
 
 #[derive(Debug, Clone, PartialEq)]
 struct AnalysisResult {
-    gate: Option<GateLevelAnalysis>,
-    word: Option<WordLevelAnalysis>,
+    /// if true, then the expression may be a valid gate-level expression
+    gate: bool,
+    /// if true, then the expression may be a valid word-level expression
+    word: bool,
 }
 
 impl AnalysisResult {
     const NONE: Self = AnalysisResult {
-        gate: None,
-        word: None,
+        gate: false,
+        word: false,
     };
 
     fn analyze(ctx: &Context, e: ExprRef, children: &[Self]) -> AnalysisResult {
-        let word = if children.iter().all(|a| a.word.is_some()) {
-            let c_word: Vec<_> = children.iter().map(|a| a.word.clone().unwrap()).collect();
-            WordLevelAnalysis::analyze(ctx, e, &c_word)
+        let word = if children.iter().all(|a| a.word) {
+            is_word_level_expr(ctx, e)
         } else {
-            None
+            false
         };
 
-        let gate = if children.iter().all(|a| a.gate.is_some()) {
-            let c_gate: Vec<_> = children.iter().map(|a| a.gate.clone().unwrap()).collect();
-            GateLevelAnalysis::analyze(ctx, e, &c_gate)
+        let gate = if children.iter().all(|a| a.gate) {
+            is_gate_level_expr(ctx, e)
         } else {
-            None
+            false
         };
 
         Self { word, gate }
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct GateLevelAnalysis {}
+/// Returns `true` if the expression may be part of a word-level expression.
+fn is_word_level_expr(ctx: &Context, e: ExprRef) -> bool {
+    let simple_expr = matches!(
+        &ctx[e],
+        Expr::BVLiteral(_)
+            | Expr::BVSymbol { .. }
+            | Expr::BVAdd(_, _, _)
+            | Expr::BVMul(_, _, _)
+            | Expr::BVNegate(_, _)
+            | Expr::BVZeroExt { .. }
+    );
+    let zero_ext_concat = matches!(&ctx[e], Expr::BVConcat(msb, _, _) if ctx.is_zero(*msb));
+    simple_expr || zero_ext_concat
+}
 
-impl GateLevelAnalysis {
-    fn new() -> Self {
-        Self {}
-    }
-
-    fn analyze(ctx: &Context, e: ExprRef, _children: &[Self]) -> Option<Self> {
-        match &ctx[e] {
-            // symbols and constants are always OK
-            Expr::BVLiteral(_) | Expr::BVSymbol { .. } => Some(Self::new()),
-            // extraction in order to get individual bits is expected
-            Expr::BVSlice { lo, hi, .. } if lo == hi => Some(Self::new()),
-            // single bit gates are ok
-            Expr::BVNot(_, w)
+/// Returns `true` if the expression may be part of a gate-level expression.
+fn is_gate_level_expr(ctx: &Context, e: ExprRef) -> bool {
+    let simple_expr = matches!(
+        &ctx[e],
+        // symbols and constants are always OK
+        Expr::BVLiteral(_) | Expr::BVSymbol { .. } |
+            // concatenation should generally be OK, right?
+            Expr::BVConcat(_, _, _)
+    );
+    let one_bit_gate = matches!(&ctx[e],  Expr::BVNot(_, w)
             | Expr::BVAnd(_, _, w)
             | Expr::BVOr(_, _, w)
             | Expr::BVXor(_, _, w)
-                if *w == 1 =>
-            {
-                Some(Self::new())
-            }
-
-            // concatenation should generally be OK, right?
-            Expr::BVConcat(_, _, _) => Some(Self::new()),
-            // nothing else
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct WordLevelAnalysis {
-    /// the maximum value that the expression can take on
-    max_value: BitVecValue,
-    /// indicates that there might have been an overflow
-    overflow: bool,
-}
-
-impl WordLevelAnalysis {
-    fn new(max_value: BitVecValue, overflow: bool) -> Self {
-        Self {
-            max_value,
-            overflow,
-        }
-    }
-
-    fn from_bit_width(w: WidthInt) -> Self {
-        let max_value = BitVecValue::ones(w);
-        Self::new(max_value, false)
-    }
-
-    fn analyze(ctx: &Context, e: ExprRef, children: &[Self]) -> Option<Self> {
-        match (ctx[e].clone(), children) {
-            (Expr::BVLiteral(value), _) => Some(Self::from_bit_width(value.width())),
-            (Expr::BVSymbol { width, .. }, _) => Some(Self::from_bit_width(width)),
-            (Expr::BVAdd(_, _, _), [a, b]) => {
-                // check for overflow in an add
-                let max_value = a.max_value.add(&b.max_value);
-                let max_modulo = max_value.zero_extend(1);
-                let max_precise = a.max_value.zero_extend(1).add(&b.max_value.zero_extend(1));
-                let no_new_overflow = max_modulo.is_equal(&max_precise);
-                Some(Self::new(
-                    max_value,
-                    a.overflow || b.overflow || !no_new_overflow,
-                ))
-            }
-            (Expr::BVMul(_, _, w), [a, b]) => {
-                // check for overflow in an mul
-                let max_value = a.max_value.mul(&b.max_value);
-                let max_modulo = max_value.zero_extend(w);
-                let max_precise = a.max_value.zero_extend(w).mul(&b.max_value.zero_extend(w));
-                let no_new_overflow = max_modulo.is_equal(&max_precise);
-                Some(Self::new(
-                    max_value,
-                    a.overflow || b.overflow || !no_new_overflow,
-                ))
-            }
-            (Expr::BVNegate(_, _), [_]) => {
-                todo!("deal with negate correctly!")
-            }
-            (Expr::BVZeroExt { by, .. }, [e]) => {
-                // todo: forbid normal zero ext and only allow concat version
-                if !e.overflow {
-                    let max_value = e.max_value.zero_extend(by);
-                    Some(Self::new(max_value, false))
-                } else {
-                    None
-                }
-            }
-            // concat to zero extend is ok
-            (Expr::BVConcat(msb, _, _), [a, b]) if ctx.is_zero(msb) => {
-                // We can only zero extend if we have not observed a possible overflow, yet.
-                // We know that `a` is just a constant zero, so we just need to look at `b`.
-                if !b.overflow {
-                    let max_value = b.max_value.zero_extend(a.max_value.width());
-                    Some(Self::new(max_value, false))
-                } else {
-                    None
-                }
-            }
-            (_, _) => None, // we are no longer considering this expression a potential word level expression
-        }
-    }
+                if *w == 1 );
+    let one_bit_slice = matches!(&ctx[e],  Expr::BVSlice { lo, hi, .. } if lo == hi);
+    simple_expr || one_bit_gate || one_bit_slice
 }
 
 /// Wrapper for pretty printing a polynomial with variable indices replaced by underlying SMT symbol names.
@@ -564,13 +549,13 @@ mod tests {
         None
     }
 
-    fn simplify_coward_smt(filename: &str) {
+    fn check_eq_coward_smt(filename: &str) {
         let mut ctx = Context::default();
         let e = read_first_assert_expr(&mut ctx, filename).unwrap();
         let candidates = find_sca_simplification_candidates(&ctx, e);
         for p in candidates {
-            let sca_based = simplify_word_level_equality(&mut ctx, p).unwrap();
-            assert_eq!(sca_based, ctx.get_true());
+            let sca_based = verify_word_level_equality(&mut ctx, p);
+            assert_eq!(sca_based, ScaVerifyResult::Equal);
         }
     }
 
@@ -592,8 +577,14 @@ mod tests {
             let e = read_first_assert_expr(&mut ctx, filename).unwrap();
             let cs = find_sca_simplification_candidates(&ctx, e);
             for c in cs {
-                let word_poly = build_bottom_up_poly(&mut ctx, c.word_level);
-                println!("{filename}:\n{}\n", PrettyPoly::n(&ctx, &word_poly));
+                if let Some((word_poly, _inputs)) = build_bottom_up_poly(&mut ctx, c.word_level) {
+                    println!("{filename}:\n{}\n", PrettyPoly::n(&ctx, &word_poly));
+                } else {
+                    println!(
+                        "{filename}:\nFailed to build polynom from {}\n",
+                        c.word_level.serialize_to_str(&ctx)
+                    );
+                }
             }
         }
     }
@@ -694,8 +685,8 @@ mod tests {
         // manually check that our problem is actually correct
         assert!(is_eq_exhaustive(&ctx, problem));
 
-        let result = simplify_word_level_equality(&mut ctx, problem).unwrap();
-        assert_eq!(result, ctx.get_true());
+        let result = verify_word_level_equality(&mut ctx, problem);
+        assert_eq!(result, ScaVerifyResult::Equal);
     }
 
     #[test]
@@ -719,43 +710,43 @@ mod tests {
         // manually check that our problem is actually correct
         assert!(is_eq_exhaustive(&ctx, problem));
 
-        let result = simplify_word_level_equality(&mut ctx, problem).unwrap();
-        assert_eq!(result, ctx.get_true());
+        let result = verify_word_level_equality(&mut ctx, problem);
+        assert_eq!(result, ScaVerifyResult::Equal);
     }
 
     #[test]
     fn test_simplify_coward_three_add_2bit() {
-        simplify_coward_smt("../inputs/coward/add_three.2_bit.smt2");
+        check_eq_coward_smt("../inputs/coward/add_three.2_bit.smt2");
     }
 
     #[test]
     fn test_simplify_coward_three_add() {
-        simplify_coward_smt("../inputs/coward/add_three.4_bit.smt2");
+        check_eq_coward_smt("../inputs/coward/add_three.4_bit.smt2");
     }
 
     #[test]
     fn test_simplify_coward_blend() {
-        simplify_coward_smt("../inputs/coward/blend.4_bit.smt2");
+        check_eq_coward_smt("../inputs/coward/blend.4_bit.smt2");
     }
 
     #[test]
     fn test_simplify_coward_dot_product() {
-        simplify_coward_smt("../inputs/coward/dot_product.4_bit.smt2");
+        check_eq_coward_smt("../inputs/coward/dot_product.4_bit.smt2");
     }
 
     #[test]
     fn test_simplify_coward_fma() {
-        simplify_coward_smt("../inputs/coward/fma.4_bit.smt2");
+        check_eq_coward_smt("../inputs/coward/fma.4_bit.smt2");
     }
 
     #[ignore] // currently times out
     #[test]
     fn test_simplify_coward_fmaa() {
-        simplify_coward_smt("../inputs/coward/fmaa.4_bit.smt2");
+        check_eq_coward_smt("../inputs/coward/fmaa.4_bit.smt2");
     }
 
     #[test]
     fn test_simplify_coward_fma_share() {
-        simplify_coward_smt("../inputs/coward/fma_share.4_bit.smt2");
+        check_eq_coward_smt("../inputs/coward/fma_share.4_bit.smt2");
     }
 }
