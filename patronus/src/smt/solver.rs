@@ -65,6 +65,8 @@ pub enum SmtCommand {
     Push(u64),
     Pop(u64),
     GetValue(ExprRef),
+    /// Resets the solver to the startup state
+    Reset,
 }
 
 /// The result of a `(check-sat)` command.

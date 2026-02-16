@@ -387,6 +387,12 @@ pub struct ScaEqualityProblem {
     word_level: ExprRef,
 }
 
+impl ScaEqualityProblem {
+    pub fn equality_expr(&self) -> ExprRef {
+        self.equality
+    }
+}
+
 pub fn find_sca_simplification_candidates(ctx: &Context, e: ExprRef) -> Vec<ScaEqualityProblem> {
     let mut problems = vec![];
     let _ = traversal::bottom_up(ctx, e, |ctx, e, children: &[AnalysisResult]| {

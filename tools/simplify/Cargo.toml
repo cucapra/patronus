@@ -12,3 +12,4 @@ rust-version.workspace = true
 patronus.workspace = true
 clap.workspace = true
 rustc-hash.workspace = true
+patronus-sca = {path="../../patronus-sca"}

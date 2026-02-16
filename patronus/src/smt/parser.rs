@@ -358,6 +358,7 @@ pub fn parse_command(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Resul
         Some(Token::Value(name)) => match name {
             b"exit" => SmtCommand::Exit,
             b"check-sat" => SmtCommand::CheckSat,
+            b"reset" => SmtCommand::Reset,
             b"set-logic" => {
                 let logic = parse_logic(&mut lexer)?;
                 SmtCommand::SetLogic(logic)

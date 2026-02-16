@@ -5,6 +5,7 @@
 use clap::Parser;
 use patronus::expr::*;
 use patronus::smt::{SmtCommand, read_command, serialize_cmd};
+use patronus_sca::*;
 use rustc_hash::FxHashMap;
 use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
@@ -17,6 +18,8 @@ use std::path::PathBuf;
 struct Args {
     #[arg(long)]
     do_not_simplify: bool,
+    #[arg(long)]
+    skip_sca: bool,
     #[arg(value_name = "INPUT", index = 1)]
     input_file: PathBuf,
     #[arg(value_name = "OUTPUT", index = 2)]
@@ -45,22 +48,44 @@ fn main() {
         let cmd = if args.do_not_simplify {
             cmd
         } else {
-            simplify(&mut ctx, &mut simplifier, cmd)
+            simplify_cmd(cmd, |e| {
+                let e_after_sca = if args.skip_sca {
+                    e
+                } else {
+                    let p = find_sca_simplification_candidates(&ctx, e);
+                    let subs: FxHashMap<_, _> = p
+                        .into_iter()
+                        .flat_map(|p| match verify_word_level_equality(&mut ctx, p) {
+                            ScaVerifyResult::Equal => Some((p.equality_expr(), ctx.get_true())),
+                            ScaVerifyResult::Unknown => None,
+                            ScaVerifyResult::Unequal(_) => {
+                                Some((p.equality_expr(), ctx.get_false()))
+                            }
+                        })
+                        .collect();
+                    substitute(&mut ctx, e, subs)
+                };
+                simplifier.simplify(&mut ctx, e_after_sca)
+            })
         };
         serialize_cmd(&mut out, Some(&ctx), &cmd).expect("failed to write command");
     }
 }
 
-fn simplify<T: ExprMap<Option<ExprRef>>>(
-    ctx: &mut Context,
-    s: &mut Simplifier<T>,
-    cmd: SmtCommand,
-) -> SmtCommand {
+fn substitute(ctx: &mut Context, e: ExprRef, subs: FxHashMap<ExprRef, ExprRef>) -> ExprRef {
+    if subs.is_empty() {
+        e
+    } else {
+        simple_transform_expr(ctx, e, |_, e, _| subs.get(&e).cloned())
+    }
+}
+
+fn simplify_cmd(cmd: SmtCommand, mut simplify: impl FnMut(ExprRef) -> ExprRef) -> SmtCommand {
     match cmd {
-        SmtCommand::Assert(e) => SmtCommand::Assert(s.simplify(ctx, e)),
-        SmtCommand::DefineConst(sym, value) => SmtCommand::DefineConst(sym, s.simplify(ctx, value)),
+        SmtCommand::Assert(e) => SmtCommand::Assert(simplify(e)),
+        SmtCommand::DefineConst(sym, value) => SmtCommand::DefineConst(sym, simplify(value)),
         SmtCommand::CheckSatAssuming(e) => {
-            SmtCommand::CheckSatAssuming(e.into_iter().map(|e| s.simplify(ctx, e)).collect())
+            SmtCommand::CheckSatAssuming(e.into_iter().map(|e| simplify(e)).collect())
         }
         other => other,
     }
