@@ -424,6 +424,17 @@ impl ScaEqualityProblem {
     pub fn equality_expr(&self) -> ExprRef {
         self.equality
     }
+
+    /// Runs the provided simplifier on the gate-level expression.
+    pub fn simplify_gate_level<T: ExprMap<Option<ExprRef>>>(
+        &self,
+        ctx: &mut Context,
+        simplifier: &mut Simplifier<T>,
+    ) -> Self {
+        let mut r = self.clone();
+        r.gate_level = simplifier.simplify(ctx, self.gate_level);
+        r
+    }
 }
 
 pub fn find_sca_simplification_candidates(ctx: &Context, e: ExprRef) -> Vec<ScaEqualityProblem> {

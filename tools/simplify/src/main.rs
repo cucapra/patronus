@@ -45,7 +45,7 @@ fn main() {
     while let Some(cmd) =
         read_command(&mut in_reader, &mut ctx, &mut st).expect("failed to read command")
     {
-        let cmd = if args.do_not_simplify {
+        let cmd = if args.do_not_simplify && args.skip_sca {
             cmd
         } else {
             simplify_cmd(cmd, |e| {
@@ -55,17 +55,28 @@ fn main() {
                     let p = find_sca_simplification_candidates(&ctx, e);
                     let subs: FxHashMap<_, _> = p
                         .into_iter()
-                        .flat_map(|p| match verify_word_level_equality(&mut ctx, p) {
-                            ScaVerifyResult::Equal => Some((p.equality_expr(), ctx.get_true())),
-                            ScaVerifyResult::Unknown => None,
-                            ScaVerifyResult::Unequal(_) => {
-                                Some((p.equality_expr(), ctx.get_false()))
+                        .flat_map(|p| {
+                            let p = if args.do_not_simplify {
+                                p
+                            } else {
+                                p.simplify_gate_level(&mut ctx, &mut simplifier)
+                            };
+                            match verify_word_level_equality(&mut ctx, p) {
+                                ScaVerifyResult::Equal => Some((p.equality_expr(), ctx.get_true())),
+                                ScaVerifyResult::Unknown => None,
+                                ScaVerifyResult::Unequal(_) => {
+                                    Some((p.equality_expr(), ctx.get_false()))
+                                }
                             }
                         })
                         .collect();
                     substitute(&mut ctx, e, subs)
                 };
-                simplifier.simplify(&mut ctx, e_after_sca)
+                if args.do_not_simplify {
+                    e_after_sca
+                } else {
+                    simplifier.simplify(&mut ctx, e_after_sca)
+                }
             })
         };
         serialize_cmd(&mut out, Some(&ctx), &cmd).expect("failed to write command");
