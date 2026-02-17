@@ -5,14 +5,14 @@
 use crate::{DefaultCoef, Poly, expr_to_var};
 use baa::BitVecOps;
 use patronus::expr::{
-    Context, DenseExprSet, Expr, ExprRef, ExprSet, ForEachChild, count_expr_uses,
+    Context, DenseExprSet, Expr, ExprRef, ExprSet, ForEachChild, count_expr_uses, traversal,
 };
-use polysub::{PhaseOptPolynom, VarIndex};
+use polysub::{Coef, Mod, PhaseOptPolynom, VarIndex};
 use rustc_hash::FxHashSet;
 use std::collections::VecDeque;
 
 /// Used for backwards substitution
-type PolyOpt = polysub::PhaseOptPolynom<DefaultCoef>;
+type PolyOpt = PhaseOptPolynom<DefaultCoef>;
 
 pub fn backwards_sub(
     ctx: &Context,
@@ -33,10 +33,11 @@ pub fn backwards_sub(
     let mut seen = DenseExprSet::default();
 
     while !todo.is_empty() {
-        //try_exhaustive(ctx, input_vars, &spec, todo.iter().cloned());
+        let min_idx = try_exhaustive(ctx, input_vars, &spec, todo.iter().cloned());
+        let (output_var, gate) = todo.swap_remove_back(min_idx).unwrap();
 
         // chose variable to replace
-        let (output_var, gate) = todo.pop_back().unwrap();
+        //let (output_var, gate) = todo.pop_back().unwrap();
 
         replaced.push(output_var);
         println!(
@@ -153,15 +154,79 @@ fn try_exhaustive(
     input_vars: &FxHashSet<VarIndex>,
     spec: &PolyOpt,
     todo: impl Iterator<Item = (VarIndex, ExprRef)>,
-) {
-    for (ii, (output_var, gate)) in todo.enumerate() {
-        let mut s = spec.clone();
-        replace_gate(ctx, input_vars, &mut s, output_var, gate);
-        println!(
-            "  {ii:>3}: {output_var} {:?}: {} -> {}",
-            &ctx[gate],
-            spec.size(),
+) -> usize {
+    let sizes: Vec<_> = todo
+        .enumerate()
+        .map(|(ii, (output_var, gate))| {
+            let mut s = spec.clone();
+            replace_gate(ctx, input_vars, &mut s, output_var, gate);
             s.size()
-        );
-    }
+        })
+        .collect();
+    let min = sizes.iter().cloned().min().unwrap();
+    let max = sizes.iter().cloned().max().unwrap();
+    let first_min = sizes.iter().position(|s| *s == min).unwrap();
+    println!("{} -> {min}/{max}", spec.size());
+    first_min
+}
+
+/// tries to build the gate-level polynomial from the bottom up.
+pub fn build_gate_polynomial(
+    ctx: &Context,
+    input_vars: &FxHashSet<VarIndex>,
+    m: Mod,
+    e: ExprRef,
+) -> Poly {
+    traversal::bottom_up(ctx, e, |ctx, gate, children: &[Poly]| {
+        let var = expr_to_var(gate);
+
+        // if this is an input, we just want to return the variable
+        if input_vars.contains(&var) {
+            return Poly::from_monoms(m, [(Coef::from_i64(1, m), vec![var].into())].into_iter());
+        }
+
+        match (ctx[gate].clone(), children) {
+            (Expr::BVOr(_, _, 1), [a, b]) => {
+                // a + b - ab
+                let mut r = a.mul(b);
+                r.scale(&Coef::from_i64(-1, m));
+                r.add_assign(a);
+                r.add_assign(b);
+                r
+            }
+            (Expr::BVXor(_, _, 1), [a, b]) => {
+                // a + b - 2ab
+                let mut r = a.mul(b);
+                r.scale(&Coef::from_i64(-2, m));
+                r.add_assign(a);
+                r.add_assign(b);
+                r
+            }
+            (Expr::BVAnd(_, _, 1), [a, b]) => {
+                // ab
+                a.mul(b)
+            }
+            (Expr::BVNot(_, 1), [a]) => {
+                // 1 - a
+                let one = Poly::from_monoms(m, [(Coef::from_i64(1, m), vec![].into())].into_iter());
+                let mut r = a.clone();
+                r.scale(&Coef::from_i64(-1, m));
+                r.add_assign(&one);
+                r
+            }
+            (Expr::BVSlice { .. }, [_]) => {
+                todo!("should not get here!")
+            }
+            (Expr::BVLiteral(value), _) => {
+                let value = value.get(ctx);
+                debug_assert_eq!(value.width(), 1);
+                if value.is_true() {
+                    Poly::from_monoms(m, [(Coef::from_i64(1, m), vec![].into())].into_iter())
+                } else {
+                    Poly::from_monoms(m, [(Coef::from_i64(0, m), vec![].into())].into_iter())
+                }
+            }
+            other => todo!("add support for {other:?}"),
+        }
+    })
 }

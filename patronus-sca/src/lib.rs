@@ -2,9 +2,9 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-mod backwards;
+mod rewrite;
 
-use crate::backwards::backwards_sub;
+use crate::rewrite::{backwards_sub, build_gate_polynomial};
 use baa::{BitVecOps, BitVecValue, BitVecValueRef};
 use patronus::expr::*;
 use polysub::{Coef, Term, VarIndex};
@@ -33,12 +33,6 @@ pub fn verify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) -> S
     };
     println!("word-level polynomial: {word_poly}");
 
-    // the actual reference polynomial needs to contain the output bits as well
-    let output_poly = poly_for_bv_expr(ctx, p.word_level);
-    word_poly.scale(&Coef::from_i64(-1, word_poly.get_mod()));
-    word_poly.add_assign(&output_poly);
-    let spec = word_poly;
-
     // collect all (bit-level) input variables
     let input_vars: FxHashSet<VarIndex> = inputs
         .iter()
@@ -50,6 +44,14 @@ pub fn verify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) -> S
             vars
         })
         .collect();
+
+    let gate_poly = build_gate_polynomial(ctx, &input_vars, word_poly.get_mod(), p.gate_level);
+
+    // the actual reference polynomial needs to contain the output bits as well
+    let output_poly = poly_for_bv_expr(ctx, p.word_level);
+    word_poly.scale(&Coef::from_i64(-1, word_poly.get_mod()));
+    word_poly.add_assign(&output_poly);
+    let spec = word_poly;
 
     // create todos for all output variables
     let gate_outputs: Vec<_> = (0..width)
