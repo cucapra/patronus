@@ -2,6 +2,9 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
+mod backwards;
+
+use crate::backwards::backwards_sub;
 use baa::{BitVecOps, BitVecValue, BitVecValueRef};
 use patronus::expr::*;
 use polysub::{Coef, Term, VarIndex};
@@ -153,158 +156,15 @@ fn extract_bit(ctx: &mut Context, e: ExprRef, bit: WidthInt) -> ExprRef {
 }
 
 type DefaultCoef = polysub::ArrayCoef<8>;
+/// Used for building the word-level polynomial
 type Poly = polysub::Polynom<DefaultCoef>;
 
 fn expr_to_var(e: ExprRef) -> polysub::VarIndex {
     (usize::from(e) as u32).into()
 }
 
-/// converts the two expression references and ensures that the smallest var index is returned first
-#[inline]
-fn exprs_to_vars_commutative(a: ExprRef, b: ExprRef) -> (VarIndex, VarIndex) {
-    let a = expr_to_var(a);
-    let b = expr_to_var(b);
-    if a > b { (b, a) } else { (a, b) }
-}
-
 fn var_to_expr(v: polysub::VarIndex) -> ExprRef {
     usize::from(v).into()
-}
-
-fn backwards_sub(
-    ctx: &Context,
-    input_vars: &FxHashSet<VarIndex>,
-    mut todo: Vec<(VarIndex, ExprRef)>,
-    mut spec: Poly,
-) -> Poly {
-    let mut var_roots: Vec<_> = todo.iter().map(|(v, _)| *v).collect();
-    var_roots.sort();
-
-    let m = spec.get_mod();
-    let one: DefaultCoef = Coef::from_i64(1, m);
-    let zero: DefaultCoef = Coef::from_i64(0, m);
-    let minus_one: DefaultCoef = Coef::from_i64(-1, m);
-    let minus_two: DefaultCoef = Coef::from_i64(-2, m);
-    // first, we count how often expressions are used
-    let roots: Vec<_> = todo.iter().map(|(_, e)| *e).collect();
-    let mut uses = count_expr_uses(ctx, roots);
-    let mut replaced = vec![];
-
-    let const_true_var = expr_to_var(ctx.get_true());
-
-    while let Some((output_var, gate)) = todo.pop() {
-        replaced.push(output_var);
-        println!("{output_var} {:?}: {}", &ctx[gate], spec.size());
-
-        let add_children = match ctx[gate].clone() {
-            Expr::BVOr(a, b, 1) => {
-                // a + b - ab
-                let (x0, x1) = exprs_to_vars_commutative(a, b);
-                let monoms = [
-                    (one.clone(), vec![x0].into()),
-                    (one.clone(), vec![x1].into()),
-                    (minus_one.clone(), vec![x0, x1].into()),
-                ];
-                assert_ne!(gate, a);
-                assert_ne!(gate, b);
-                spec.replace_var(output_var, &monoms);
-                true
-            }
-            Expr::BVXor(a, b, 1) => {
-                // a + b - 2ab
-                let (x0, x1) = exprs_to_vars_commutative(a, b);
-                let monoms = [
-                    (one.clone(), vec![x0].into()),
-                    (one.clone(), vec![x1].into()),
-                    (minus_two.clone(), vec![x0, x1].into()),
-                ];
-                assert_ne!(gate, a);
-                assert_ne!(gate, b);
-                spec.replace_var(output_var, &monoms);
-                true
-            }
-            Expr::BVAnd(a, b, 1) => {
-                // ab
-                let (x0, x1) = exprs_to_vars_commutative(a, b);
-                let monoms = [(one.clone(), vec![x0, x1].into())];
-                assert_ne!(gate, a);
-                assert_ne!(gate, b);
-                spec.replace_var(output_var, &monoms);
-                true
-            }
-            Expr::BVNot(a, 1) => {
-                // 1 - a
-                let x0 = expr_to_var(a);
-                let monoms = [
-                    (one.clone(), vec![].into()),
-                    (minus_one.clone(), vec![x0].into()),
-                ];
-                assert_ne!(gate, a);
-                spec.replace_var(output_var, &monoms);
-                true
-            }
-            Expr::BVSlice { hi, lo, e } => {
-                assert_eq!(hi, lo);
-                assert!(
-                    input_vars.contains(&expr_to_var(e)),
-                    "Not actually an input: {e:?}"
-                );
-                // a bit slice normally marks an input, thus we should be done!
-                false
-            }
-            Expr::BVLiteral(value) => {
-                let value = value.get(ctx);
-                debug_assert_eq!(value.width(), 1);
-                if value.is_true() {
-                    spec.replace_var(output_var, &[(one.clone(), vec![].into())]);
-                } else {
-                    spec.replace_var(output_var, &[(zero.clone(), vec![].into())]);
-                }
-                false
-            }
-            other => todo!("add support for {other:?}"),
-        };
-
-        if add_children {
-            ctx[gate].for_each_child(|&e| {
-                // reduce the use by one
-                let prev_uses = uses[e];
-                assert!(prev_uses > 0);
-                uses[e] = prev_uses - 1;
-                // did the use count just go down to zero?
-                let var = expr_to_var(e);
-                if prev_uses == 1 && !input_vars.contains(&var) {
-                    todo.push((var, e));
-                }
-            });
-        }
-    }
-
-    println!("Roots: {var_roots:?}");
-
-    replaced.sort();
-    println!("Replaced variables: {replaced:?}");
-
-    // find any expressions where uses are not zero
-    use patronus::expr::ExprMap;
-    let mut still_used: Vec<_> = uses
-        .iter()
-        .filter(|(_, v)| **v > 0)
-        .map(|(k, _)| expr_to_var(k))
-        .collect();
-    still_used.sort();
-    println!("Still used: {still_used:?}");
-
-    let mut remaining_vars: Vec<_> = spec
-        .sorted_monom_vec()
-        .iter()
-        .flat_map(|(_, t)| t.vars().cloned().collect::<Vec<_>>())
-        .collect();
-    remaining_vars.sort();
-    remaining_vars.dedup();
-    println!("Remaining vars: {remaining_vars:?}");
-
-    spec
 }
 
 fn poly_for_bv_expr(ctx: &mut Context, e: ExprRef) -> Poly {
@@ -312,7 +172,7 @@ fn poly_for_bv_expr(ctx: &mut Context, e: ExprRef) -> Poly {
         .get_bv_type(ctx)
         .expect("function only works with bitvector expressions.");
     let m = polysub::Mod::from_bits(width);
-    polysub::Polynom::from_monoms(
+    Poly::from_monoms(
         m,
         (0..width).map(|ii| {
             // add an entry for each bit
@@ -332,7 +192,7 @@ fn poly_for_bv_literal(value: BitVecValueRef) -> Poly {
     let coef = Coef::from_big(&big_value, m);
     // now we create a polynomial with just this coefficient
     let monom = (coef, vec![].into());
-    polysub::Polynom::from_monoms(m, vec![monom].into_iter())
+    Poly::from_monoms(m, vec![monom].into_iter())
 }
 
 /// Returns a polynomial representation of the expression + all input expressions if possible.
