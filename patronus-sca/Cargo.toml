@@ -14,3 +14,4 @@ patronus = { path = "../patronus" }
 baa = {version = "0.17.1", features = ["bigint"]}
 rustc-hash.workspace = true
 polysub = "0.2.2"
+bit-set = "0.8.0"

@@ -45,7 +45,7 @@ pub fn verify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) -> S
         })
         .collect();
 
-    let gate_poly = build_gate_polynomial(ctx, &input_vars, word_poly.get_mod(), p.gate_level);
+    //let gate_poly = build_gate_polynomial(ctx, &input_vars, word_poly.get_mod(), p.gate_level);
 
     // the actual reference polynomial needs to contain the output bits as well
     let output_poly = poly_for_bv_expr(ctx, p.word_level);

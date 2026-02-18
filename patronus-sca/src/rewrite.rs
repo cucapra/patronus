@@ -4,8 +4,10 @@
 
 use crate::{DefaultCoef, Poly, expr_to_var};
 use baa::BitVecOps;
+use bit_set::BitSet;
 use patronus::expr::{
-    Context, DenseExprSet, Expr, ExprRef, ExprSet, ForEachChild, count_expr_uses, traversal,
+    Context, DenseExprMetaData, DenseExprSet, Expr, ExprMap, ExprRef, ExprSet, ForEachChild,
+    count_expr_uses, traversal,
 };
 use polysub::{Coef, Mod, PhaseOptPolynom, VarIndex};
 use rustc_hash::FxHashSet;
@@ -20,6 +22,10 @@ pub fn backwards_sub(
     todo: Vec<(VarIndex, ExprRef)>,
     spec: Poly,
 ) -> Poly {
+    let root_vars: Vec<_> = todo.iter().map(|(v, _)| *v).collect();
+    let root_exprs: Vec<_> = todo.iter().map(|(_, e)| *e).collect();
+    let root_uses = analyze_uses(ctx, &root_exprs);
+
     // empirically, it looks like we should not use a stack
     let mut todo: VecDeque<_> = todo.into();
     let mut spec: PolyOpt = spec.into();
@@ -33,15 +39,22 @@ pub fn backwards_sub(
     let mut seen = DenseExprSet::default();
 
     while !todo.is_empty() {
-        let min_idx = try_exhaustive(ctx, input_vars, &spec, todo.iter().cloned());
+        let min_idx = try_exhaustive(ctx, input_vars, &spec, todo.iter().cloned(), &root_uses);
         let (output_var, gate) = todo.swap_remove_back(min_idx).unwrap();
 
         // chose variable to replace
         //let (output_var, gate) = todo.pop_back().unwrap();
 
         replaced.push(output_var);
+        let gate_uses = &root_uses[gate];
+        let num_output_uses = gate_uses.len();
+        let output_use_str = gate_uses
+            .iter()
+            .map(|ii| format!("{}", root_vars[ii]))
+            .collect::<Vec<_>>()
+            .join(", ");
         println!(
-            "{output_var} {:?}: {}, {}",
+            "{output_var} ({output_use_str}) {:?}: {}, {}",
             &ctx[gate],
             todo.len() + 1,
             spec.size()
@@ -154,20 +167,30 @@ fn try_exhaustive(
     input_vars: &FxHashSet<VarIndex>,
     spec: &PolyOpt,
     todo: impl Iterator<Item = (VarIndex, ExprRef)>,
+    root_uses: &impl ExprMap<BitSet>,
 ) -> usize {
     let sizes: Vec<_> = todo
         .enumerate()
         .map(|(ii, (output_var, gate))| {
             let mut s = spec.clone();
             replace_gate(ctx, input_vars, &mut s, output_var, gate);
-            s.size()
+            (s.size(), root_uses[gate].len())
         })
         .collect();
-    let min = sizes.iter().cloned().min().unwrap();
-    let max = sizes.iter().cloned().max().unwrap();
-    let first_min = sizes.iter().position(|s| *s == min).unwrap();
-    println!("{} -> {min}/{max}", spec.size());
-    first_min
+    let min = sizes.iter().map(|(s, _)| *s).min().unwrap();
+    let max = sizes.iter().map(|(s, _)| *s).max().unwrap();
+    let all_mins: Vec<_> = sizes.iter().filter(|(s, _)| *s == min).collect();
+    let lowest_min_use = all_mins.iter().map(|(_, u)| *u).min().unwrap();
+    let min_with_lowest_use = sizes
+        .iter()
+        .position(|(s, u)| *s == min && *u == lowest_min_use)
+        .unwrap();
+    println!(
+        "{} -> {min}/{max}, {} mins, lowest use: {lowest_min_use}",
+        spec.size(),
+        all_mins.len()
+    );
+    min_with_lowest_use
 }
 
 /// tries to build the gate-level polynomial from the bottom up.
@@ -229,4 +252,19 @@ pub fn build_gate_polynomial(
             other => todo!("add support for {other:?}"),
         }
     })
+}
+
+/// Calculates for each expression which root depends on it.
+fn analyze_uses(ctx: &Context, roots: &[ExprRef]) -> impl ExprMap<BitSet> {
+    let mut out = DenseExprMetaData::<BitSet>::default();
+
+    for (ii, &root) in roots.iter().enumerate() {
+        let mut id = BitSet::new();
+        id.insert(ii);
+        traversal::bottom_up(ctx, root, |_, e, _| {
+            out[e].union_with(&id);
+        })
+    }
+
+    out
 }
