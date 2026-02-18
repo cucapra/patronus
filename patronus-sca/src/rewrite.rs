@@ -33,7 +33,10 @@ pub fn backwards_sub(
     println!("XOR/AND: {xor_and_pairs:?}");
 
     let same_input = find_expr_with_same_inputs(ctx, gate_level_expr);
-    println!("SAME INPUT: {same_input:?}");
+    println!("Expressions that have the same input:");
+    for (a, b) in same_input {
+        println!("{:?} and {:?}", &ctx[a], &ctx[b]);
+    }
 
     // empirically, it looks like we should not use a stack
     let mut todo: VecDeque<_> = todo.into();
