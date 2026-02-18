@@ -9,8 +9,9 @@ use patronus::expr::{
     Context, DenseExprMetaData, DenseExprSet, Expr, ExprMap, ExprRef, ExprSet, ForEachChild,
     count_expr_uses, traversal,
 };
+use patronus::smt::Error::Parser;
 use polysub::{Coef, Mod, PhaseOptPolynom, VarIndex};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
 /// Used for backwards substitution
@@ -20,11 +21,19 @@ pub fn backwards_sub(
     ctx: &Context,
     input_vars: &FxHashSet<VarIndex>,
     todo: Vec<(VarIndex, ExprRef)>,
+    gate_level_expr: ExprRef,
     spec: Poly,
 ) -> Poly {
     let root_vars: Vec<_> = todo.iter().map(|(v, _)| *v).collect();
     let root_exprs: Vec<_> = todo.iter().map(|(_, e)| *e).collect();
     let root_uses = analyze_uses(ctx, &root_exprs);
+
+    // check to see if there are any half adders we can identify
+    let xor_and_pairs = find_xor_and_pairs(ctx, gate_level_expr);
+    println!("XOR/AND: {xor_and_pairs:?}");
+
+    let same_input = find_expr_with_same_inputs(ctx, gate_level_expr);
+    println!("SAME INPUT: {same_input:?}");
 
     // empirically, it looks like we should not use a stack
     let mut todo: VecDeque<_> = todo.into();
@@ -39,8 +48,10 @@ pub fn backwards_sub(
     let mut seen = DenseExprSet::default();
 
     while !todo.is_empty() {
-        let min_idx = try_exhaustive(ctx, input_vars, &spec, todo.iter().cloned(), &root_uses);
-        let (output_var, gate) = todo.swap_remove_back(min_idx).unwrap();
+        //let gate_idx = try_exhaustive(ctx, input_vars, &spec, todo.iter().cloned(), &root_uses);
+        // println!("CHOICE: {todo:?}");
+        let gate_idx = pick_smallest_use(todo.iter().cloned(), &root_uses);
+        let (output_var, gate) = todo.swap_remove_back(gate_idx).unwrap();
 
         // chose variable to replace
         //let (output_var, gate) = todo.pop_back().unwrap();
@@ -162,6 +173,15 @@ fn replace_gate(
     }
 }
 
+fn pick_smallest_use(
+    todo: impl Iterator<Item = (VarIndex, ExprRef)>,
+    root_uses: &impl ExprMap<BitSet>,
+) -> usize {
+    let uses: Vec<_> = todo.map(|(_, gate)| root_uses[gate].len()).collect();
+    let min_uses = *uses.iter().min().unwrap();
+    uses.iter().position(|u| *u == min_uses).unwrap()
+}
+
 fn try_exhaustive(
     ctx: &Context,
     input_vars: &FxHashSet<VarIndex>,
@@ -267,4 +287,59 @@ fn analyze_uses(ctx: &Context, roots: &[ExprRef]) -> impl ExprMap<BitSet> {
     }
 
     out
+}
+
+/// Tries to identify two expressions which correspond to "a and b" and "a xor b".
+fn find_xor_and_pairs(ctx: &Context, gate_level: ExprRef) -> Vec<(ExprRef, ExprRef)> {
+    let mut xor = FxHashMap::default();
+    let mut and = FxHashMap::default();
+    traversal::bottom_up(ctx, gate_level, |ctx, e, _| match ctx[e].clone() {
+        Expr::BVXor(a, b, 1) => {
+            xor.insert(two_expr_key(a, b), e);
+        }
+        Expr::BVAnd(a, b, 1) => {
+            and.insert(two_expr_key(a, b), e);
+        }
+        _ => {}
+    });
+    let mut out = vec![];
+    for (key, xor_e) in xor.iter() {
+        if let Some(and_e) = and.get(key) {
+            out.push((*xor_e, *and_e));
+        }
+    }
+    out
+}
+
+fn find_expr_with_same_inputs(ctx: &Context, gate_level: ExprRef) -> Vec<(ExprRef, ExprRef)> {
+    let mut others = FxHashMap::default();
+    traversal::bottom_up(ctx, gate_level, |ctx, e, _| match ctx[e].clone() {
+        Expr::BVXor(a, b, 1) | Expr::BVAnd(a, b, 1) | Expr::BVOr(a, b, 1) => {
+            let v = others.entry(two_expr_key(a, b)).or_insert(vec![]);
+            if !v.contains(&e) {
+                v.push(e);
+            }
+        }
+        _ => {}
+    });
+
+    let mut out = vec![];
+    for (key, value) in others {
+        if value.len() > 1 {
+            match value.as_slice() {
+                [a, b] => out.push((*a, *b)),
+                other => todo!("{other:?}"),
+            }
+        }
+    }
+    out
+}
+
+/// Sorts the two expressions to generate a unique key
+fn two_expr_key(a: ExprRef, b: ExprRef) -> (ExprRef, ExprRef) {
+    if usize::from(a) <= usize::from(b) {
+        (a, b)
+    } else {
+        (b, a)
+    }
 }

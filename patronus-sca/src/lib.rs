@@ -66,7 +66,7 @@ pub fn verify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) -> S
         .collect();
 
     // now we can perform backwards substitution
-    let result = backwards_sub(ctx, &input_vars, gate_outputs.into(), spec);
+    let result = backwards_sub(ctx, &input_vars, gate_outputs, p.gate_level, spec);
 
     if result.is_zero() {
         ScaVerifyResult::Equal
