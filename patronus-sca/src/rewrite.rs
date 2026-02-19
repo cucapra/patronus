@@ -7,9 +7,8 @@ use baa::BitVecOps;
 use bit_set::BitSet;
 use patronus::expr::{
     Context, DenseExprMetaData, DenseExprSet, Expr, ExprMap, ExprRef, ExprSet, ForEachChild,
-    count_expr_uses, traversal,
+    SerializableIrNode, count_expr_uses, traversal,
 };
-use patronus::smt::Error::Parser;
 use polysub::{Coef, Mod, PhaseOptPolynom, VarIndex};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
@@ -28,11 +27,12 @@ pub fn backwards_sub(
     let root_exprs: Vec<_> = todo.iter().map(|(_, e)| *e).collect();
     let root_uses = analyze_uses(ctx, &root_exprs);
 
-    print_gate_stats(ctx, input_vars, gate_level_expr);
+    let gate_count = print_gate_stats(ctx, input_vars, gate_level_expr);
 
     // check to see if there are any half adders we can identify
-    let xor_and_pairs = find_xor_and_pairs(ctx, gate_level_expr);
-    println!("XOR/AND: {xor_and_pairs:?}");
+    let has = find_half_adders(ctx, gate_level_expr);
+    println!("HAs: {has:?}");
+    let fas = find_full_adders(ctx, gate_level_expr);
 
     let same_input = find_expr_with_same_inputs(ctx, gate_level_expr);
     println!("Expressions that have the same input:");
@@ -52,7 +52,9 @@ pub fn backwards_sub(
     let mut replaced = vec![];
     let mut seen = DenseExprSet::default();
 
+    let mut iter_count = 0;
     while !todo.is_empty() {
+        iter_count += 1;
         //let gate_idx = try_exhaustive(ctx, input_vars, &spec, todo.iter().cloned(), &root_uses);
         // println!("CHOICE: {todo:?}");
         let gate_idx = pick_smallest_use(todo.iter().cloned(), &root_uses);
@@ -70,7 +72,7 @@ pub fn backwards_sub(
             .collect::<Vec<_>>()
             .join(", ");
         println!(
-            "{output_var} ({output_use_str}) {:?}: {}, {}",
+            "{iter_count}/{gate_count} {output_var} ({output_use_str}) {:?}: {}, {}",
             &ctx[gate],
             todo.len() + 1,
             spec.size()
@@ -178,17 +180,19 @@ fn replace_gate(
     }
 }
 
-fn print_gate_stats(ctx: &Context, input_vars: &FxHashSet<VarIndex>, root: ExprRef) {
+fn print_gate_stats(ctx: &Context, input_vars: &FxHashSet<VarIndex>, root: ExprRef) -> u32 {
     let mut ands = 0u32;
     let mut xors = 0u32;
     let mut ors = 0u32;
     let mut nots = 0u32;
     let mut ones = 0u32;
     let mut zeros = 0u32;
+    let mut seen = DenseExprSet::default();
     traversal::bottom_up(ctx, root, |ctx, e, _| {
-        if input_vars.contains(&expr_to_var(e)) {
+        if input_vars.contains(&expr_to_var(e)) || seen.contains(&e) {
             return;
         }
+        seen.insert(e);
         match &ctx[e] {
             Expr::BVOr(_, _, 1) => ors += 1,
             Expr::BVXor(_, _, 1) => xors += 1,
@@ -207,6 +211,7 @@ fn print_gate_stats(ctx: &Context, input_vars: &FxHashSet<VarIndex>, root: ExprR
         }
     });
     println!("AND: {ands}, XOR: {xors}, OR: {ors}, NOT: {nots}, 1: {ones}, 0: {zeros}");
+    ands + xors + ors + nots + ones + zeros
 }
 
 fn pick_smallest_use(
@@ -325,8 +330,18 @@ fn analyze_uses(ctx: &Context, roots: &[ExprRef]) -> impl ExprMap<BitSet> {
     out
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct HalfAdder {
+    a: ExprRef,
+    b: ExprRef,
+    /// a xor b
+    sum: ExprRef,
+    /// a and b
+    carry: ExprRef,
+}
+
 /// Tries to identify two expressions which correspond to "a and b" and "a xor b".
-fn find_xor_and_pairs(ctx: &Context, gate_level: ExprRef) -> Vec<(ExprRef, ExprRef)> {
+fn find_half_adders(ctx: &Context, gate_level: ExprRef) -> Vec<HalfAdder> {
     let mut xor = FxHashMap::default();
     let mut and = FxHashMap::default();
     traversal::bottom_up(ctx, gate_level, |ctx, e, _| match ctx[e].clone() {
@@ -341,9 +356,52 @@ fn find_xor_and_pairs(ctx: &Context, gate_level: ExprRef) -> Vec<(ExprRef, ExprR
     let mut out = vec![];
     for (key, xor_e) in xor.iter() {
         if let Some(and_e) = and.get(key) {
-            out.push((*xor_e, *and_e));
+            let (a, b) = key.clone();
+            let sum = *xor_e;
+            let carry = *and_e;
+            out.push(HalfAdder { a, b, sum, carry })
         }
     }
+    out
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct FullAdder {
+    a: ExprRef,
+    b: ExprRef,
+    // carry in
+    c: ExprRef,
+    /// a xor b xor c
+    sum: ExprRef,
+    /// a and b
+    carry: ExprRef,
+}
+
+fn find_full_adders(ctx: &Context, gate_level: ExprRef) -> Vec<HalfAdder> {
+    let mut xor = FxHashMap::default();
+    traversal::bottom_up(ctx, gate_level, |ctx, e, _| match ctx[e].clone() {
+        Expr::BVXor(a, b, 1) => {
+            let key = if let Expr::BVXor(a1, a2, 1) = ctx[a].clone() {
+                Some(three_expr_key(a1, a2, b))
+            } else if let Expr::BVXor(b1, b2, 1) = ctx[b].clone() {
+                Some(three_expr_key(a, b1, b2))
+            } else {
+                None
+            };
+            if let Some(key) = key {
+                xor.insert(key, e);
+            }
+        }
+        _ => {}
+    });
+
+    println!("Found {} 3-XOR gates", xor.len());
+    for v in xor.values() {
+        println!("  {}", v.serialize_to_str(ctx));
+    }
+
+    let mut out = vec![];
+    // TODO
     out
 }
 
@@ -378,4 +436,11 @@ fn two_expr_key(a: ExprRef, b: ExprRef) -> (ExprRef, ExprRef) {
     } else {
         (b, a)
     }
+}
+
+/// Sorts three expressions to generate a unique key
+fn three_expr_key(a: ExprRef, b: ExprRef, c: ExprRef) -> (ExprRef, ExprRef, ExprRef) {
+    let mut all = [a, b, c];
+    all.sort_by_key(|e| usize::from(*e));
+    (all[0], all[1], all[2])
 }

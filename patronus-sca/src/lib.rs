@@ -439,7 +439,7 @@ impl<'a, 'b> Display for PrettyPoly<'a, 'b> {
 mod tests {
     use super::*;
     use patronus::expr::{eval_bv_expr, find_symbols};
-    use patronus::smt::{SmtCommand, read_command};
+    use patronus::smt::{BITWUZLA, SmtCommand, Solver, read_command};
     use rustc_hash::FxHashMap;
     use std::io::BufReader;
 
@@ -465,10 +465,16 @@ mod tests {
         let mut ctx = Context::default();
         let e = read_first_assert_expr(&mut ctx, filename).unwrap();
         let candidates = find_sca_simplification_candidates(&ctx, e);
+        let mut simpl = Simplifier::new(DenseExprMetaData::default());
         for p in candidates {
+            println!("GATE: {}", p.gate_level.serialize_to_str(&ctx));
+            let p = p.simplify_gate_level(&mut ctx, &mut simpl);
+            println!("OPT-GATE: {}", p.gate_level.serialize_to_str(&ctx));
             let sca_based = verify_word_level_equality(&mut ctx, p);
             assert_eq!(sca_based, ScaVerifyResult::Equal);
         }
+        let mut solver = BITWUZLA.start(None).unwrap();
+        simpl.verify_simplification(&mut ctx, &mut solver).unwrap();
     }
 
     const ALL_FILES: &[&str] = &[
@@ -651,7 +657,7 @@ mod tests {
         if let ScaVerifyResult::Unequal(w) = result {
             println!("Witness: {w:?}");
         } else {
-            assert!(false, "{result:?}");
+            unreachable!("{result:?}");
         }
     }
 
