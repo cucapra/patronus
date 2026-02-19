@@ -44,6 +44,14 @@ fn test_simplify_and() {
         "and(not(and(not(a:bv<3>), b:bv<3>)), not(and(not(b), a)))",
         "not(xor(a:bv<3>, b:bv<3>))",
     );
+    ts(
+        "not(and(not(and(not(a:bv<3>), b:bv<3>)), not(and(not(b), a))))",
+        "xor(a:bv<3>, b:bv<3>)",
+    );
+    ts(
+        "not(and(not(and(b:bv<3>, not(a:bv<3>))), not(and(not(b), a))))",
+        "xor(b:bv<3>, a:bv<3>)",
+    );
 }
 
 #[test]
@@ -68,9 +76,6 @@ fn test_simplify_or() {
         "or(and(not(a:bv<3>), b:bv<3>), and(not(b), a))",
         "xor(a:bv<3>, b:bv<3>)",
     );
-
-    // equality truth table (sum of products)
-    // ts("or(and(a:bv<3>, b:bv<3>), and(not(b), not(a)))", "eq(a:bv<3>, b:bv<3>)");
 }
 
 #[test]

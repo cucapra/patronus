@@ -401,9 +401,6 @@ fn simplify_sum_of_products(
         match (prods[0], prods[1]) {
             // !a & b | a & !b
             ((false, true), (true, false)) => Some(ctx.xor(a, b)),
-            // !a & !b | a & b
-            // TODO: this currently cannot be triggered, because !a & !b gets converted with demorgan first!
-            ((false, false), (true, true)) => Some(ctx.equal(a, b)),
             _ => None,
         }
     } else {
