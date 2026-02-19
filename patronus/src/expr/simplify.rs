@@ -363,9 +363,77 @@ fn simplify_bv_or(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef> 
                     let and = ctx.and(*a, *b);
                     Some(ctx.not(and))
                 }
+                // sum of products form
+                (Expr::BVAnd(a1, b1, _), Expr::BVAnd(a2, b2, _)) => {
+                    simplify_sum_of_products(ctx, *a1, *b1, *a2, *b2)
+                }
                 _ => None,
             }
         }
+    }
+}
+
+// simplifies some sum of products expressions over exactly two products of t variables
+fn simplify_sum_of_products(
+    ctx: &mut Context,
+    a1: ExprRef,
+    b1: ExprRef,
+    a2: ExprRef,
+    b2: ExprRef,
+) -> Option<ExprRef> {
+    // recognize a / !a
+    let mut lits_1 = [Lit::from_expr(ctx, a1), Lit::from_expr(ctx, b1)];
+    let mut lits_2 = [Lit::from_expr(ctx, a2), Lit::from_expr(ctx, b2)];
+    // sort by inner expression in order to normalize the order since AND is commutative
+    lits_1.sort_by_key(|l| l.get_var());
+    lits_2.sort_by_key(|l| l.get_var());
+    // define a and b
+    let a = lits_1[0].get_var();
+    let b = lits_1[1].get_var();
+    // check that the second product also is over the same a and b
+    if a == lits_2[0].get_var() && b == lits_2[1].get_var() {
+        let prod_1 = (lits_1[0].is_neg(), lits_1[1].is_neg());
+        let prod_2 = (lits_2[0].is_neg(), lits_2[1].is_neg());
+        // sort products
+        let mut prods = [prod_1, prod_2];
+        prods.sort();
+
+        match (prods[0], prods[1]) {
+            // !a & b | a & !b
+            ((false, true), (true, false)) => Some(ctx.xor(a, b)),
+            // !a & !b | a & b
+            // TODO: this currently cannot be triggered, because !a & !b gets converted with demorgan first!
+            ((false, false), (true, true)) => Some(ctx.equal(a, b)),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+enum Lit {
+    Pos(ExprRef),
+    Neg(ExprRef),
+}
+
+impl Lit {
+    fn from_expr(ctx: &Context, e: ExprRef) -> Self {
+        if let Expr::BVNot(a, _) = &ctx[e] {
+            Lit::Neg(*a)
+        } else {
+            Lit::Pos(e)
+        }
+    }
+    fn get_var(&self) -> ExprRef {
+        match self {
+            Lit::Pos(e) => *e,
+            Lit::Neg(e) => *e,
+        }
+    }
+
+    fn is_neg(&self) -> bool {
+        matches!(self, Lit::Neg(_))
     }
 }
 

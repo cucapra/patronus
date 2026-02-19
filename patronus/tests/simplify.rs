@@ -37,7 +37,13 @@ fn test_simplify_and() {
     ts(
         "and(not(a:bv<3>), not(b:bv<3>))",
         "not(or(a:bv<3>, b:bv<3>))",
-    )
+    );
+
+    // and encoded xor (as one would get from an and-inverter-graph
+    ts(
+        "and(not(and(not(a:bv<3>), b:bv<3>)), not(and(not(b), a)))",
+        "not(xor(a:bv<3>, b:bv<3>))",
+    );
 }
 
 #[test]
@@ -55,7 +61,16 @@ fn test_simplify_or() {
     ts(
         "or(not(a:bv<3>), not(b:bv<3>))",
         "not(and(a:bv<3>, b:bv<3>))",
-    )
+    );
+
+    // xor truth table (sum of products)
+    ts(
+        "or(and(not(a:bv<3>), b:bv<3>), and(not(b), a))",
+        "xor(a:bv<3>, b:bv<3>)",
+    );
+
+    // equality truth table (sum of products)
+    // ts("or(and(a:bv<3>, b:bv<3>), and(not(b), not(a)))", "eq(a:bv<3>, b:bv<3>)");
 }
 
 #[test]
