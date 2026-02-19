@@ -30,7 +30,7 @@ pub fn simple_transform_expr(
 }
 
 #[inline]
-pub(crate) fn do_transform_expr<T: ExprMap<Option<ExprRef>>>(
+pub fn do_transform_expr<T: ExprMap<Option<ExprRef>>>(
     ctx: &mut Context,
     mode: ExprTransformMode,
     transformed: &mut T,

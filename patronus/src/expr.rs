@@ -28,6 +28,5 @@ pub use serialize::SerializableIrNode;
 pub(crate) use serialize::{serialize_expr, serialize_expr_ref};
 pub(crate) use simplify::simplify;
 pub use simplify::{Simplifier, simplify_single_expression};
-pub use transform::simple_transform_expr;
-pub(crate) use transform::{ExprTransformMode, do_transform_expr};
+pub use transform::{ExprTransformMode, do_transform_expr, simple_transform_expr};
 pub use types::{TypeCheck, TypeCheckError};

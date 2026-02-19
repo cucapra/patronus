@@ -103,6 +103,14 @@ impl<T: ExprMap<Option<ExprRef>>> Simplifier<T> {
     }
 }
 
+impl<T: ExprMap<Option<ExprRef>> + Default> Default for Simplifier<T> {
+    fn default() -> Self {
+        Self {
+            cache: T::default(),
+        }
+    }
+}
+
 /// Simplifies one expression (not its children)
 pub(crate) fn simplify(ctx: &mut Context, expr: ExprRef, children: &[ExprRef]) -> Option<ExprRef> {
     match (ctx[expr].clone(), children) {
@@ -323,6 +331,17 @@ fn simplify_bv_and(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef>
                 (Expr::BVNot(a, _), Expr::BVNot(b, _)) => {
                     let or = ctx.or(*a, *b);
                     Some(ctx.not(or))
+                }
+                // or(a, b) & !and(a,b) -> a xor b
+                (Expr::BVOr(a, b, _), Expr::BVNot(n, _))
+                | (Expr::BVNot(n, _), Expr::BVOr(a, b, _)) => {
+                    if let Expr::BVAnd(c, d, _) = &ctx[*n]
+                        && ((a == c && b == d) || (a == d && b == c))
+                    {
+                        Some(ctx.xor(*a, *b))
+                    } else {
+                        None
+                    }
                 }
                 _ => None,
             }
