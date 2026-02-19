@@ -585,6 +585,15 @@ fn test_bool_from_gate_level() {
         "and(not(and(not(c:bv<1>), not(b:bv<1>))), not(and(c, b)))",
         "xor(c:bv<1>, b:bv<1>)",
     );
+    // permutations
+    t.ts(
+        "and(not(and(not(b:bv<1>), not(c:bv<1>))), not(and(c, b)))",
+        "xor(b:bv<1>, c:bv<1>)",
+    );
+    t.ts(
+        "and(not(and(c: bv<1>, b:bv<1>)), not(and(not(b:bv<1>), not(c:bv<1>))))",
+        "xor(b:bv<1>, c:bv<1>)",
+    );
 }
 
 // TODO: add missing literals simplifications: https://github.com/ekiwi/maltese-private/blob/main/test/maltese/smt/SMTSimplifierLiteralsSpec.scala
