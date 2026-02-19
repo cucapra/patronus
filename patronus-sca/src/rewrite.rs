@@ -28,6 +28,8 @@ pub fn backwards_sub(
     let root_exprs: Vec<_> = todo.iter().map(|(_, e)| *e).collect();
     let root_uses = analyze_uses(ctx, &root_exprs);
 
+    print_gate_stats(ctx, input_vars, gate_level_expr);
+
     // check to see if there are any half adders we can identify
     let xor_and_pairs = find_xor_and_pairs(ctx, gate_level_expr);
     println!("XOR/AND: {xor_and_pairs:?}");
@@ -174,6 +176,37 @@ fn replace_gate(
         }
         other => todo!("add support for {other:?}"),
     }
+}
+
+fn print_gate_stats(ctx: &Context, input_vars: &FxHashSet<VarIndex>, root: ExprRef) {
+    let mut ands = 0u32;
+    let mut xors = 0u32;
+    let mut ors = 0u32;
+    let mut nots = 0u32;
+    let mut ones = 0u32;
+    let mut zeros = 0u32;
+    traversal::bottom_up(ctx, root, |ctx, e, _| {
+        if input_vars.contains(&expr_to_var(e)) {
+            return;
+        }
+        match &ctx[e] {
+            Expr::BVOr(_, _, 1) => ors += 1,
+            Expr::BVXor(_, _, 1) => xors += 1,
+            Expr::BVAnd(_, _, 1) => ands += 1,
+            Expr::BVNot(_, 1) => nots += 1,
+            Expr::BVLiteral(value) => {
+                let value = value.get(ctx);
+                debug_assert_eq!(value.width(), 1);
+                if value.is_true() {
+                    ones += 1;
+                } else {
+                    zeros += 1;
+                }
+            }
+            _ => {} // ignore
+        }
+    });
+    println!("AND: {ands}, XOR: {xors}, OR: {ors}, NOT: {nots}, 1: {ones}, 0: {zeros}");
 }
 
 fn pick_smallest_use(
