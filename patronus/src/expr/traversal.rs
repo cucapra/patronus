@@ -15,6 +15,7 @@ pub fn bottom_up<R>(
     expr: ExprRef,
     f: impl FnMut(&Context, ExprRef, &[R]) -> R,
 ) -> R {
+    // TODO: custom implementation that does not repeatedly visit the same nodes in the DAG
     bottom_up_multi_pat(
         ctx,
         expr,

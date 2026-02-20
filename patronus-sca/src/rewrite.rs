@@ -11,6 +11,7 @@ use patronus::expr::{
 };
 use polysub::{Coef, Mod, PhaseOptPolynom, VarIndex};
 use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::SmallVec;
 use std::collections::VecDeque;
 
 /// Used for backwards substitution
@@ -33,6 +34,7 @@ pub fn backwards_sub(
     let has = find_half_adders(ctx, gate_level_expr);
     println!("HAs: {has:?}");
     let fas = find_full_adders(ctx, gate_level_expr);
+    println!("FAs: {fas:?}");
 
     let same_input = find_expr_with_same_inputs(ctx, gate_level_expr);
     println!("Expressions that have the same input:");
@@ -377,9 +379,11 @@ struct FullAdder {
     carry: ExprRef,
 }
 
-fn find_full_adders(ctx: &Context, gate_level: ExprRef) -> Vec<HalfAdder> {
+fn find_full_adders(ctx: &Context, gate_level: ExprRef) -> Vec<FullAdder> {
     let mut xor = FxHashMap::default();
+    let mut majority = FxHashMap::default();
     traversal::bottom_up(ctx, gate_level, |ctx, e, _| match ctx[e].clone() {
+        // s = xor(a, b, c) = xor(xor(a, b), c) = xor(a, xor(b, c))
         Expr::BVXor(a, b, 1) => {
             let key = if let Expr::BVXor(a1, a2, 1) = ctx[a].clone() {
                 Some(three_expr_key(a1, a2, b))
@@ -392,16 +396,96 @@ fn find_full_adders(ctx: &Context, gate_level: ExprRef) -> Vec<HalfAdder> {
                 xor.insert(key, e);
             }
         }
+        // c = majority(a,b,c) = ((a xor b) and c) or (a and b)
+        //                     = or(and(a, b), or(and(a,c), and(b,c)))
+        Expr::BVOr(o1, o2, 1) => {
+            let key = match (ctx[o1].clone(), ctx[o2].clone()) {
+                (Expr::BVAnd(a11, a12, 1), Expr::BVAnd(a21, a22, 1)) => {
+                    if let Expr::BVXor(a, b, 1) = ctx[a11].clone() {
+                        let c = a12;
+                        if a != c && b != c && ((a21 == a && a22 == b) || (a21 == b && a22 == a)) {
+                            Some(three_expr_key(a, b, c))
+                        } else {
+                            None
+                        }
+                    } else if let Expr::BVXor(a, b, 1) = ctx[a12].clone() {
+                        let c = a11;
+                        if a != c && b != c && ((a21 == a && a22 == b) || (a21 == b && a22 == a)) {
+                            Some(three_expr_key(a, b, c))
+                        } else {
+                            None
+                        }
+                    } else if let Expr::BVXor(a, b, 1) = ctx[a21].clone() {
+                        let c = a22;
+                        if a != c && b != c && ((a11 == a && a12 == b) || (a11 == b && a12 == a)) {
+                            Some(three_expr_key(a, b, c))
+                        } else {
+                            None
+                        }
+                    } else if let Expr::BVXor(a, b, 1) = ctx[a22].clone() {
+                        let c = a21;
+                        if a != c && b != c && ((a11 == a && a12 == b) || (a11 == b && a12 == a)) {
+                            Some(three_expr_key(a, b, c))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                (Expr::BVAnd(a11, a12, 1), Expr::BVOr(o11, o12, 1))
+                | (Expr::BVOr(o11, o12, 1), Expr::BVAnd(a11, a12, 1)) => {
+                    if let (Expr::BVAnd(a21, a22, 1), Expr::BVAnd(a31, a32, 1)) =
+                        (ctx[o11].clone(), ctx[o12].clone())
+                    {
+                        let products = [[a11, a12], [a21, a22], [a31, a32]];
+                        // check that there are exactly three unique variables in these products
+                        let mut vars: SmallVec<[_; 6]> =
+                            products.iter().cloned().flatten().collect();
+                        vars.sort();
+                        vars.dedup();
+                        if vars.len() == 3 {
+                            // each var needs to appear in exactly 2 products
+                            let exactly_2 = vars
+                                .iter()
+                                .map(|var| products.iter().filter(|p| p.contains(var)).count())
+                                .all(|c| c == 2);
+                            if exactly_2 {
+                                Some(three_expr_key(vars[0], vars[1], vars[2]))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            if let Some(key) = key {
+                majority.insert(key, e);
+            }
+        }
         _ => {}
     });
 
-    println!("Found {} 3-XOR gates", xor.len());
-    for v in xor.values() {
-        println!("  {}", v.serialize_to_str(ctx));
-    }
-
     let mut out = vec![];
-    // TODO
+    for (key, xor_e) in xor.iter() {
+        if let Some(maj_e) = majority.get(key) {
+            let (a, b, c) = *key;
+            let sum = *xor_e;
+            let carry = *maj_e;
+            out.push(FullAdder {
+                a,
+                b,
+                c,
+                sum,
+                carry,
+            })
+        }
+    }
     out
 }
 
