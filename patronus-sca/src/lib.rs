@@ -26,6 +26,8 @@ pub fn verify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) -> S
     let width = p.word_level.get_bv_type(ctx).unwrap();
     debug_assert_eq!(width, p.gate_level.get_bv_type(ctx).unwrap());
 
+    println!("Word level expr:\n{}", p.word_level.serialize_to_str(ctx));
+
     // create a reference polynomial from the word level side
     let (mut word_poly, inputs) = match build_bottom_up_poly(ctx, p.word_level) {
         None => return ScaVerifyResult::Unknown,

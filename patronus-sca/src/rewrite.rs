@@ -32,9 +32,9 @@ pub fn backwards_sub(
 
     // check to see if there are any half adders we can identify
     let has = find_half_adders(ctx, gate_level_expr);
-    println!("HAs: {has:?}");
+    println!("{} HAs: {has:?}", has.len());
     let fas = find_full_adders(ctx, gate_level_expr);
-    println!("FAs: {fas:?}");
+    println!("{} FAs: {fas:?}", fas.len());
 
     let same_input = find_expr_with_same_inputs(ctx, gate_level_expr);
     println!("Expressions that have the same input:");
