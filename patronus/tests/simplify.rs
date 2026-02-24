@@ -71,7 +71,7 @@ fn test_simplify_and() {
     );
     t.ts(
         "not(and(not(and(b:bv<3>, not(a:bv<3>))), not(and(not(b), a))))",
-        "xor(b:bv<3>, a:bv<3>)",
+        "xor(a:bv<3>, b:bv<3>)",
     );
 }
 
