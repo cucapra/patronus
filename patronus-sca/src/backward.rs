@@ -13,6 +13,7 @@ use polysub::{Coef, Mod, PhaseOptPolynom, VarIndex};
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 use std::collections::VecDeque;
+use std::fmt::{Display, Formatter};
 
 /// Used for backwards substitution
 type PolyOpt = PhaseOptPolynom<DefaultCoef>;
@@ -33,14 +34,15 @@ pub fn backwards_sub(
     // check to see if there are any half adders we can identify
     let mut has = find_half_adders(ctx, gate_level_expr);
     has.sort_by_key(|ha| std::cmp::min(usize::from(ha.sum), usize::from(ha.carry)));
-    let ha_id = FxHashMap::from_iter(has.iter().enumerate().map(|(ii, ha)| (*ha, ii)));
     println!("{} HAs: {has:?}", has.len());
     let fas = find_full_adders(ctx, gate_level_expr);
     println!("{} FAs: {fas:?}", fas.len());
     let output_to_ha = FxHashMap::from_iter(
-        has.into_iter()
-            .flat_map(|ha| vec![(ha.sum, ha), (ha.carry, ha)]),
+        has.iter()
+            .enumerate()
+            .flat_map(|(ii, ha)| vec![(ha.sum, ii), (ha.carry, ii)]),
     );
+    let ha_uses = analyze_ha_uses(ctx, gate_level_expr, &has, &output_to_ha);
 
     let mut spec: PolyOpt = spec.into();
     let mut var_roots: Vec<_> = todo.iter().map(|(v, _)| *v).collect();
@@ -55,7 +57,7 @@ pub fn backwards_sub(
     let mut iter_count = 0;
     while !todo.is_empty() {
         iter_count += 1;
-        let gate = pick_gate(&todo, &root_uses, &output_to_ha, &replaced);
+        let gate = pick_gate(&todo, &root_uses, &output_to_ha, &has, &replaced, &ha_uses);
         let output_var = todo.remove(&gate).unwrap();
 
         debug_assert!(!replaced.contains(&output_var));
@@ -66,7 +68,8 @@ pub fn backwards_sub(
             .map(|ii| format!("{}", root_vars[ii]))
             .collect::<Vec<_>>()
             .join(", ");
-        let ha_str = half_adder_info(gate, &output_to_ha, &replaced, &ha_id);
+        let ha_str = half_adder_info(gate, &has, &output_to_ha, &replaced);
+
         let before_size = spec.size();
 
         let add_children = replace_gate(ctx, input_vars, &mut spec, output_var, gate);
@@ -129,12 +132,12 @@ pub fn backwards_sub(
 
 fn half_adder_info(
     gate: ExprRef,
-    output_to_ha: &FxHashMap<ExprRef, HalfAdder>,
+    has: &[HalfAdder],
+    output_to_ha: &FxHashMap<ExprRef, usize>,
     replaced: &FxHashSet<VarIndex>,
-    ha_id: &FxHashMap<HalfAdder, usize>,
 ) -> String {
-    if let Some(ha) = output_to_ha.get(&gate) {
-        let id = ha_id[ha];
+    if let Some(&id) = output_to_ha.get(&gate) {
+        let ha = &has[id];
         if ha.sum == gate {
             if replaced.contains(&expr_to_var(ha.carry)) {
                 format!(" (S{id} -> DONE)")
@@ -238,13 +241,28 @@ fn print_gate_stats(ctx: &Context, input_vars: &FxHashSet<VarIndex>, root: ExprR
 fn pick_gate(
     todo: &FxHashMap<ExprRef, VarIndex>,
     root_uses: &impl ExprMap<BitSet>,
-    output_to_ha: &FxHashMap<ExprRef, HalfAdder>,
+    output_to_ha: &FxHashMap<ExprRef, usize>,
+    has: &[HalfAdder],
     replaced: &FxHashSet<VarIndex>,
+    ha_uses: &impl ExprMap<BitSet>,
 ) -> ExprRef {
+    let ha_uses_str: Vec<_> = todo
+        .keys()
+        .map(|&e| {
+            let items: Vec<_> = ha_uses[e]
+                .iter()
+                .map(|i| format!("{}", HalfAdderOut::from(i)))
+                .collect();
+            format!("{{{}}}", items.join(", "))
+        })
+        .collect();
+    println!("HA: [{}]", ha_uses_str.join(", "));
+
     // check to see if there is a gate that would finish a half adder
     let mut other_output_available = vec![];
     for &gate in todo.keys() {
-        if let Some(ha) = output_to_ha.get(&gate) {
+        if let Some(&ha_index) = output_to_ha.get(&gate) {
+            let ha = &has[ha_index];
             let other = ha.get_other_output(gate).unwrap();
             if replaced.contains(&expr_to_var(other)) {
                 return gate;
@@ -315,6 +333,86 @@ fn try_exhaustive(
         all_mins.len()
     );
     min_with_lowest_use
+}
+
+#[derive(Debug, Copy, Clone)]
+enum HalfAdderOut {
+    Sum(usize),
+    Carry(usize),
+}
+
+impl Display for HalfAdderOut {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HalfAdderOut::Sum(i) => write!(f, "S{i}"),
+            HalfAdderOut::Carry(i) => write!(f, "C{i}"),
+        }
+    }
+}
+
+impl HalfAdderOut {
+    pub fn from_index_and_expr(has: &[HalfAdder], index: usize, e: ExprRef) -> Option<Self> {
+        let ha = &has[index];
+        if ha.sum == e {
+            Some(Self::Sum(index))
+        } else if ha.carry == e {
+            Some(Self::Carry(index))
+        } else {
+            None
+        }
+    }
+}
+
+impl From<HalfAdderOut> for usize {
+    fn from(value: HalfAdderOut) -> Self {
+        match value {
+            HalfAdderOut::Sum(i) => i * 2,
+            HalfAdderOut::Carry(i) => i * 2 + 1,
+        }
+    }
+}
+
+impl From<usize> for HalfAdderOut {
+    fn from(value: usize) -> Self {
+        if value & 1 == 1 {
+            Self::Carry(value / 2)
+        } else {
+            Self::Sum(value / 2)
+        }
+    }
+}
+
+fn analyze_ha_uses(
+    ctx: &Context,
+    root: ExprRef,
+    has: &[HalfAdder],
+    output_to_ha: &FxHashMap<ExprRef, usize>,
+) -> impl ExprMap<BitSet> {
+    let mut out = DenseExprMetaData::<BitSet>::default();
+
+    traversal::bottom_up(ctx, root, |_, e, c: &[BitSet]| {
+        let set = if let Some(&index) = output_to_ha.get(&e) {
+            let out = HalfAdderOut::from_index_and_expr(has, index, e).unwrap();
+            let mut set = BitSet::new();
+            set.insert(out.into());
+            set
+        } else {
+            if c.is_empty() {
+                BitSet::new()
+            } else if c.len() == 1 {
+                c[0].clone()
+            } else {
+                assert_eq!(c.len(), 2);
+                let mut r = c[0].clone();
+                r.union_with(&c[1]);
+                r
+            }
+        };
+        out[e] = set.clone();
+        set
+    });
+
+    out
 }
 
 /// Calculates for each expression which root depends on it.

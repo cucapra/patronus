@@ -2,11 +2,11 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
+mod backward;
 mod forward;
-mod rewrite;
 
+use crate::backward::backwards_sub;
 use crate::forward::{BuildPolyMode, build_bottom_up_poly, poly_for_bv_expr};
-use crate::rewrite::backwards_sub;
 use baa::{BitVecOps, BitVecValue, BitVecValueRef};
 use patronus::expr::*;
 use polysub::{Coef, Term, VarIndex};
