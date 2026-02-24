@@ -5,8 +5,8 @@
 mod forward;
 mod rewrite;
 
-use crate::forward::{build_bottom_up_poly, poly_for_bv_expr};
-use crate::rewrite::{backwards_sub, build_gate_polynomial};
+use crate::forward::{BuildPolyMode, build_bottom_up_poly, poly_for_bv_expr};
+use crate::rewrite::backwards_sub;
 use baa::{BitVecOps, BitVecValue, BitVecValueRef};
 use patronus::expr::*;
 use polysub::{Coef, Term, VarIndex};
@@ -32,11 +32,13 @@ pub fn verify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) -> S
     let inputs = find_symbols(ctx, p.word_level);
 
     // create a reference polynomial from the word level side
-    let mut word_poly = match build_bottom_up_poly(ctx, &inputs, p.word_level) {
-        None => return ScaVerifyResult::Unknown,
-        Some(p) => p,
-    };
+    let mut word_poly =
+        match build_bottom_up_poly(ctx, &inputs, p.word_level, BuildPolyMode::Arithmetic) {
+            None => return ScaVerifyResult::Unknown,
+            Some(p) => p,
+        };
     println!("word-level polynomial: {word_poly}");
+    println!("word-level bits: {}", word_poly.get_mod().bits());
 
     // collect all (bit-level) input variables
     let input_vars: FxHashSet<VarIndex> = inputs
@@ -50,7 +52,11 @@ pub fn verify_word_level_equality(ctx: &mut Context, p: ScaEqualityProblem) -> S
         })
         .collect();
 
-    //let gate_poly = build_gate_polynomial(ctx, &input_vars, word_poly.get_mod(), p.gate_level);
+    // TODO: how do we calculate a correct polynomial from the gate level?
+    // let gate_poly = build_bottom_up_poly(ctx, &inputs, p.gate_level, BuildPolyMode::Gates(word_poly.get_mod()));
+    // if let Some(gate_poly) = gate_poly {
+    //     println!("GATE POLY: {gate_poly}");
+    // }
 
     // the actual reference polynomial needs to contain the output bits as well
     let output_poly = poly_for_bv_expr(ctx, p.word_level);
@@ -395,7 +401,9 @@ mod tests {
             let cs = find_sca_simplification_candidates(&ctx, e);
             for c in cs {
                 let inputs = find_symbols(&ctx, c.word_level);
-                if let Some(word_poly) = build_bottom_up_poly(&mut ctx, &inputs, c.word_level) {
+                if let Some(word_poly) =
+                    build_bottom_up_poly(&mut ctx, &inputs, c.word_level, BuildPolyMode::Arithmetic)
+                {
                     println!("{filename}:\n{}\n", PrettyPoly::n(&ctx, &word_poly));
                 } else {
                     println!(

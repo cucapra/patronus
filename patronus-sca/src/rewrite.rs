@@ -317,67 +317,6 @@ fn try_exhaustive(
     min_with_lowest_use
 }
 
-/// tries to build the gate-level polynomial from the bottom up.
-pub fn build_gate_polynomial(
-    ctx: &Context,
-    input_vars: &FxHashSet<VarIndex>,
-    m: Mod,
-    e: ExprRef,
-) -> Poly {
-    traversal::bottom_up(ctx, e, |ctx, gate, children: &[Poly]| {
-        let var = expr_to_var(gate);
-
-        // if this is an input, we just want to return the variable
-        if input_vars.contains(&var) {
-            return Poly::from_monoms(m, [(Coef::from_i64(1, m), vec![var].into())].into_iter());
-        }
-
-        match (ctx[gate].clone(), children) {
-            (Expr::BVOr(_, _, 1), [a, b]) => {
-                // a + b - ab
-                let mut r = a.mul(b);
-                r.scale(&Coef::from_i64(-1, m));
-                r.add_assign(a);
-                r.add_assign(b);
-                r
-            }
-            (Expr::BVXor(_, _, 1), [a, b]) => {
-                // a + b - 2ab
-                let mut r = a.mul(b);
-                r.scale(&Coef::from_i64(-2, m));
-                r.add_assign(a);
-                r.add_assign(b);
-                r
-            }
-            (Expr::BVAnd(_, _, 1), [a, b]) => {
-                // ab
-                a.mul(b)
-            }
-            (Expr::BVNot(_, 1), [a]) => {
-                // 1 - a
-                let one = Poly::from_monoms(m, [(Coef::from_i64(1, m), vec![].into())].into_iter());
-                let mut r = a.clone();
-                r.scale(&Coef::from_i64(-1, m));
-                r.add_assign(&one);
-                r
-            }
-            (Expr::BVSlice { .. }, [_]) => {
-                todo!("should not get here!")
-            }
-            (Expr::BVLiteral(value), _) => {
-                let value = value.get(ctx);
-                debug_assert_eq!(value.width(), 1);
-                if value.is_true() {
-                    Poly::from_monoms(m, [(Coef::from_i64(1, m), vec![].into())].into_iter())
-                } else {
-                    Poly::from_monoms(m, [(Coef::from_i64(0, m), vec![].into())].into_iter())
-                }
-            }
-            other => todo!("add support for {other:?}"),
-        }
-    })
-}
-
 /// Calculates for each expression which root depends on it.
 fn analyze_uses(ctx: &Context, roots: &[ExprRef]) -> impl ExprMap<BitSet> {
     let mut out = DenseExprMetaData::<BitSet>::default();

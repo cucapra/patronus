@@ -9,7 +9,7 @@ use rustc_hash::FxHashSet;
 pub type UseCountInt = u16;
 
 /// Counts how often expressions in the DAGs characterized by the provided roots are used.
-pub fn count_expr_uses(ctx: &Context, roots: Vec<ExprRef>) -> impl ExprMap<UseCountInt> {
+pub fn count_expr_uses(ctx: &Context, roots: Vec<ExprRef>) -> impl ExprMap<UseCountInt> + use<> {
     let mut use_count = SparseExprMap::default();
     let mut todo = roots;
 
