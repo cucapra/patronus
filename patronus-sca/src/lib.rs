@@ -469,9 +469,9 @@ mod tests {
         let candidates = find_sca_simplification_candidates(&ctx, e);
         let mut simpl = Simplifier::new(DenseExprMetaData::default());
         for p in candidates {
-            println!("GATE: {}", p.gate_level.serialize_to_str(&ctx));
+            // println!("GATE: {}", p.gate_level.serialize_to_str(&ctx));
             let p = p.simplify_gate_level(&mut ctx, &mut simpl);
-            println!("OPT-GATE: {}", p.gate_level.serialize_to_str(&ctx));
+            // println!("OPT-GATE: {}", p.gate_level.serialize_to_str(&ctx));
             let sca_based = verify_word_level_equality(&mut ctx, p);
             assert_eq!(sca_based, ScaVerifyResult::Equal);
         }

@@ -7,7 +7,7 @@ use baa::BitVecOps;
 use bit_set::BitSet;
 use patronus::expr::{
     Context, DenseExprMetaData, DenseExprSet, Expr, ExprMap, ExprRef, ExprSet, ForEachChild,
-    SerializableIrNode, count_expr_uses, traversal,
+    count_expr_uses, traversal,
 };
 use polysub::{Coef, Mod, PhaseOptPolynom, VarIndex};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -20,7 +20,7 @@ type PolyOpt = PhaseOptPolynom<DefaultCoef>;
 pub fn backwards_sub(
     ctx: &Context,
     input_vars: &FxHashSet<VarIndex>,
-    todo: Vec<(VarIndex, ExprRef)>,
+    mut todo: Vec<(VarIndex, ExprRef)>,
     gate_level_expr: ExprRef,
     spec: Poly,
 ) -> Poly {
@@ -35,15 +35,12 @@ pub fn backwards_sub(
     println!("{} HAs: {has:?}", has.len());
     let fas = find_full_adders(ctx, gate_level_expr);
     println!("{} FAs: {fas:?}", fas.len());
-
-    let same_input = find_expr_with_same_inputs(ctx, gate_level_expr);
-    println!("Expressions that have the same input:");
-    for (a, b) in same_input {
-        println!("{:?} and {:?}", &ctx[a], &ctx[b]);
-    }
+    let output_to_ha = FxHashMap::from_iter(
+        has.into_iter()
+            .flat_map(|ha| vec![(ha.sum, ha), (ha.carry, ha)]),
+    );
 
     // empirically, it looks like we should not use a stack
-    let mut todo: VecDeque<_> = todo.into();
     let mut spec: PolyOpt = spec.into();
     let mut var_roots: Vec<_> = todo.iter().map(|(v, _)| *v).collect();
     var_roots.sort();
@@ -51,21 +48,21 @@ pub fn backwards_sub(
     // first, we count how often expressions are used
     let roots: Vec<_> = todo.iter().map(|(_, e)| *e).collect();
     let mut uses = count_expr_uses(ctx, roots);
-    let mut replaced = vec![];
-    let mut seen = DenseExprSet::default();
+    let mut replaced = FxHashSet::default();
 
     let mut iter_count = 0;
     while !todo.is_empty() {
         iter_count += 1;
         //let gate_idx = try_exhaustive(ctx, input_vars, &spec, todo.iter().cloned(), &root_uses);
         // println!("CHOICE: {todo:?}");
-        let gate_idx = pick_smallest_use(todo.iter().cloned(), &root_uses);
-        let (output_var, gate) = todo.swap_remove_back(gate_idx).unwrap();
+        let gate_idx = pick_gate(todo.as_slice(), &root_uses, &output_to_ha, &replaced);
+        let (output_var, gate) = todo.swap_remove(gate_idx);
 
         // chose variable to replace
         //let (output_var, gate) = todo.pop_back().unwrap();
 
-        replaced.push(output_var);
+        debug_assert!(!replaced.contains(&output_var));
+        replaced.insert(output_var);
         let gate_uses = &root_uses[gate];
         let num_output_uses = gate_uses.len();
         let output_use_str = gate_uses
@@ -91,7 +88,7 @@ pub fn backwards_sub(
                 // did the use count just go down to zero?
                 let var = expr_to_var(e);
                 if prev_uses == 1 && !input_vars.contains(&var) {
-                    todo.push_back((var, e));
+                    todo.push((var, e));
                 } else {
                     let old_size = spec.size();
                     if spec.invert_size_change(var) < 0 {
@@ -105,6 +102,7 @@ pub fn backwards_sub(
 
     println!("Roots: {var_roots:?}");
 
+    let mut replaced: Vec<_> = replaced.into_iter().collect();
     replaced.sort();
     println!("Replaced variables: {replaced:?}");
 
@@ -212,13 +210,42 @@ fn print_gate_stats(ctx: &Context, input_vars: &FxHashSet<VarIndex>, root: ExprR
     ands + xors + ors + nots + ones + zeros
 }
 
+fn pick_gate(
+    todo: &[(VarIndex, ExprRef)],
+    root_uses: &impl ExprMap<BitSet>,
+    output_to_ha: &FxHashMap<ExprRef, HalfAdder>,
+    replaced: &FxHashSet<VarIndex>,
+) -> usize {
+    // check to see if there is a gate that would finish a half adder
+    for (ii, (_, gate)) in todo.iter().enumerate() {
+        if let Some(ha) = output_to_ha.get(gate) {
+            if replaced.contains(&expr_to_var(ha.get_other_output(*gate).unwrap())) {
+                return ii;
+            }
+        }
+    }
+
+    // otherwise we do prefer any gates that are part of a half adder
+    if let Some(ii) = pick_smallest_use(todo.iter().cloned(), root_uses, |gate| {
+        output_to_ha.contains_key(&gate)
+    }) {
+        return ii;
+    }
+
+    pick_smallest_use(todo.iter().cloned(), root_uses, |_| true).unwrap()
+}
+
 fn pick_smallest_use(
     todo: impl Iterator<Item = (VarIndex, ExprRef)>,
     root_uses: &impl ExprMap<BitSet>,
-) -> usize {
-    let uses: Vec<_> = todo.map(|(_, gate)| root_uses[gate].len()).collect();
-    let min_uses = *uses.iter().min().unwrap();
-    uses.iter().position(|u| *u == min_uses).unwrap()
+    mut predicate: impl FnMut(ExprRef) -> bool,
+) -> Option<usize> {
+    let uses: Vec<_> = todo
+        .map(|(_, gate)| (root_uses[gate].len(), predicate(gate)))
+        .collect();
+    let min_uses = uses.iter().filter(|(_, include)| *include).min()?.0;
+    uses.iter()
+        .position(|(u, include)| *include && *u == min_uses)
 }
 
 fn try_exhaustive(
@@ -336,6 +363,18 @@ struct HalfAdder {
     sum: ExprRef,
     /// a and b
     carry: ExprRef,
+}
+
+impl HalfAdder {
+    fn get_other_output(&self, out: ExprRef) -> Option<ExprRef> {
+        if self.sum == out {
+            Some(self.carry)
+        } else if self.carry == out {
+            Some(self.sum)
+        } else {
+            None
+        }
+    }
 }
 
 /// Tries to identify two expressions which correspond to "a and b" and "a xor b".
