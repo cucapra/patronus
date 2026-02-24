@@ -92,17 +92,13 @@ pub fn backwards_sub(
                 let var = expr_to_var(e);
                 if prev_uses == 1 && !input_vars.contains(&var) {
                     todo.push_back((var, e));
-                } else if !seen.contains(&e) {
-                    // try phase opt
+                } else {
                     let old_size = spec.size();
-                    spec.invert(var);
-                    if spec.size() > old_size {
+                    if spec.invert_size_change(var) < 0 {
                         spec.invert(var);
-                    } else {
                         println!("INVERTING {var} {old_size} -> {}", spec.size());
                     }
                 }
-                seen.insert(e);
             });
         }
     }
