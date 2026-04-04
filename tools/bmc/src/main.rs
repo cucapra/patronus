@@ -24,6 +24,8 @@ struct Args {
         help = "the SMT solver to use"
     )]
     solver: SolverChoice,
+    #[arg(short, long, default_value = "25")]
+    kmax: u64,
     #[arg(short, long)]
     verbose: bool,
     #[arg(short, long)]
@@ -58,7 +60,7 @@ fn main() {
         println!();
         println!();
     }
-    let k_max = 25;
+    let k_max = args.kmax;
     let check_constraints = true;
     let check_bad_states_individually = false;
     let solver = match args.solver {
