@@ -218,7 +218,7 @@ jobs:
       - name: Install z3, CVC5, boolector
         run: sudo apt install -y z3 cvc5 boolector
       - name: Install uv and set the Python version
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v8.0.0
         with:
           python-version: ${{ matrix.python }}
       - uses: actions/checkout@v5
