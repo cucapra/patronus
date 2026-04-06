@@ -7,7 +7,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   BITWUZLA_VERSION: 0.6.1
-  YICES_VERSION: 2.6.5
+  YICES_VERSION: 2.7.0
 
 jobs:
   tests:
