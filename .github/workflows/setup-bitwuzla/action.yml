@@ -10,7 +10,7 @@ runs:
   steps:
     - name: Cache Bitwuzla
       id: cache-bitwuzla
-      uses: actions/cache@v3
+      uses: actions/cache@v5
       with:
         key: bitwuzla-${{ runner.os }}-${{ inputs.version }}
         path: /tmp/bitwuzla
