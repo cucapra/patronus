@@ -422,7 +422,7 @@ pub const Z3: SmtLibSolver = SmtLibSolver {
 
 pub const CVC5: SmtLibSolver = SmtLibSolver {
     name: "cvc5",
-    args: &[],
+    args: &["--incremental"],
     options: &[],
     supports_uf: true,
     supports_check_assuming: true,
