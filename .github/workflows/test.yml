@@ -8,6 +8,7 @@ env:
   CARGO_TERM_COLOR: always
   BITWUZLA_VERSION: 0.6.1
   YICES_VERSION: 2.7.0
+  CVC5_VERSION: 1.3.3
 
 jobs:
   tests:
@@ -43,9 +44,15 @@ jobs:
         solver:
           - bitwuzla
           - yices2
+          - cvc5
 
     steps:
       - uses: actions/checkout@v5
+      - name: Set Up CVC5
+        if: ${{ matrix.solver == 'cvc5' }}
+        uses: ./.github/workflows/setup-cvc5
+        with:
+          version: ${{ env.CVC5_VERSION }}
       - name: Set Up Yices
         if: ${{ matrix.solver == 'yices2' }}
         uses: ./.github/workflows/setup-yices
