@@ -9,6 +9,8 @@ env:
   BITWUZLA_VERSION: 0.6.1
   YICES_VERSION: 2.7.0
   CVC5_VERSION: 1.3.3
+  Z3_VERSION: 4.16.0
+  GLIBC_VERSION: 2.39
 
 jobs:
   tests:
@@ -45,9 +47,16 @@ jobs:
           - bitwuzla
           - yices2
           - cvc5
+          - z3
 
     steps:
       - uses: actions/checkout@v5
+      - name: Set Up Z3
+        if: ${{ matrix.solver == 'z3' }}
+        uses: ./.github/workflows/setup-z3
+        with:
+          version: ${{ env.Z3_VERSION }}
+          glibc_version: ${{ env.GLIBC_VERSION }}
       - name: Set Up CVC5
         if: ${{ matrix.solver == 'cvc5' }}
         uses: ./.github/workflows/setup-cvc5
