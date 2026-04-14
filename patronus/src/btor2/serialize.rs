@@ -63,6 +63,14 @@ struct Serializer<'a, W: Write> {
     next_id: u64,
     sort_ids: FxHashMap<Type, u64>,
     expr_ids: SparseExprMap<Option<u64>>,
+    /// Names on output/bad/constraint lines. Preserving an intermediate
+    /// expression's debug name that happens to collide with a label name would
+    /// confuse the parser's `improve_state_names` pass on re-parse, so we skip
+    /// those.
+    label_names: rustc_hash::FxHashSet<String>,
+    /// Expressions whose canonical name is restored via a trailing
+    /// `uext <sort> <e> 0 <name>` alias line; they are emitted unnamed inline.
+    alias_needed: rustc_hash::FxHashSet<ExprRef>,
 }
 
 impl<'a, W: Write> Serializer<'a, W> {
@@ -73,6 +81,8 @@ impl<'a, W: Write> Serializer<'a, W> {
             next_id: 1,
             sort_ids: FxHashMap::default(),
             expr_ids: SparseExprMap::default(),
+            label_names: rustc_hash::FxHashSet::default(),
+            alias_needed: rustc_hash::FxHashSet::default(),
         }
     }
 
@@ -120,14 +130,14 @@ impl<'a, W: Write> Serializer<'a, W> {
         // BTOR2 line: otherwise the second line (the `output` etc.) would be forced to
         // rename via `add_unique_str`, breaking idempotent round-trips. Patronus's
         // `improve_state_names` recovers the symbol name on re-parse.
-        let label_names = collect_label_names(self.ctx, sys);
+        self.label_names = collect_label_names(self.ctx, sys);
 
-        // Labels (outputs/bads/constraints) directly referencing a state expression, and
-        // whose label name differs from the state's symbol name. For each such state we
-        // must defer the state's name to a trailing `uext <state> 0 <name>` alias line:
-        // otherwise the output line's `sys.names` overwrite + `improve_state_names`
-        // would rename the state on re-parse.
-        let alias_needed = compute_alias_needed(self.ctx, sys);
+        // Labels (outputs/bads/constraints) directly referencing an expression whose
+        // canonical name differs from the label's name. For each such expression we
+        // defer the name to a trailing `uext <e> 0 <name>` alias line: otherwise the
+        // label's `sys.names[e]` overwrite (plus `improve_state_names`, for states)
+        // would lose the original name on re-parse.
+        self.alias_needed = compute_alias_needed(self.ctx, sys);
 
         // 1. declare inputs
         for &input in sys.inputs.iter() {
@@ -135,7 +145,7 @@ impl<'a, W: Write> Serializer<'a, W> {
             let sort = self.sort_id(tpe)?;
             let id = self.new_id();
             let raw = self.ctx[input].get_symbol_name(self.ctx).unwrap_or("");
-            let name = decl_name(raw, &label_names);
+            let name = decl_name(raw, &self.label_names);
             writeln!(self.writer, "{id} input {sort}{}", name_suffix(name))?;
             self.expr_ids[input] = Some(id);
         }
@@ -159,7 +169,7 @@ impl<'a, W: Write> Serializer<'a, W> {
 
             // (a) init expression tree, if any.
             let init_id = if let Some(init) = state.init {
-                Some(self.emit_state_init(state, init)?)
+                Some(self.emit_state_init(sys, state, init)?)
             } else {
                 None
             };
@@ -169,25 +179,32 @@ impl<'a, W: Write> Serializer<'a, W> {
             let raw = self.ctx[state.symbol]
                 .get_symbol_name(self.ctx)
                 .unwrap_or("");
-            let name = if alias_needed.contains(&state.symbol) {
+            let name = if self.alias_needed.contains(&state.symbol) {
                 "" // trailing alias line will reassert the name
             } else {
-                decl_name(raw, &label_names)
+                decl_name(raw, &self.label_names)
             };
-            writeln!(self.writer, "{state_id} state {state_sort}{}", name_suffix(name))?;
+            writeln!(
+                self.writer,
+                "{state_id} state {state_sort}{}",
+                name_suffix(name)
+            )?;
             self.expr_ids[state.symbol] = Some(state_id);
             state_ids.push(state_id);
 
             // (c) init line. By construction, init_id < state_id.
             if let Some(init_id) = init_id {
                 let line_id = self.new_id();
-                writeln!(self.writer, "{line_id} init {state_sort} {state_id} {init_id}")?;
+                writeln!(
+                    self.writer,
+                    "{line_id} init {state_sort} {state_id} {init_id}"
+                )?;
             }
         }
 
         // 5. outputs
         for out in sys.outputs.iter() {
-            let body_id = self.emit_expr(out.expr)?;
+            let body_id = self.emit_expr(sys, out.expr)?;
             let id = self.new_id();
             let name = self.ctx[out.name].clone();
             writeln!(self.writer, "{id} output {body_id}{}", name_suffix(&name))?;
@@ -195,37 +212,50 @@ impl<'a, W: Write> Serializer<'a, W> {
 
         // 6. constraints
         for (i, &c) in sys.constraints.iter().enumerate() {
-            let body_id = self.emit_expr(c)?;
+            let body_id = self.emit_expr(sys, c)?;
             let id = self.new_id();
             let name = label_name(self.ctx, sys, c, "constraint", i);
-            writeln!(self.writer, "{id} constraint {body_id}{}", name_suffix(&name))?;
+            writeln!(
+                self.writer,
+                "{id} constraint {body_id}{}",
+                name_suffix(&name)
+            )?;
         }
 
         // 7. bad states
         for (i, &b) in sys.bad_states.iter().enumerate() {
-            let body_id = self.emit_expr(b)?;
+            let body_id = self.emit_expr(sys, b)?;
             let id = self.new_id();
             let name = label_name(self.ctx, sys, b, "bad", i);
             writeln!(self.writer, "{id} bad {body_id}{}", name_suffix(&name))?;
         }
 
-        // 8. trailing aliases: reassert each affected state's name.
-        for (state, &state_id) in sys.states.iter().zip(state_ids.iter()) {
-            if !alias_needed.contains(&state.symbol) {
+        // 8. trailing aliases: reassert the canonical name of every flagged symbol
+        //    (state *or* intermediate expression). `uext ... 0 <name>` is the idiomatic
+        //    pattern the parser already recognizes — for states it feeds into
+        //    `improve_state_names`; for non-state expressions it just overwrites
+        //    `sys.names[e]` with the intended debug name, restoring what the preceding
+        //    output/bad/constraint line overwrote. Because the flagged node was emitted
+        //    without its name (see `emit_expr` / state decl above), `name` is guaranteed
+        //    unique in the parser's unique-names set at this point.
+        // Collect first so we don't borrow `self.alias_needed` while mutably borrowing
+        // `self.writer`/`self.sort_ids` inside the loop. Sort by the already-assigned
+        // BTOR2 id so alias ordering is deterministic across runs (a HashSet's iter
+        // order is not, which would cause spurious round-trip diffs).
+        let mut alias_targets: Vec<(ExprRef, u64)> = self
+            .alias_needed
+            .iter()
+            .filter_map(|&e| self.expr_ids[e].map(|id| (e, id)))
+            .collect();
+        alias_targets.sort_by_key(|&(_, id)| id);
+        for (e, id_of_target) in alias_targets {
+            let name = expr_canonical_name(self.ctx, sys, e);
+            if name.is_empty() {
                 continue;
             }
-            let raw = self.ctx[state.symbol]
-                .get_symbol_name(self.ctx)
-                .unwrap_or("");
-            if raw.is_empty() {
-                continue;
-            }
-            let sort = self.sort_id(state.symbol.get_type(self.ctx))?;
-            let id = self.new_id();
-            // `uext ... 0` is the idiomatic alias pattern the parser already recognizes;
-            // see `improve_state_names`. With the state decl emitted unnamed above,
-            // `raw` is guaranteed unique at this point in the parser's namespace.
-            writeln!(self.writer, "{id} uext {sort} {state_id} 0 {raw}")?;
+            let sort = self.sort_id(e.get_type(self.ctx))?;
+            let line_id = self.new_id();
+            writeln!(self.writer, "{line_id} uext {sort} {id_of_target} 0 {name}")?;
         }
 
         // 9. next expressions and lines (next may reference states, so it has to come
@@ -233,7 +263,7 @@ impl<'a, W: Write> Serializer<'a, W> {
         for (state, &state_id) in sys.states.iter().zip(state_ids.iter()) {
             if let Some(next) = state.next {
                 let state_sort = self.sort_id(state.symbol.get_type(self.ctx))?;
-                let next_id = self.emit_expr(next)?;
+                let next_id = self.emit_expr(sys, next)?;
                 let id = self.new_id();
                 writeln!(self.writer, "{id} next {state_sort} {state_id} {next_id}")?;
             }
@@ -246,18 +276,23 @@ impl<'a, W: Write> Serializer<'a, W> {
     /// `init` line carries the array sort but a BV-sort node. The parser re-wraps such
     /// cases into `ArrayConstant`, so on the way out we unwrap the BV and let the init
     /// line handle the rest.
-    fn emit_state_init(&mut self, state: &State, init: ExprRef) -> std::io::Result<u64> {
+    fn emit_state_init(
+        &mut self,
+        sys: &TransitionSystem,
+        state: &State,
+        init: ExprRef,
+    ) -> std::io::Result<u64> {
         if state.symbol.get_type(self.ctx).is_array()
             && let Expr::ArrayConstant { e, .. } = self.ctx[init]
         {
-            return self.emit_expr(e);
+            return self.emit_expr(sys, e);
         }
-        self.emit_expr(init)
+        self.emit_expr(sys, init)
     }
 
     /// Emit this expression (and all sub-expressions) in post-order. Symbols must already
     /// be registered via `expr_ids` (inputs/states).
-    fn emit_expr(&mut self, e: ExprRef) -> std::io::Result<u64> {
+    fn emit_expr(&mut self, sys: &TransitionSystem, e: ExprRef) -> std::io::Result<u64> {
         if let Some(id) = self.expr_ids[e] {
             return Ok(id);
         }
@@ -277,14 +312,32 @@ impl<'a, W: Write> Serializer<'a, W> {
         expr.for_each_child(|c| children.push(*c));
         let child_ids: Vec<u64> = children
             .into_iter()
-            .map(|c| self.emit_expr(c))
+            .map(|c| self.emit_expr(sys, c))
             .collect::<Result<_, _>>()?;
 
         let tpe = expr.get_type(self.ctx);
         let sort = self.sort_id(tpe)?;
         let id = self.new_id();
 
-        write_node(self.writer, self.ctx, id, sort, &expr, &child_ids)?;
+        // Preserve yosys-style debug names carried on intermediate expressions
+        // (e.g. `uext 1 11 0 axis_reg_inst.s_axis_tready`). These names sit in
+        // `sys.names` after parsing. We omit the name in two cases:
+        //   * It collides with a label name (output/bad/constraint). Emitting it
+        //     would pollute the parser's unique-name set and force the label to
+        //     get an `_N` suffix on re-parse.
+        //   * The expression is in `alias_needed`: the canonical name is going
+        //     to be re-asserted by a trailing `uext 0` alias line anyway.
+        let tail = if self.alias_needed.contains(&e) {
+            String::new()
+        } else {
+            sys.names[e]
+                .map(|sr| &self.ctx[sr])
+                .filter(|name| !self.label_names.contains(name.as_str()))
+                .map(|s| name_suffix(s))
+                .unwrap_or_default()
+        };
+
+        write_node(self.writer, self.ctx, id, sort, &expr, &child_ids, &tail)?;
 
         self.expr_ids[e] = Some(id);
         Ok(id)
@@ -303,10 +356,7 @@ fn name_suffix(name: &str) -> String {
 /// (1) the symbol carries an autogenerated default prefix (the parser will regenerate it),
 /// (2) the name would clash with an output/bad/constraint label (in which case the parser's
 /// `improve_state_names` pass will propagate the name back onto the symbol on re-parse).
-fn decl_name<'a>(
-    raw: &'a str,
-    label_names: &rustc_hash::FxHashSet<String>,
-) -> &'a str {
+fn decl_name<'a>(raw: &'a str, label_names: &rustc_hash::FxHashSet<String>) -> &'a str {
     if raw.is_empty() || is_autogen_name(raw) || label_names.contains(raw) {
         ""
     } else {
@@ -314,54 +364,59 @@ fn decl_name<'a>(
     }
 }
 
-/// Returns the set of state symbols that need a trailing `uext 0` alias line to preserve
-/// their name across a round-trip. A state is flagged when at least one direct reference
-/// from an output/bad/constraint uses a different name than the state's current symbol
-/// name — the parser's `improve_state_names` pass would otherwise override the state's
-/// name with that label's name on re-parse.
-fn compute_alias_needed(
-    ctx: &Context,
-    sys: &TransitionSystem,
-) -> rustc_hash::FxHashSet<ExprRef> {
-    let mut state_symbols = rustc_hash::FxHashSet::default();
-    for state in sys.states.iter() {
-        state_symbols.insert(state.symbol);
+/// Returns the set of expressions that need a trailing `uext 0` alias line to preserve
+/// their name across a round-trip.
+///
+/// An expression `e` is flagged when it is *directly* referenced by some
+/// output/bad/constraint whose label name differs from the name carried by `e` (either
+/// the symbol name for a state/input, or the yosys-style debug name in `sys.names[e]`
+/// for an intermediate expression). Without the alias:
+///   * For a state, the parser's `improve_state_names` pass would override the state's
+///     name with that label's name on re-parse.
+///   * For any other expression, parser's overwrite of `sys.names[e]` from the
+///     label line would simply replace the debug name, and on re-serialization we'd
+///     drop it under the label-collision filter.
+fn compute_alias_needed(ctx: &Context, sys: &TransitionSystem) -> rustc_hash::FxHashSet<ExprRef> {
+    // Track the *last* label (in emit order: outputs, then constraints, then bads)
+    // that directly references each expression. The parser's `sys.names[e]` after
+    // re-parse ends up equal to that last label, so we only need a trailing alias
+    // when the canonical name differs from it.
+    let mut last_label: rustc_hash::FxHashMap<ExprRef, String> = rustc_hash::FxHashMap::default();
+
+    for o in sys.outputs.iter() {
+        last_label.insert(o.expr, ctx[o.name].clone());
+    }
+    for (i, &e) in sys.constraints.iter().enumerate() {
+        last_label.insert(e, label_name(ctx, sys, e, "constraint", i));
+    }
+    for (i, &e) in sys.bad_states.iter().enumerate() {
+        last_label.insert(e, label_name(ctx, sys, e, "bad", i));
     }
 
     let mut out = rustc_hash::FxHashSet::default();
-
-    let mark_if_conflict = |out: &mut rustc_hash::FxHashSet<ExprRef>, e: ExprRef, label: &str| {
-        if !state_symbols.contains(&e) {
-            return;
+    for (e, label) in last_label {
+        let name = expr_canonical_name(ctx, sys, e);
+        if name.is_empty() || is_autogen_name(&name) {
+            continue;
         }
-        let state_name = ctx[e].get_symbol_name(ctx).unwrap_or("");
-        if state_name.is_empty() || is_autogen_name(state_name) {
-            return;
-        }
-        if state_name != label {
+        if name != label {
             out.insert(e);
         }
-    };
-
-    for o in sys.outputs.iter() {
-        mark_if_conflict(&mut out, o.expr, &ctx[o.name]);
     }
-    for (i, &e) in sys.constraints.iter().enumerate() {
-        let lbl = label_name(ctx, sys, e, "constraint", i);
-        mark_if_conflict(&mut out, e, &lbl);
-    }
-    for (i, &e) in sys.bad_states.iter().enumerate() {
-        let lbl = label_name(ctx, sys, e, "bad", i);
-        mark_if_conflict(&mut out, e, &lbl);
-    }
-
     out
 }
 
-fn collect_label_names(
-    ctx: &Context,
-    sys: &TransitionSystem,
-) -> rustc_hash::FxHashSet<String> {
+/// The "canonical" name for an expression that should survive a round-trip. For a
+/// symbol (state/input), this is the symbol's own name. For any other expression,
+/// this is the yosys-style debug label stashed in `sys.names[e]` by the parser.
+fn expr_canonical_name(ctx: &Context, sys: &TransitionSystem, e: ExprRef) -> String {
+    if let Some(name) = ctx[e].get_symbol_name(ctx) {
+        return name.to_string();
+    }
+    sys.names[e].map(|s| ctx[s].clone()).unwrap_or_default()
+}
+
+fn collect_label_names(ctx: &Context, sys: &TransitionSystem) -> rustc_hash::FxHashSet<String> {
     let mut out = rustc_hash::FxHashSet::default();
     for out_sig in sys.outputs.iter() {
         out.insert(ctx[out_sig.name].clone());
@@ -396,98 +451,102 @@ fn write_node<W: Write>(
     sort: u64,
     expr: &Expr,
     children: &[u64],
+    tail: &str,
 ) -> std::io::Result<()> {
     match expr {
-        Expr::BVSymbol { .. } | Expr::ArraySymbol { .. } => unreachable!(
-            "symbols are handled by the caller and never emitted as regular nodes"
-        ),
-
-        Expr::BVLiteral(value) => write_bv_literal(writer, ctx, id, sort, *value),
-
-        Expr::BVZeroExt { by, .. } => writeln!(writer, "{id} uext {sort} {} {by}", children[0]),
-        Expr::BVSignExt { by, .. } => writeln!(writer, "{id} sext {sort} {} {by}", children[0]),
-        Expr::BVSlice { hi, lo, .. } => {
-            writeln!(writer, "{id} slice {sort} {} {hi} {lo}", children[0])
+        Expr::BVSymbol { .. } | Expr::ArraySymbol { .. } => {
+            unreachable!("symbols are handled by the caller and never emitted as regular nodes")
         }
 
-        Expr::BVNot(_, _) => writeln!(writer, "{id} not {sort} {}", children[0]),
-        Expr::BVNegate(_, _) => writeln!(writer, "{id} neg {sort} {}", children[0]),
+        Expr::BVLiteral(value) => write_bv_literal(writer, ctx, id, sort, *value)?,
+
+        Expr::BVZeroExt { by, .. } => write!(writer, "{id} uext {sort} {} {by}", children[0])?,
+        Expr::BVSignExt { by, .. } => write!(writer, "{id} sext {sort} {} {by}", children[0])?,
+        Expr::BVSlice { hi, lo, .. } => {
+            write!(writer, "{id} slice {sort} {} {hi} {lo}", children[0])?
+        }
+
+        Expr::BVNot(_, _) => write!(writer, "{id} not {sort} {}", children[0])?,
+        Expr::BVNegate(_, _) => write!(writer, "{id} neg {sort} {}", children[0])?,
 
         Expr::BVEqual(_, _) | Expr::ArrayEqual(_, _) => {
-            writeln!(writer, "{id} eq {sort} {} {}", children[0], children[1])
+            write!(writer, "{id} eq {sort} {} {}", children[0], children[1])?
         }
-        Expr::BVImplies(_, _) => {
-            writeln!(writer, "{id} implies {sort} {} {}", children[0], children[1])
-        }
-        Expr::BVGreater(_, _) => {
-            writeln!(writer, "{id} ugt {sort} {} {}", children[0], children[1])
-        }
+        Expr::BVImplies(_, _) => write!(
+            writer,
+            "{id} implies {sort} {} {}",
+            children[0], children[1]
+        )?,
+        Expr::BVGreater(_, _) => write!(writer, "{id} ugt {sort} {} {}", children[0], children[1])?,
         Expr::BVGreaterSigned(_, _, _) => {
-            writeln!(writer, "{id} sgt {sort} {} {}", children[0], children[1])
+            write!(writer, "{id} sgt {sort} {} {}", children[0], children[1])?
         }
         Expr::BVGreaterEqual(_, _) => {
-            writeln!(writer, "{id} ugte {sort} {} {}", children[0], children[1])
+            write!(writer, "{id} ugte {sort} {} {}", children[0], children[1])?
         }
         Expr::BVGreaterEqualSigned(_, _, _) => {
-            writeln!(writer, "{id} sgte {sort} {} {}", children[0], children[1])
+            write!(writer, "{id} sgte {sort} {} {}", children[0], children[1])?
         }
         Expr::BVConcat(_, _, _) => {
-            writeln!(writer, "{id} concat {sort} {} {}", children[0], children[1])
+            write!(writer, "{id} concat {sort} {} {}", children[0], children[1])?
         }
 
-        Expr::BVAnd(_, _, _) => writeln!(writer, "{id} and {sort} {} {}", children[0], children[1]),
-        Expr::BVOr(_, _, _) => writeln!(writer, "{id} or {sort} {} {}", children[0], children[1]),
-        Expr::BVXor(_, _, _) => writeln!(writer, "{id} xor {sort} {} {}", children[0], children[1]),
+        Expr::BVAnd(_, _, _) => write!(writer, "{id} and {sort} {} {}", children[0], children[1])?,
+        Expr::BVOr(_, _, _) => write!(writer, "{id} or {sort} {} {}", children[0], children[1])?,
+        Expr::BVXor(_, _, _) => write!(writer, "{id} xor {sort} {} {}", children[0], children[1])?,
         Expr::BVShiftLeft(_, _, _) => {
-            writeln!(writer, "{id} sll {sort} {} {}", children[0], children[1])
+            write!(writer, "{id} sll {sort} {} {}", children[0], children[1])?
         }
         Expr::BVArithmeticShiftRight(_, _, _) => {
-            writeln!(writer, "{id} sra {sort} {} {}", children[0], children[1])
+            write!(writer, "{id} sra {sort} {} {}", children[0], children[1])?
         }
         Expr::BVShiftRight(_, _, _) => {
-            writeln!(writer, "{id} srl {sort} {} {}", children[0], children[1])
+            write!(writer, "{id} srl {sort} {} {}", children[0], children[1])?
         }
-        Expr::BVAdd(_, _, _) => writeln!(writer, "{id} add {sort} {} {}", children[0], children[1]),
-        Expr::BVMul(_, _, _) => writeln!(writer, "{id} mul {sort} {} {}", children[0], children[1]),
+        Expr::BVAdd(_, _, _) => write!(writer, "{id} add {sort} {} {}", children[0], children[1])?,
+        Expr::BVMul(_, _, _) => write!(writer, "{id} mul {sort} {} {}", children[0], children[1])?,
         Expr::BVSignedDiv(_, _, _) => {
-            writeln!(writer, "{id} sdiv {sort} {} {}", children[0], children[1])
+            write!(writer, "{id} sdiv {sort} {} {}", children[0], children[1])?
         }
         Expr::BVUnsignedDiv(_, _, _) => {
-            writeln!(writer, "{id} udiv {sort} {} {}", children[0], children[1])
+            write!(writer, "{id} udiv {sort} {} {}", children[0], children[1])?
         }
         Expr::BVSignedMod(_, _, _) => {
-            writeln!(writer, "{id} smod {sort} {} {}", children[0], children[1])
+            write!(writer, "{id} smod {sort} {} {}", children[0], children[1])?
         }
         Expr::BVSignedRem(_, _, _) => {
-            writeln!(writer, "{id} srem {sort} {} {}", children[0], children[1])
+            write!(writer, "{id} srem {sort} {} {}", children[0], children[1])?
         }
         Expr::BVUnsignedRem(_, _, _) => {
-            writeln!(writer, "{id} urem {sort} {} {}", children[0], children[1])
+            write!(writer, "{id} urem {sort} {} {}", children[0], children[1])?
         }
-        Expr::BVSub(_, _, _) => writeln!(writer, "{id} sub {sort} {} {}", children[0], children[1]),
+        Expr::BVSub(_, _, _) => write!(writer, "{id} sub {sort} {} {}", children[0], children[1])?,
 
         Expr::BVArrayRead { .. } => {
-            writeln!(writer, "{id} read {sort} {} {}", children[0], children[1])
+            write!(writer, "{id} read {sort} {} {}", children[0], children[1])?
         }
 
-        Expr::BVIte { .. } | Expr::ArrayIte { .. } => writeln!(
+        Expr::BVIte { .. } | Expr::ArrayIte { .. } => write!(
             writer,
             "{id} ite {sort} {} {} {}",
             children[0], children[1], children[2]
-        ),
+        )?,
 
-        Expr::ArrayStore { .. } => writeln!(
+        Expr::ArrayStore { .. } => write!(
             writer,
             "{id} write {sort} {} {} {}",
             children[0], children[1], children[2]
-        ),
+        )?,
 
-        Expr::ArrayConstant { .. } => Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "cannot serialize ArrayConstant outside of a state's init position: \
-             core BTOR2 has no operator for constant arrays",
-        )),
+        Expr::ArrayConstant { .. } => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "cannot serialize ArrayConstant outside of a state's init position: \
+                 core BTOR2 has no operator for constant arrays",
+            ));
+        }
     }
+    writeln!(writer, "{tail}")
 }
 
 fn write_bv_literal<W: Write>(
@@ -497,18 +556,20 @@ fn write_bv_literal<W: Write>(
     sort: u64,
     value: BVLitValue,
 ) -> std::io::Result<()> {
+    // The body is written without a trailing newline; `write_node` appends the
+    // name suffix (if any) and the newline.
     let v = value.get(ctx);
     let width = value.width();
     if v.is_zero() {
-        writeln!(writer, "{id} zero {sort}")
+        write!(writer, "{id} zero {sort}")
     } else if width > 1 && v.is_all_ones() {
-        writeln!(writer, "{id} ones {sort}")
+        write!(writer, "{id} ones {sort}")
     } else if is_bv_one(&v) {
         // width == 1 and v == 1 is also `ones`, but `one` reads just as well and keeps
         // round-trips stable (parser accepts either).
-        writeln!(writer, "{id} one {sort}")
+        write!(writer, "{id} one {sort}")
     } else {
-        writeln!(writer, "{id} const {sort} {}", v.to_bit_str())
+        write!(writer, "{id} const {sort} {}", v.to_bit_str())
     }
 }
 

@@ -171,17 +171,13 @@ fn parse_llsdspi_bug_c1_instrumented() {
 /// information the serializer drops or mangles will show up as a text diff on
 /// the second pass.
 fn check_roundtrip(path: &str) {
-    let (ctx1, sys1) = btor2::parse_file(path)
-        .unwrap_or_else(|| panic!("failed to parse {path}"));
+    let (ctx1, sys1) = btor2::parse_file(path).unwrap_or_else(|| panic!("failed to parse {path}"));
     let text1 = btor2::serialize_to_str(&ctx1, &sys1);
 
     let mut ctx2 = Context::default();
-    let sys2 = btor2::parse_str(&mut ctx2, &text1, Some(&sys1.name))
-        .unwrap_or_else(|| {
-            panic!(
-                "failed to re-parse serializer output for {path}. Output was:\n{text1}"
-            )
-        });
+    let sys2 = btor2::parse_str(&mut ctx2, &text1, Some(&sys1.name)).unwrap_or_else(|| {
+        panic!("failed to re-parse serializer output for {path}. Output was:\n{text1}")
+    });
     let text2 = btor2::serialize_to_str(&ctx2, &sys2);
 
     assert_eq!(
