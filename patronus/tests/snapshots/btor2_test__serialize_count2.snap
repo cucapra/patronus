@@ -1,5 +1,15 @@
 ---
-source: tests/btor2_test.rs
+source: patronus/tests/btor2_test.rs
 expression: "skip_first_line(&btor2::serialize_to_str(&ctx, &sys))"
 ---
-; TODO: implement the btor2 serialization!
+1 sort bitvec 3
+2 state 1
+3 ones 1
+4 sort bitvec 1
+5 eq 4 2 3
+6 bad 5 _bad_0
+7 zero 1
+8 init 1 2 7
+9 one 1
+10 add 1 2 9
+11 next 1 2 10

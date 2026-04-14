@@ -165,3 +165,108 @@ fn parse_llsdspi_bug_c1_instrumented() {
     simplify_expressions(&mut ctx, &mut sys);
     println!("{}", sys.serialize_to_str(&ctx));
 }
+
+/// Serialize → parse → serialize, then require the two serializations match.
+/// This is the strongest check we can make without comparing IR directly: any
+/// information the serializer drops or mangles will show up as a text diff on
+/// the second pass.
+fn check_roundtrip(path: &str) {
+    let (ctx1, sys1) = btor2::parse_file(path)
+        .unwrap_or_else(|| panic!("failed to parse {path}"));
+    let text1 = btor2::serialize_to_str(&ctx1, &sys1);
+
+    let mut ctx2 = Context::default();
+    let sys2 = btor2::parse_str(&mut ctx2, &text1, Some(&sys1.name))
+        .unwrap_or_else(|| {
+            panic!(
+                "failed to re-parse serializer output for {path}. Output was:\n{text1}"
+            )
+        });
+    let text2 = btor2::serialize_to_str(&ctx2, &sys2);
+
+    assert_eq!(
+        skip_first_line(&text1),
+        skip_first_line(&text2),
+        "btor2 serialization is not a fixed point for {path}"
+    );
+}
+
+#[test]
+fn roundtrip_unittest_delay() {
+    check_roundtrip("../inputs/unittest/delay.btor");
+}
+
+#[test]
+fn roundtrip_unittest_swap() {
+    check_roundtrip("../inputs/unittest/swap.btor");
+}
+
+#[test]
+fn roundtrip_quiz1() {
+    check_roundtrip("../inputs/chiseltest/Quiz1.btor");
+}
+
+#[test]
+fn roundtrip_quiz1_unsat() {
+    check_roundtrip("../inputs/chiseltest/Quiz1.unsat.btor");
+}
+
+#[test]
+fn roundtrip_quiz2_sat() {
+    check_roundtrip("../inputs/chiseltest/Quiz2.sat.btor");
+}
+
+#[test]
+fn roundtrip_quiz2_unsat() {
+    check_roundtrip("../inputs/chiseltest/Quiz2.unsat.btor");
+}
+
+#[test]
+fn roundtrip_const_array_example() {
+    check_roundtrip("../inputs/chiseltest/const_array_example.btor");
+}
+
+#[test]
+fn roundtrip_instrumented_decoder() {
+    check_roundtrip("../inputs/repair/decoder_3_to_8.instrumented.btor");
+}
+
+#[test]
+fn roundtrip_sdram_controller() {
+    check_roundtrip("../inputs/repair/sdram_controller.original.btor");
+}
+
+#[test]
+fn roundtrip_mux_4_1() {
+    check_roundtrip("../inputs/repair/mux_4_1.original.btor");
+}
+
+#[test]
+fn roundtrip_axi_lite_xlnx() {
+    check_roundtrip("../inputs/repair/axi-lite-xlnx.original.btor");
+}
+
+#[test]
+fn roundtrip_axis_async_fifo_wrapper() {
+    check_roundtrip("../inputs/repair/axis-async-fifo-wrapper.original.btor");
+}
+
+#[test]
+fn roundtrip_i2c_m_replace_literals() {
+    check_roundtrip("../inputs/repair/i2c_m.original.replace_literals.btor");
+}
+
+#[test]
+fn roundtrip_llsdspi_bug_c1_instrumented() {
+    check_roundtrip("../inputs/repair/llsdspi_bug_c1.instrumented.btor");
+}
+
+#[test]
+fn roundtrip_sha3_keccak() {
+    check_roundtrip("../inputs/repair/sha3_keccak.w2.replace_variables.btor");
+}
+
+#[test]
+fn roundtrip_lakeroad_dsp48e2() {
+    check_roundtrip("../inputs/lakeroad/DSP48E2.btor");
+}
