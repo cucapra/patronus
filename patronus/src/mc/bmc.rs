@@ -39,6 +39,13 @@ pub fn bmc(
     let constraints = sys.constraints.clone();
     let bad_states = sys.bad_states.clone();
 
+    if k_max > 0 && sys.states.is_empty() {
+        println!(
+            "[warn]: k_max={k_max} is unnecessarily large. System {} has no states.",
+            sys.name
+        );
+    }
+
     for k in 0..=k_max {
         // assume all constraints hold in this step
         for expr_ref in constraints.iter() {
@@ -520,9 +527,18 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
         Ok(())
     }
 
-    fn get_at(&self, _ctx: &Context, expr: ExprRef, step: u64) -> ExprRef {
+    fn get_at(&self, ctx: &Context, expr: ExprRef, step: u64) -> ExprRef {
         assert!(step <= self.current_step.unwrap_or(0));
-        self.signal_sym_in_step(expr, step).unwrap()
+        self.signal_sym_in_step(expr, step).unwrap_or_else(|| {
+            if ctx[expr].is_true() || ctx[expr].is_false() {
+                expr
+            } else {
+                panic!(
+                    "Failed to find signal {} in step {step}",
+                    expr.serialize_to_str(ctx)
+                )
+            }
+        })
     }
 }
 

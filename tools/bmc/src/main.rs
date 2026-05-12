@@ -60,7 +60,17 @@ fn main() {
         println!();
         println!();
     }
-    let k_max = args.kmax;
+    let k_max = if sys.states.is_empty() {
+        if args.verbose {
+            println!(
+                "System {} has no states. Reducing BMC to a single cycle.",
+                sys.name
+            );
+        }
+        0
+    } else {
+        args.kmax
+    };
     let check_constraints = true;
     let check_bad_states_individually = false;
     let solver = match args.solver {
