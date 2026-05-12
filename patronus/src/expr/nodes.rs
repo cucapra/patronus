@@ -271,9 +271,9 @@ mod tests {
     fn ir_type_size() {
         // 4 bytes for the tag, 3  * 4 bytes for the largest field
         assert_eq!(std::mem::size_of::<Expr>(), 16);
-        // we only represents widths up to (2^32 - 1)
+        // we only represent widths up to (2^32 - 1)
         assert_eq!(std::mem::size_of::<WidthInt>(), 4);
-        // an array has a index and a data width
+        // an array has an index and a data width
         assert_eq!(std::mem::size_of::<ArrayType>(), 2 * 4);
         // Type could be a bit-vector or an array type (4 bytes for the tag!)
         assert_eq!(std::mem::size_of::<Type>(), 2 * 4 + 4);

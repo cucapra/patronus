@@ -15,20 +15,28 @@ use std::ops::Index;
 pub struct SymEngine<V: Value> {
     sys: TransitionSystem,
     gc: GuardCtx,
-    step_count: u64,
+    step_count: u32,
     data: Data<V>,
     dependencies: Dependencies,
+    states: FxHashMap<ExprRef, u32>,
 }
 
 impl<V: Value> SymEngine<V> {
     pub fn new(ctx: &Context, sys: TransitionSystem) -> Self {
         let dependencies = Dependencies::calculate(ctx, &sys);
+        let states = sys
+            .states
+            .iter()
+            .enumerate()
+            .map(|(index, state)| (state.symbol, index as u32))
+            .collect();
         Self {
             sys,
             gc: GuardCtx::default(),
             step_count: 0,
             data: Data::<V>::default(),
             dependencies,
+            states,
         }
     }
 
@@ -48,7 +56,7 @@ impl<V: Value> SymEngine<V> {
                 for sym in symbols {
                     let tpe = sym.get_type(ec);
                     let zero = V::zero(ec, &tpe);
-                    self.data.set(sym, 0, ValueSummary::new(&mut self.gc, zero));
+                    self.data.set(sym, 0, ValueSummary::new(zero));
                 }
             }
             InitKind::Random(_) => {
@@ -65,15 +73,21 @@ impl<V: Value> SymEngine<V> {
         todo!()
     }
 
-    pub fn get(&self, expr: ExprRef) -> ValueSummary<V> {
-        let mut todo: SmallVec<[Dep; 4]> =
-            SmallVec::from_iter(self.dependencies[expr].iter().cloned());
-        while let Some(dep) = todo.pop() {}
-        todo!("Where should we actually do the computation? As part of data or here?")
-        //self.data.g
+    pub fn get(&self, expr: ExprRef) -> &ValueSummary<V> {
+        if let Some(value) = self.data.get(expr, self.step_count) {
+            value
+        } else if let Some(state_idx) = self.states.get(&expr) {
+            todo!()
+        } else {
+            let mut todo: SmallVec<[ExprRef; 4]> =
+                SmallVec::from_iter(self.dependencies[expr].iter().cloned());
+            while let Some(dep) = todo.pop() {}
+            todo!("Where should we actually do the computation? As part of data or here?")
+            //self.data.g
+        }
     }
 
-    pub fn step_count(&self) -> u64 {
+    pub fn step_count(&self) -> u32 {
         self.step_count
     }
 }
@@ -117,26 +131,29 @@ impl<V: Value> Default for Data<V> {
 }
 
 /// Data structure, tracking the dependencies of every expression in the circuit.
-struct Dependencies {}
+struct Dependencies {
+    to_range: FxHashMap<ExprRef, (u32, u32)>,
+    data: Vec<ExprRef>,
+}
 
 impl Dependencies {
     fn calculate(ctx: &Context, sys: &TransitionSystem) -> Self {
-        // let uses = count_expr_uses(ctx, sys);
+        let uses = patronus::system::analysis::count_system_expr_uses(ctx, sys);
+        let multi_use_exprs = uses
+            .iter()
+            .enumerate()
+            .filter(|(_, uses)| **uses > 1)
+            .map(|(index, _)| ExprRef::from(index));
 
         todo!()
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-enum Dep {
-    Same(ExprRef),
-    Past(ExprRef),
-}
-
 impl Index<ExprRef> for Dependencies {
-    type Output = [Dep];
+    type Output = [ExprRef];
 
     fn index(&self, index: ExprRef) -> &Self::Output {
-        todo!()
+        let (start, len) = self.to_range[&index];
+        &self.data[start as usize..(start as usize + len as usize)]
     }
 }

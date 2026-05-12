@@ -18,6 +18,14 @@ pub trait GetExprValue<V: Value> {
     fn get(&self, expr: ExprRef) -> Option<&ValueSummary<V>>;
 }
 
+impl GetExprValue<ExprRef> for [(ExprRef, ValueSummary<ExprRef>)] {
+    fn get(&self, expr: ExprRef) -> Option<&ValueSummary<ExprRef>> {
+        self.iter()
+            .find(|(key, _)| *key == expr)
+            .map(|(_, value)| value)
+    }
+}
+
 /// Evaluate an expression symbolically using `[[ValueSummary]]`.
 /// Note that this function will not re-compute expressions if a corresponding value is already available.
 pub fn eval(
@@ -70,7 +78,7 @@ pub fn eval(
                 // TODO: turn into return Err
                 panic!("No value found for symbol: {} : bv<{width}>", ctx[name]);
             }
-            Expr::BVLiteral(_) => stack.push(ValueSummary::new(gc, e)),
+            Expr::BVLiteral(_) => stack.push(ValueSummary::new(e)),
             // unary
             Expr::BVZeroExt { by, .. } => un_op(&mut stack, |e| ctx.zero_extend(e, by)),
             Expr::BVSignExt { by, .. } => un_op(&mut stack, |e| ctx.sign_extend(e, by)),
@@ -100,7 +108,7 @@ pub fn eval(
             //     bin_op(&mut stack, |a, b| a.arithmetic_shift_right(&b))
             // }
             // Expr::BVShiftRight(_, _, _) => bin_op(&mut stack, |a, b| a.shift_right(&b)),
-            // Expr::BVAdd(_, _, _) => bin_op(&mut stack, |a, b| a.add(&b)),
+            Expr::BVAdd(_, _, _) => bin_op(gc, &mut stack, |a, b| ctx.add(a, b)),
             // Expr::BVMul(_, _, _) => bin_op(&mut stack, |a, b| a.mul(&b)),
             // div, rem and mod are still TODO
             Expr::BVSignedDiv(_, _, _)
@@ -112,16 +120,15 @@ pub fn eval(
             }
             // Expr::BVSub(_, _, _) => bin_op(&mut stack, |a, b| a.sub(&b)),
             // BVArrayRead needs array support!
-            // Expr::BVIte { .. } => {
-            //     let cond = stack.pop().unwrap().to_bool().unwrap();
-            //     if cond {
-            //         let tru = stack.pop().unwrap();
-            //         stack.pop().unwrap();
-            //         stack.push(tru);
-            //     } else {
-            //         stack.pop().unwrap(); // just discard tru
-            //     }
-            // }
+            Expr::BVIte { .. } => {
+                // TODO: calculate cond first and then selectively compute tru and fals depending on result
+
+                let cond = stack.pop().unwrap();
+                let tru = stack.pop().unwrap();
+                let fals = stack.pop().unwrap();
+                let res = ValueSummary::apply_ite(ctx, gc, cond, tru, fals);
+                stack.push(res);
+            }
             // array ops
             // Expr::BVArrayRead { .. } => {
             //     let array = array_stack
@@ -196,10 +203,40 @@ fn un_op(stack: &mut Vec<ValueSummary<ExprRef>>, mut op: impl FnMut(ExprRef) -> 
     stack.push(res);
 }
 
-// #[inline]
-// fn bin_op(stack: &mut Vec<ValueSummary<ExprRef>>, op: impl Fn(BitVecValue, BitVecValue) -> BitVecValue) {
-//     let a = stack.pop().unwrap_or_else(|| panic!("Stack is empty!"));
-//     let b = stack.pop().unwrap_or_else(|| panic!("Stack is empty!"));
-//     let res = op(a, b);
-//     stack.push(res);
-// }
+#[inline]
+fn bin_op(
+    gc: &mut GuardCtx,
+    stack: &mut Vec<ValueSummary<ExprRef>>,
+    mut op: impl FnMut(ExprRef, ExprRef) -> ExprRef,
+) {
+    let a = stack.pop().unwrap_or_else(|| panic!("Stack is empty!"));
+    let b = stack.pop().unwrap_or_else(|| panic!("Stack is empty!"));
+    let res = ValueSummary::apply_bin_op(gc, &mut op, a, b);
+    stack.push(res);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use patronus::expr::{Context, SerializableIrNode};
+    use smallvec::smallvec;
+
+    #[test]
+    fn simple_eval() {
+        let mut ctx = Context::default();
+        let mut gc = GuardCtx::default();
+
+        let reset = ctx.bv_symbol("reset", 1);
+        let inp = ctx.bv_symbol("inp", 32);
+        let out = ctx.build(|c| c.ite(reset, c.zero(32), c.add(inp, c.one(32))));
+
+        let symbols = [(reset, ctx.get_false().into()), (inp, inp.into())];
+        let result = eval(&mut ctx, &mut gc, symbols.as_slice(), out);
+        println!("Entries: {}", result.len());
+        println!("In: {}", out.serialize_to_str(&ctx));
+        println!(
+            "Out: {}",
+            result.to_value(&mut ctx, &mut gc).serialize_to_str(&ctx)
+        )
+    }
+}

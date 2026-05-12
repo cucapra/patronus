@@ -32,7 +32,7 @@ fn test_exec_count_2() {
     let bad = sys.bad_states[0];
     let mut sim = SymEngine::new(&ctx, sys);
 
-    fn v(v: ValueSummary<ExprRef>) -> u64 {
+    fn v(v: &ValueSummary<ExprRef>) -> u64 {
         v.concrete()
             .expect("not concrete!")
             .try_into_u64()

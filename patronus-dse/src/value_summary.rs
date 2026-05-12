@@ -2,7 +2,7 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use boolean_expression::{BDD, BDDFunc};
+use boolean_expression::{BDD, BDD_ONE, BDD_ZERO, BDDFunc};
 use patronus::expr::*;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use smallvec::{Array, SmallVec, smallvec};
@@ -22,11 +22,11 @@ impl Default for GuardCtx {
 }
 
 impl GuardCtx {
-    pub fn get_true(&mut self) -> Guard {
-        self.bdd.constant(true)
+    pub fn get_true() -> Guard {
+        BDD_ONE
     }
-    pub fn get_false(&mut self) -> Guard {
-        self.bdd.constant(false)
+    pub fn get_false() -> Guard {
+        BDD_ZERO
     }
 
     pub fn and(&mut self, a: Guard, b: Guard) -> Guard {
@@ -48,6 +48,36 @@ impl GuardCtx {
 
     pub fn is_true(&self, e: Guard) -> bool {
         matches!(e, boolean_expression::BDD_ONE)
+    }
+
+    pub fn guard_to_expr(&self, ctx: &mut Context, e: Guard) -> ExprRef {
+        let bdd_expr = self.bdd.to_expr(e);
+        Self::convert_bdd_expr(ctx, &bdd_expr)
+    }
+
+    fn convert_bdd_expr(
+        ctx: &mut Context,
+        bdd_expr: &boolean_expression::Expr<ExprRef>,
+    ) -> ExprRef {
+        match bdd_expr {
+            boolean_expression::Expr::Terminal(e) => *e,
+            boolean_expression::Expr::Const(true) => ctx.get_true(),
+            boolean_expression::Expr::Const(false) => ctx.get_false(),
+            boolean_expression::Expr::Not(inner) => {
+                let inner = Self::convert_bdd_expr(ctx, inner);
+                ctx.not(inner)
+            }
+            boolean_expression::Expr::And(a, b) => {
+                let a = Self::convert_bdd_expr(ctx, a);
+                let b = Self::convert_bdd_expr(ctx, b);
+                ctx.and(a, b)
+            }
+            boolean_expression::Expr::Or(a, b) => {
+                let a = Self::convert_bdd_expr(ctx, a);
+                let b = Self::convert_bdd_expr(ctx, b);
+                ctx.or(a, b)
+            }
+        }
     }
 
     pub fn expr_to_guard(&mut self, ec: &Context, expr: ExprRef) -> Guard {
@@ -108,7 +138,7 @@ pub trait Value: Clone + Eq + Hash {
     fn zero(_ec: &mut ValueContext, tpe: &Type) -> Self;
 }
 
-type EntryVec<V: Value> = SmallVec<[Entry<V>; 4]>;
+type EntryVec<V> = SmallVec<[Entry<V>; 4]>;
 
 #[allow(dead_code)]
 #[derive(Clone)]
@@ -116,11 +146,17 @@ pub struct ValueSummary<V: Value> {
     entries: EntryVec<V>,
 }
 
+impl<V: Value> From<V> for ValueSummary<V> {
+    fn from(value: V) -> Self {
+        ValueSummary::new(value)
+    }
+}
+
 impl<V: Value> ValueSummary<V> {
-    pub fn new(gc: &mut GuardCtx, value: V) -> Self {
+    pub fn new(value: V) -> Self {
         Self {
             entries: smallvec![Entry {
-                guard: gc.get_true(),
+                guard: GuardCtx::get_true(),
                 value,
             }],
         }
@@ -128,9 +164,8 @@ impl<V: Value> ValueSummary<V> {
 
     /// Applies an operation to a and b.
     pub fn apply_bin_op(
-        ec: &mut ValueContext,
         gc: &mut GuardCtx,
-        op: fn(ec: &mut ValueContext, a: V, b: V) -> V,
+        op: &mut impl FnMut(V, V) -> V,
         a: Self,
         b: Self,
     ) -> Self {
@@ -156,7 +191,7 @@ impl<V: Value> ValueSummary<V> {
                 // we can create exactly one new entry with the common guard
                 out.push(Entry {
                     guard,
-                    value: op(ec, a_expr, b_expr),
+                    value: op(a_expr, b_expr),
                 })
             }
 
@@ -176,7 +211,7 @@ impl<V: Value> ValueSummary<V> {
                         // create a new entry
                         out.push(Entry {
                             guard,
-                            value: op(ec, a_entry.value.clone(), b_entry.value.clone()),
+                            value: op(a_entry.value.clone(), b_entry.value.clone()),
                         })
                     }
                 }
@@ -201,7 +236,10 @@ impl<V: Value> ValueSummary<V> {
     /// Indicates that this value summary is trivially true.
     pub fn is_true(&self, ec: &ValueContext) -> bool {
         match self.entries.as_slice() {
-            [entry] => entry.value.is_true(ec),
+            [entry] => {
+                debug_assert_eq!(entry.guard, GuardCtx::get_true());
+                entry.value.is_true(ec)
+            }
             _ => false,
         }
     }
@@ -209,7 +247,10 @@ impl<V: Value> ValueSummary<V> {
     /// Indicates that this value summary is trivially false.
     pub fn is_false(&self, ec: &ValueContext) -> bool {
         match self.entries.as_slice() {
-            [entry] => entry.value.is_false(ec),
+            [entry] => {
+                debug_assert_eq!(entry.guard, GuardCtx::get_true());
+                entry.value.is_false(ec)
+            }
             _ => false,
         }
     }
@@ -235,6 +276,22 @@ impl<V: Value> ValueSummary<V> {
     /// returns a concrete value, if the value summary consists of a single concrete value
     pub fn concrete(&self) -> Option<V::Concrete> {
         todo!()
+    }
+}
+
+impl ValueSummary<ExprRef> {
+    pub fn to_value(&self, ctx: &mut ValueContext, gc: &mut GuardCtx) -> ExprRef {
+        assert!(
+            !self.entries.is_empty(),
+            "A value summary must always contain at least one entry!"
+        );
+        let default = self.entries.last().unwrap();
+        let mut out = self.entries.last().unwrap().value;
+        for entry in self.entries.iter().take(self.entries.len() - 1) {
+            let guard = gc.guard_to_expr(ctx, entry.guard);
+            out = ctx.ite(guard, entry.value, out);
+        }
+        out
     }
 }
 
@@ -313,7 +370,7 @@ impl<V: Value + ToGuard> ValueSummary<V> {
     /// Converts the value summary into a guard.
     fn to_guard(&self, ec: &mut ValueContext, gc: &mut GuardCtx) -> (Guard, EntryVec<V>) {
         let mut results = EntryVec::default();
-        let mut guard = gc.get_false();
+        let mut guard = GuardCtx::get_false();
         for e in self.entries.iter() {
             match e.value.to_guard(ec, gc) {
                 GuardResult::Guard(value_as_guard) => {
@@ -345,7 +402,7 @@ impl<V: Value + ToGuard> ValueSummary<V> {
         if gc.is_true(value_as_guard) {
             debug_assert!(others.is_empty());
             self.entries = smallvec![Entry {
-                guard: gc.get_true(),
+                guard: GuardCtx::get_true(),
                 value: V::true_value(ec),
             }];
             return;
@@ -353,7 +410,7 @@ impl<V: Value + ToGuard> ValueSummary<V> {
         if gc.is_false(value_as_guard) {
             debug_assert!(others.is_empty());
             self.entries = smallvec![Entry {
-                guard: gc.get_true(),
+                guard: GuardCtx::get_true(),
                 value: V::false_value(ec),
             }];
             return;
@@ -469,9 +526,8 @@ mod tests {
     #[test]
     fn simple_value_summaries() {
         let mut ctx = Context::default();
-        let mut gc = GuardCtx::default();
 
-        let vs = ValueSummary::new(&mut gc, ctx.bv_symbol("a", 16));
+        let vs: ValueSummary<_> = ctx.bv_symbol("a", 16).into();
         assert_eq!(vs.len(), 1);
     }
 
