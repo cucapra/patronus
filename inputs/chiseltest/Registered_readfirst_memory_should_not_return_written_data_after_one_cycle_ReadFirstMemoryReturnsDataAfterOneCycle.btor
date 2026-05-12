@@ -1,0 +1,78 @@
+; @[src/test/scala/chiseltest/formal/MemoryTests.scala 110:7]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 110:7]
+3 sort bitvec 5
+4 input 3 writeAddr ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 93:21]
+5 input 3 readAddr ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 94:20]
+6 sort bitvec 8
+7 input 6 in ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 95:14]
+8 input 6 m_readValue_rand_data ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 98:22]
+9 sort array 3 6
+10 state 9 m ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 98:22]
+11 state 6 m_readValue_data_pipe_0
+12 state 1 _cycles
+13 state 1 m_readValue_do_rand_r1 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 98:22]
+14 state 6 out_1 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+; _resetCount.init
+15 zero 1
+16 state 1 _resetCount
+17 init 1 16 15
+18 read 6 10 5
+19 one 1
+20 ugte 1 12 19
+21 not 1 20
+22 not 1 21
+23 one 1 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 100:{25,25} 98:22]
+24 eq 1 5 4 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 111:19]
+25 not 1 2 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 111:9]
+26 not 1 24 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 111:9]
+27 ite 6 13 8 11 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 96:15], @[src/test/scala/chiseltest/formal/MemoryTests.scala 98:{22,22}]
+28 eq 1 27 14 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 112:14]
+29 not 1 28 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 112:9]
+30 one 1
+31 ugte 1 16 30
+32 not 1 31
+33 implies 1 25 24
+34 constraint 33 ; assume @[src/test/scala/chiseltest/formal/MemoryTests.scala 111:9]
+35 and 1 25 22
+36 implies 1 35 28
+37 not 1 36
+38 bad 37 ; assert @[src/test/scala/chiseltest/formal/MemoryTests.scala 112:9]
+39 implies 1 32 2
+40 constraint 39 ; _resetActive
+41 one 1
+42 one 1
+43 one 1
+; m.next
+44 and 1 42 43
+45 write 9 10 4 7
+46 ite 9 44 45 10
+47 next 9 10 46
+; m_readValue_data_pipe_0.next
+48 one 1
+49 ite 6 48 18 11
+50 next 6 11 49
+; _cycles.next
+51 zero 1
+52 sort bitvec 2
+53 uext 52 12 1
+54 one 1
+55 uext 52 54 1
+56 add 52 53 55
+57 slice 1 56 0 0
+58 ite 1 21 57 12
+59 ite 1 2 51 58
+60 next 1 12 59
+; m_readValue_do_rand_r1.next
+61 not 1 23
+62 next 1 13 61
+; out_1.next
+63 next 6 14 7
+; _resetCount.next
+64 uext 52 16 1
+65 one 1
+66 uext 52 65 1
+67 add 52 64 66
+68 slice 1 67 0 0
+69 ite 1 32 68 16
+70 next 1 16 69

@@ -1,0 +1,61 @@
+; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 23:7]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 23:7]
+3 sort bitvec 8
+4 input 3 in ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 24:14]
+5 state 1 _cycles
+6 state 3 out_REG ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 27:17]
+7 state 3 out_1 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+; _resetCount.init
+8 zero 1
+9 state 1 _resetCount
+10 init 1 9 8
+11 one 1
+12 ugte 1 5 11
+13 not 1 12
+14 not 1 13
+15 sort bitvec 4
+16 const 15 1011
+17 uext 3 16 4
+18 eq 1 7 17 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 28:17] @[src/test/scala/chiseltest/formal/SafePastSpec.scala 25:15], @[src/test/scala/chiseltest/formal/SafePastSpec.scala 27:7]
+19 const 15 1011
+20 uext 3 19 4
+21 eq 1 6 20 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 29:16]
+22 not 1 2 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 29:11]
+23 not 1 21 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 29:11]
+24 one 1
+25 ugte 1 9 24
+26 not 1 25
+27 and 1 18 22
+28 and 1 27 14
+29 implies 1 28 21
+30 not 1 29
+31 bad 30 ; assert @[src/test/scala/chiseltest/formal/SafePastSpec.scala 29:11]
+32 implies 1 26 2
+33 constraint 32 ; _resetActive
+; _cycles.next
+34 zero 1
+35 sort bitvec 2
+36 uext 35 5 1
+37 one 1
+38 uext 35 37 1
+39 add 35 36 38
+40 slice 1 39 0 0
+41 ite 1 13 40 5
+42 ite 1 2 34 41
+43 next 1 5 42
+; out_REG.next
+44 zero 1
+45 uext 3 44 7
+46 ite 3 2 45 4
+47 next 3 6 46
+; out_1.next
+48 next 3 7 4
+; _resetCount.next
+49 uext 35 9 1
+50 one 1
+51 uext 35 50 1
+52 add 35 49 51
+53 slice 1 52 0 0
+54 ite 1 26 53 9
+55 next 1 9 54

@@ -1,0 +1,18 @@
+; count.init
+1 sort bitvec 32
+2 zero 1
+3 state 1 count
+4 init 1 3 2
+5 sort bitvec 1
+6 one 5
+7 uext 1 6 31
+8 ugte 5 3 7
+9 bad 8 ; leq_assert
+; count.next
+10 sort bitvec 33
+11 uext 10 3 1
+12 one 5
+13 uext 10 12 32
+14 add 10 11 13
+15 slice 1 14 31 0
+16 next 1 3 15

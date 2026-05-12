@@ -1,0 +1,202 @@
+; @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 107:15]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 107:15]
+3 input 1 io_enq_valid ; @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 110:14]
+4 sort bitvec 32
+5 input 4 io_enq_bits ; @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 110:14]
+6 input 1 io_deq_ready ; @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 110:14]
+7 input 1 startTracking ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 20:27]
+8 input 4 dut_ram_io_deq_bits_MPORT_rand_data ; @[src/main/scala/chisel3/util/Decoupled.scala 256:91]
+9 sort bitvec 2
+10 input 9 dut__GEN_1_invalid ; @[src/main/scala/chisel3/util/Decoupled.scala 269:16 270:8]
+11 input 1 dut__GEN_4_invalid ; @[src/main/scala/chisel3/util/Decoupled.scala 269:16 270:24]
+12 input 4 dut__GEN_5_invalid ; @[src/main/scala/chisel3/util/Decoupled.scala 269:16 270:24]
+13 sort array 9 4
+14 state 13 dut_ram ; @[src/main/scala/chisel3/util/Decoupled.scala 256:91]
+15 state 9 dut_deq_ptr_value ; @[src/main/scala/chisel3/util/Counter.scala 61:40]
+16 state 9 dut_enq_ptr_value ; @[src/main/scala/chisel3/util/Counter.scala 61:40]
+17 state 1 dut_maybe_full ; @[src/main/scala/chisel3/util/Decoupled.scala 259:27]
+18 state 9 tracker_elementCount ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 44:29]
+19 state 1 tracker_isActive ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 54:25]
+20 state 4 tracker_packetValue ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 55:24]
+21 state 9 tracker_packetCount ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 56:24]
+; _resetCount.init
+22 zero 1
+23 state 1 _resetCount
+24 init 1 23 22
+25 read 4 14 15 ; @[src/main/scala/chisel3/util/Decoupled.scala 256:{91,91}]
+26 ones 9
+27 ugt 1 26 15
+28 not 1 27 ; @[src/main/scala/chisel3/util/Decoupled.scala 256:91]
+29 eq 1 16 15 ; @[src/main/scala/chisel3/util/Decoupled.scala 260:33]
+30 not 1 17 ; @[src/main/scala/chisel3/util/Decoupled.scala 261:28]
+31 and 1 29 30 ; @[src/main/scala/chisel3/util/Decoupled.scala 261:25]
+32 and 1 29 17 ; @[src/main/scala/chisel3/util/Decoupled.scala 262:24]
+33 not 1 32 ; @[src/main/scala/chisel3/util/Decoupled.scala 286:19] @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 110:41]
+34 and 1 33 3 ; @[src/main/scala/chisel3/util/Decoupled.scala 51:35] @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 110:41]
+35 not 1 31 ; @[src/main/scala/chisel3/util/Decoupled.scala 285:19]
+36 and 1 6 35 ; @[src/main/scala/chisel3/util/Decoupled.scala 51:35]
+37 const 9 10
+38 eq 1 16 37 ; @[src/main/scala/chisel3/util/Counter.scala 73:24]
+39 sort bitvec 3
+40 uext 39 16 1
+41 one 1
+42 uext 39 41 2
+43 add 39 40 42 ; @[src/main/scala/chisel3/util/Counter.scala 77:24]
+44 slice 9 43 1 0 ; @[src/main/scala/chisel3/util/Counter.scala 77:24]
+45 zero 1
+46 uext 9 45 1
+47 ite 9 38 46 44 ; @[src/main/scala/chisel3/util/Counter.scala 77:15 87:{20,28}]
+48 not 1 34
+49 not 1 34
+50 not 1 34
+51 ite 9 34 47 16 ; @[src/main/scala/chisel3/util/Decoupled.scala 269:16 src/main/scala/chisel3/util/Counter.scala 61:40]
+52 const 9 10
+53 eq 1 15 52 ; @[src/main/scala/chisel3/util/Counter.scala 73:24]
+54 uext 39 15 1
+55 one 1
+56 uext 39 55 2
+57 add 39 54 56 ; @[src/main/scala/chisel3/util/Counter.scala 77:24]
+58 slice 9 57 1 0 ; @[src/main/scala/chisel3/util/Counter.scala 77:24]
+59 zero 1
+60 uext 9 59 1
+61 ite 9 53 60 58 ; @[src/main/scala/chisel3/util/Counter.scala 77:15 87:{20,28}]
+62 ite 9 36 61 15 ; @[src/main/scala/chisel3/util/Decoupled.scala 273:16 src/main/scala/chisel3/util/Counter.scala 61:40]
+63 neq 1 34 36 ; @[src/main/scala/chisel3/util/Decoupled.scala 276:15]
+64 ite 1 63 34 17 ; @[src/main/scala/chisel3/util/Decoupled.scala 276:27 277:16 259:27]
+65 uext 39 16 1
+66 uext 39 15 1
+67 sub 39 65 66 ; @[src/main/scala/chisel3/util/Decoupled.scala 309:32]
+68 slice 9 67 1 0 ; @[src/main/scala/chisel3/util/Decoupled.scala 309:32]
+69 ones 9
+70 zero 1
+71 uext 9 70 1
+72 ite 9 17 69 71 ; @[src/main/scala/chisel3/util/Decoupled.scala 316:10]
+73 ugt 1 15 16 ; @[src/main/scala/chisel3/util/Decoupled.scala 317:25]
+74 ones 9
+75 uext 39 74 1
+76 uext 39 68 1
+77 add 39 75 76 ; @[src/main/scala/chisel3/util/Decoupled.scala 317:57]
+78 slice 9 77 1 0 ; @[src/main/scala/chisel3/util/Decoupled.scala 317:57]
+79 ite 9 73 78 68 ; @[src/main/scala/chisel3/util/Decoupled.scala 317:10]
+80 ite 4 28 8 25 ; @[src/main/scala/chisel3/util/Decoupled.scala 256:{91,91}]
+81 ite 9 29 72 79 ; @[src/main/scala/chisel3/util/Decoupled.scala 314:20]
+82 one 1
+83 and 1 33 3
+84 not 1 34
+85 ite 9 84 10 16
+86 not 1 34
+87 one 1
+88 ite 1 86 11 87 ; @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 110:41]
+89 not 1 34
+90 ite 4 89 12 5
+91 and 1 6 35 ; @[src/main/scala/chisel3/util/Decoupled.scala 51:35]
+92 not 1 91 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 46:17]
+93 and 1 33 3 ; @[src/main/scala/chisel3/util/Decoupled.scala 51:35]
+94 and 1 93 92 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 46:14]
+95 uext 39 18 1
+96 one 1
+97 uext 39 96 2
+98 add 39 95 97 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 47:18]
+99 slice 9 98 1 0 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 47:18]
+100 not 1 93 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 48:9]
+101 and 1 100 91 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 48:19]
+102 uext 39 18 1
+103 one 1
+104 uext 39 103 2
+105 sub 39 102 104 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 48:45]
+106 slice 9 105 1 0 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 48:45]
+107 ite 9 101 106 18 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 48:8]
+108 ite 9 94 99 107 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 45:29]
+109 not 1 19 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 58:8]
+110 and 1 109 93 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 58:18] @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 21:27]
+111 and 1 110 7 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 58:30]
+112 zero 1
+113 uext 9 112 1
+114 eq 1 18 113 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 59:35]
+115 and 1 91 114 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 59:19] @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 31:23 33:18] @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 31:23 33:18]
+116 eq 1 5 80 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 61:25]
+117 not 1 2 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 60:13]
+118 not 1 116 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 60:13]
+119 one 1
+120 ite 1 115 19 119 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 54:25 59:44 67:16]
+121 ite 4 115 20 5 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 55:24 59:44 68:19]
+122 ite 9 115 21 108 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 56:24 59:44 69:19]
+123 ite 1 111 120 19 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 54:25 58:48]
+124 ite 9 111 122 21 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 56:24 58:48]
+125 and 1 19 91 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 73:17]
+126 uext 39 21 1
+127 one 1
+128 uext 39 127 2
+129 sub 39 126 128 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 74:32]
+130 slice 9 129 1 0 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 74:32]
+131 one 1
+132 uext 9 131 1
+133 eq 1 21 132 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 75:22]
+134 eq 1 20 80 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 77:28]
+135 not 1 134 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 76:13]
+136 zero 1
+137 ite 1 133 136 123 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 75:31 82:16]
+138 ite 1 125 137 123 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 73:30]
+139 ones 9
+140 eq 1 18 139 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 87:21]
+141 not 1 94 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 90:7]
+142 not 1 141 ; @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 89:11]
+143 and 1 111 115
+144 and 1 143 117
+145 implies 1 144 116
+146 not 1 145
+147 bad 146 ; tracker_assert @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 60:13]
+148 and 1 125 133
+149 and 1 148 117
+150 implies 1 149 134
+151 not 1 150
+152 bad 151 ; tracker_assert_1 @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 76:13]
+153 and 1 140 117
+154 implies 1 153 141
+155 not 1 154
+156 bad 155 ; tracker_assert_2 @[src/main/scala/chiseltest/formal/vips/MagicPacketTracker.scala 89:11]
+157 one 1
+158 ugte 1 23 157
+159 not 1 158 ; @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 110:14], @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 110:41] @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 110:14], @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 110:41] @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 110:14], @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 110:41] @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 110:14], @[src/test/scala/chiseltest/formal/MagicPacketTrackerTests.scala 110:41]
+160 implies 1 159 2
+161 constraint 160 ; _resetActive
+; dut_ram.next
+162 and 1 83 88
+163 write 13 14 85 90
+164 ite 13 162 163 14
+165 next 13 14 164
+; dut_deq_ptr_value.next
+166 zero 9
+167 ite 9 2 166 62
+168 next 9 15 167
+; dut_enq_ptr_value.next
+169 zero 9
+170 ite 9 2 169 51
+171 next 9 16 170
+; dut_maybe_full.next
+172 zero 1
+173 ite 1 2 172 64
+174 next 1 17 173
+; tracker_elementCount.next
+175 zero 9
+176 ite 9 2 175 108
+177 next 9 18 176
+; tracker_isActive.next
+178 zero 1
+179 ite 1 2 178 138
+180 next 1 19 179
+; tracker_packetValue.next
+181 ite 4 111 121 20
+182 next 4 20 181
+; tracker_packetCount.next
+183 ite 9 125 130 124
+184 next 9 21 183
+; _resetCount.next
+185 uext 9 23 1
+186 one 1
+187 uext 9 186 1
+188 add 9 185 187
+189 slice 1 188 0 0
+190 ite 1 159 189 23
+191 next 1 23 190

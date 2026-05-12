@@ -1,0 +1,120 @@
+; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 33:7]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 33:7]
+3 sort bitvec 8
+4 input 3 addr ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 34:16]
+5 sort bitvec 32
+6 input 5 data ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 35:16]
+7 input 1 aEn ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 36:15]
+8 input 1 bEn ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 37:15]
+9 input 1 _GEN_3_invalid ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 41:{13,22}]
+10 input 1 _GEN_8_invalid ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 42:{13,22}]
+11 sort bitvec 5
+12 input 11 _GEN_0_invalid ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 41:{13,22}]
+13 input 11 _GEN_5_invalid ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 42:{13,22}]
+14 input 5 m_MPORT_wwc_data ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 39:14]
+15 input 5 _GEN_4_invalid ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 41:{13,22}]
+16 input 5 _GEN_9_invalid ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 42:{13,22}]
+17 sort array 11 5
+18 state 17 m ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 39:14]
+19 state 1 _cycles
+20 state 3 out ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+21 state 5 REG ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 47:40]
+; _resetCount.init
+22 zero 1
+23 state 1 _resetCount
+24 init 1 23 22
+25 slice 11 20 4 0
+26 read 5 18 25
+27 one 1
+28 ugte 1 19 27
+29 not 1 28
+30 not 1 29 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 41:13 39:14 41:22]
+31 not 1 7
+32 not 1 7
+33 one 1
+34 ite 1 32 9 33 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 41:{13,22}] @[src/test/scala/chiseltest/formal/SafePastSpec.scala 41:{13,22}] @[src/test/scala/chiseltest/formal/SafePastSpec.scala 42:13 39:14 42:22]
+35 not 1 8
+36 not 1 8
+37 one 1
+38 ite 1 36 10 37 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 42:{13,22}] @[src/test/scala/chiseltest/formal/SafePastSpec.scala 42:{13,22}]
+39 slice 11 4 4 0 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 41:22]
+40 not 1 7
+41 not 1 7
+42 ite 11 41 12 39 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 41:{13,22}] @[src/test/scala/chiseltest/formal/SafePastSpec.scala 41:{13,22}]
+43 not 1 8
+44 not 1 8
+45 ite 11 44 13 39 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 42:{13,22}] @[src/test/scala/chiseltest/formal/SafePastSpec.scala 42:{13,22}]
+46 and 1 7 34
+47 and 1 8 38
+48 and 1 46 47
+49 eq 1 42 45
+50 and 1 48 49 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 39:{14,14}]
+51 not 1 7
+52 not 1 7
+53 ite 5 52 15 6 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 41:{13,22}]
+54 not 1 8
+55 xor 1 7 8 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 44:14]
+56 not 1 2 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 44:9]
+57 not 1 55 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 44:9]
+58 eq 1 26 21 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 47:29]
+59 not 1 58 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 47:9]
+60 one 1
+61 ugte 1 23 60
+62 not 1 61 ; @[src/test/scala/chiseltest/formal/SafePastSpec.scala 41:{13,22}]
+63 implies 1 56 55
+64 constraint 63 ; assume @[src/test/scala/chiseltest/formal/SafePastSpec.scala 44:9]
+65 and 1 56 30
+66 implies 1 65 58
+67 not 1 66
+68 bad 67 ; assert @[src/test/scala/chiseltest/formal/SafePastSpec.scala 47:9]
+69 implies 1 62 2
+70 constraint 69 ; _resetActive
+71 one 1
+72 and 1 7 34
+73 not 1 7
+74 ite 11 73 12 39
+75 one 1
+76 ite 5 50 14 53
+77 and 1 8 38
+78 not 1 50
+79 and 1 77 78
+80 not 1 8
+81 ite 11 80 13 39
+82 one 1
+83 not 1 8
+84 ite 5 83 16 6
+; m.next
+85 and 1 79 82
+86 and 1 72 75
+87 write 17 18 74 76
+88 ite 17 86 87 18
+89 write 17 88 81 84
+90 and 1 72 75
+91 write 17 18 74 76
+92 ite 17 90 91 18
+93 ite 17 85 89 92
+94 next 17 18 93
+; _cycles.next
+95 zero 1
+96 sort bitvec 2
+97 uext 96 19 1
+98 one 1
+99 uext 96 98 1
+100 add 96 97 99
+101 slice 1 100 0 0
+102 ite 1 29 101 19
+103 ite 1 2 95 102
+104 next 1 19 103
+; out.next
+105 next 3 20 4
+; REG.next
+106 next 5 21 6
+; _resetCount.next
+107 uext 96 23 1
+108 one 1
+109 uext 96 108 1
+110 add 96 107 109
+111 slice 1 110 0 0
+112 ite 1 62 111 23
+113 next 1 23 112

@@ -1,0 +1,55 @@
+; @[src/test/scala/chiseltest/formal/examples/KeepMax.scala 22:7]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/examples/KeepMax.scala 22:7]
+3 sort bitvec 8
+4 input 3 in ; @[src/test/scala/chiseltest/formal/examples/KeepMax.scala 23:14]
+5 state 1 _cycles
+6 state 3 max ; @[src/test/scala/chiseltest/formal/examples/KeepMax.scala 26:20]
+7 state 3 out_1 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+; _resetCount.init
+8 zero 1
+9 state 1 _resetCount
+10 init 1 9 8
+11 one 1
+12 ugte 1 5 11
+13 not 1 12
+14 not 1 13
+15 ugt 1 4 6 ; @[src/test/scala/chiseltest/formal/examples/KeepMax.scala 27:11]
+16 ite 3 15 4 6 ; @[src/test/scala/chiseltest/formal/examples/KeepMax.scala 27:18 26:20 28:9] @[src/test/scala/chiseltest/formal/examples/KeepMax.scala 24:15], @[src/test/scala/chiseltest/formal/examples/KeepMax.scala 30:7]
+17 ugte 1 6 7 ; @[src/test/scala/chiseltest/formal/examples/KeepMax.scala 33:14]
+18 not 1 2 ; @[src/test/scala/chiseltest/formal/examples/KeepMax.scala 33:9]
+19 not 1 17 ; @[src/test/scala/chiseltest/formal/examples/KeepMax.scala 33:9]
+20 one 1
+21 ugte 1 9 20
+22 not 1 21
+23 and 1 18 14
+24 implies 1 23 17
+25 not 1 24
+26 bad 25 ; assert @[src/test/scala/chiseltest/formal/examples/KeepMax.scala 33:9]
+27 implies 1 22 2
+28 constraint 27 ; _resetActive
+; _cycles.next
+29 zero 1
+30 sort bitvec 2
+31 uext 30 5 1
+32 one 1
+33 uext 30 32 1
+34 add 30 31 33
+35 slice 1 34 0 0
+36 ite 1 13 35 5
+37 ite 1 2 29 36
+38 next 1 5 37
+; max.next
+39 zero 3
+40 ite 3 2 39 16
+41 next 3 6 40
+; out_1.next
+42 next 3 7 6
+; _resetCount.next
+43 uext 30 9 1
+44 one 1
+45 uext 30 44 1
+46 add 30 43 45
+47 slice 1 46 0 0
+48 ite 1 22 47 9
+49 next 1 9 48

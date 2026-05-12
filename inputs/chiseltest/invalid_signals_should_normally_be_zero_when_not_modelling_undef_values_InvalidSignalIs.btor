@@ -1,0 +1,24 @@
+; @[src/test/scala/chiseltest/formal/UndefinedValuesTests.scala 68:7]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/UndefinedValuesTests.scala 68:7]
+; _resetCount.init
+3 zero 1
+4 state 1 _resetCount
+5 init 1 4 3
+6 not 1 2 ; @[src/test/scala/chiseltest/formal/UndefinedValuesTests.scala 71:9]
+7 zero 1
+8 bad 7 ; assert @[src/test/scala/chiseltest/formal/UndefinedValuesTests.scala 71:9]
+9 one 1
+10 ugte 1 4 9
+11 not 1 10
+12 implies 1 11 2
+13 constraint 12 ; _resetActive
+; _resetCount.next
+14 sort bitvec 2
+15 uext 14 4 1
+16 one 1
+17 uext 14 16 1
+18 add 14 15 17
+19 slice 1 18 0 0
+20 ite 1 11 19 4
+21 next 1 4 20

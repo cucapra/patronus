@@ -1,0 +1,48 @@
+; @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 64:7]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 64:7]
+3 sort bitvec 8
+4 input 3 in ; @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 65:14]
+; _resetCount.init
+5 zero 1
+6 state 1 _resetCount
+7 init 1 6 5
+8 sort bitvec 9
+9 uext 8 4 1
+10 one 1
+11 uext 8 10 8
+12 add 8 9 11 ; @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 67:13]
+13 sort bitvec 4
+14 const 13 1100
+15 uext 3 14 4
+16 ugt 1 4 15 ; @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 68:13]
+17 ones 3
+18 ugte 1 4 17
+19 not 1 18 ; @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 68:26]
+20 and 1 16 19 ; @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 68:20]
+21 not 1 2 ; @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 68:9]
+22 not 1 20 ; @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 68:9]
+23 slice 3 12 7 0 ; @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 66:15], @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 67:13]
+24 const 13 1101
+25 uext 3 24 4
+26 ugt 1 23 25 ; @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 69:14]
+27 not 1 26 ; @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 69:9]
+28 one 1
+29 ugte 1 6 28
+30 not 1 29
+31 implies 1 21 20
+32 constraint 31 ; assume @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 68:9]
+33 implies 1 21 26
+34 not 1 33
+35 bad 34 ; assert @[src/test/scala/chiseltest/formal/BasicBoundedCheckTests.scala 69:9]
+36 implies 1 30 2
+37 constraint 36 ; _resetActive
+; _resetCount.next
+38 sort bitvec 2
+39 uext 38 6 1
+40 one 1
+41 uext 38 40 1
+42 add 38 39 41
+43 slice 1 42 0 0
+44 ite 1 30 43 6
+45 next 1 6 44

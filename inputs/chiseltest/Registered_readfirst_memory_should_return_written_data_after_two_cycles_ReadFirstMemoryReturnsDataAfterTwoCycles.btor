@@ -1,0 +1,88 @@
+; @[src/test/scala/chiseltest/formal/MemoryTests.scala 104:7]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 104:7]
+3 sort bitvec 5
+4 input 3 writeAddr ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 93:21]
+5 input 3 readAddr ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 94:20]
+6 sort bitvec 8
+7 input 6 in ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 95:14]
+8 input 6 m_readValue_rand_data ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 98:22]
+9 sort array 3 6
+10 state 9 m ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 98:22]
+11 state 6 m_readValue_data_pipe_0
+12 sort bitvec 2
+13 state 12 _cycles
+14 state 1 m_readValue_do_rand_r1 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 98:22]
+15 state 3 out_1 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+16 state 6 out_past ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+17 state 6 out_2 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+; _resetCount.init
+18 zero 1
+19 state 1 _resetCount
+20 init 1 19 18
+21 read 6 10 5
+22 const 12 10
+23 ugte 1 13 22
+24 not 1 23
+25 one 12
+26 ugte 1 13 25
+27 not 1 24
+28 one 1 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 100:{25,25} 98:22]
+29 eq 1 5 15 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 106:19]
+30 not 1 2 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 106:9]
+31 not 1 29 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 106:9]
+32 ite 6 14 8 11 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 96:15], @[src/test/scala/chiseltest/formal/MemoryTests.scala 98:{22,22}]
+33 eq 1 32 17 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 107:14]
+34 not 1 33 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 107:9]
+35 one 1
+36 ugte 1 19 35
+37 not 1 36
+38 and 1 30 26
+39 implies 1 38 29
+40 constraint 39 ; assume @[src/test/scala/chiseltest/formal/MemoryTests.scala 106:9]
+41 and 1 30 27
+42 implies 1 41 33
+43 not 1 42
+44 bad 43 ; assert @[src/test/scala/chiseltest/formal/MemoryTests.scala 107:9]
+45 implies 1 37 2
+46 constraint 45 ; _resetActive
+47 one 1
+48 one 1
+49 one 1
+; m.next
+50 and 1 48 49
+51 write 9 10 4 7
+52 ite 9 50 51 10
+53 next 9 10 52
+; m_readValue_data_pipe_0.next
+54 one 1
+55 ite 6 54 21 11
+56 next 6 11 55
+; _cycles.next
+57 zero 12
+58 sort bitvec 3
+59 uext 58 13 1
+60 one 12
+61 uext 58 60 1
+62 add 58 59 61
+63 slice 12 62 1 0
+64 ite 12 24 63 13
+65 ite 12 2 57 64
+66 next 12 13 65
+; m_readValue_do_rand_r1.next
+67 not 1 28
+68 next 1 14 67
+; out_1.next
+69 next 3 15 4
+; out_past.next
+70 next 6 16 7
+; out_2.next
+71 next 6 17 16
+; _resetCount.next
+72 uext 12 19 1
+73 one 1
+74 uext 12 73 1
+75 add 12 72 74
+76 slice 1 75 0 0
+77 ite 1 37 76 19
+78 next 1 19 77

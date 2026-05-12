@@ -1,0 +1,201 @@
+; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 21:7]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 21:7]
+3 sort bitvec 13
+4 input 3 numerator ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 23:21]
+; _resetCount.init
+5 zero 1
+6 state 1 _resetCount
+7 init 1 6 5
+8 one 1
+9 uext 3 8 12
+10 udiv 3 4 9 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 24:20]
+11 eq 1 10 4 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 24:26]
+12 not 1 2 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 24:9]
+13 not 1 11 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 24:9]
+14 sort bitvec 2
+15 const 14 10
+16 uext 3 15 11
+17 udiv 3 4 16 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:22]
+18 sort bitvec 12
+19 slice 18 4 12 1
+20 uext 3 19 1 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:45]
+21 eq 1 17 20 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:30]
+22 not 1 21 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+23 slice 18 4 12 1 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:48]
+24 uext 3 23 1
+25 eq 1 17 24 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:30]
+26 not 1 25 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+27 sort bitvec 3
+28 const 27 100
+29 uext 3 28 10
+30 udiv 3 4 29 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:22]
+31 sort bitvec 11
+32 slice 31 4 12 2
+33 uext 3 32 2 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:45]
+34 eq 1 30 33 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:30]
+35 not 1 34 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+36 slice 31 4 12 2 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:48]
+37 uext 3 36 2
+38 eq 1 30 37 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:30]
+39 not 1 38 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+40 sort bitvec 4
+41 const 40 1000
+42 uext 3 41 9
+43 udiv 3 4 42 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:22]
+44 sort bitvec 10
+45 slice 44 4 12 3
+46 uext 3 45 3 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:45]
+47 eq 1 43 46 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:30]
+48 not 1 47 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+49 slice 44 4 12 3 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:48]
+50 uext 3 49 3
+51 eq 1 43 50 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:30]
+52 not 1 51 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+53 sort bitvec 5
+54 const 53 10000
+55 uext 3 54 8
+56 udiv 3 4 55 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:22]
+57 sort bitvec 9
+58 slice 57 4 12 4
+59 uext 3 58 4 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:45]
+60 eq 1 56 59 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:30]
+61 not 1 60 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+62 slice 57 4 12 4 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:48]
+63 uext 3 62 4
+64 eq 1 56 63 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:30]
+65 not 1 64 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+66 sort bitvec 6
+67 const 66 100000
+68 uext 3 67 7
+69 udiv 3 4 68 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:22]
+70 sort bitvec 8
+71 slice 70 4 12 5
+72 uext 3 71 5 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:45]
+73 eq 1 69 72 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:30]
+74 not 1 73 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+75 slice 70 4 12 5 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:48]
+76 uext 3 75 5
+77 eq 1 69 76 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:30]
+78 not 1 77 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+79 sort bitvec 7
+80 const 79 1000000
+81 uext 3 80 6
+82 udiv 3 4 81 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:22]
+83 slice 79 4 12 6
+84 uext 3 83 6 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:45]
+85 eq 1 82 84 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:30]
+86 not 1 85 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+87 slice 79 4 12 6 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:48]
+88 uext 3 87 6
+89 eq 1 82 88 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:30]
+90 not 1 89 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+91 const 70 10000000
+92 uext 3 91 5
+93 udiv 3 4 92 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:22]
+94 slice 66 4 12 7
+95 uext 3 94 7 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:45]
+96 eq 1 93 95 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:30]
+97 not 1 96 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+98 slice 66 4 12 7 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:48]
+99 uext 3 98 7
+100 eq 1 93 99 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:30]
+101 not 1 100 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+102 const 57 100000000
+103 uext 3 102 4
+104 udiv 3 4 103 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:22]
+105 slice 53 4 12 8
+106 uext 3 105 8 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:45]
+107 eq 1 104 106 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:30]
+108 not 1 107 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+109 slice 53 4 12 8 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:48]
+110 uext 3 109 8
+111 eq 1 104 110 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:30]
+112 not 1 111 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+113 const 44 1000000000
+114 uext 3 113 3
+115 udiv 3 4 114 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:22]
+116 slice 40 4 12 9
+117 uext 3 116 9 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:45]
+118 eq 1 115 117 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:30]
+119 not 1 118 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+120 slice 40 4 12 9 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:48]
+121 uext 3 120 9
+122 eq 1 115 121 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:30]
+123 not 1 122 ; @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+124 one 1
+125 ugte 1 6 124
+126 not 1 125
+127 implies 1 12 11
+128 not 1 127
+129 bad 128 ; assert @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 24:9]
+130 implies 1 12 11
+131 not 1 130
+132 bad 131 ; assert_1 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+133 implies 1 12 11
+134 not 1 133
+135 bad 134 ; assert_2 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+136 implies 1 12 21
+137 not 1 136
+138 bad 137 ; assert_3 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+139 implies 1 12 25
+140 not 1 139
+141 bad 140 ; assert_4 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+142 implies 1 12 34
+143 not 1 142
+144 bad 143 ; assert_5 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+145 implies 1 12 38
+146 not 1 145
+147 bad 146 ; assert_6 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+148 implies 1 12 47
+149 not 1 148
+150 bad 149 ; assert_7 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+151 implies 1 12 51
+152 not 1 151
+153 bad 152 ; assert_8 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+154 implies 1 12 60
+155 not 1 154
+156 bad 155 ; assert_9 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+157 implies 1 12 64
+158 not 1 157
+159 bad 158 ; assert_10 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+160 implies 1 12 73
+161 not 1 160
+162 bad 161 ; assert_11 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+163 implies 1 12 77
+164 not 1 163
+165 bad 164 ; assert_12 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+166 implies 1 12 85
+167 not 1 166
+168 bad 167 ; assert_13 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+169 implies 1 12 89
+170 not 1 169
+171 bad 170 ; assert_14 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+172 implies 1 12 96
+173 not 1 172
+174 bad 173 ; assert_15 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+175 implies 1 12 100
+176 not 1 175
+177 bad 176 ; assert_16 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+178 implies 1 12 107
+179 not 1 178
+180 bad 179 ; assert_17 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+181 implies 1 12 111
+182 not 1 181
+183 bad 182 ; assert_18 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+184 implies 1 12 118
+185 not 1 184
+186 bad 185 ; assert_19 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 28:11]
+187 implies 1 12 122
+188 not 1 187
+189 bad 188 ; assert_20 @[src/test/scala/chiseltest/formal/ExpressionSemanticsTests.scala 31:11]
+190 implies 1 126 2
+191 constraint 190 ; _resetActive
+; _resetCount.next
+192 uext 14 6 1
+193 one 1
+194 uext 14 193 1
+195 add 14 192 194
+196 slice 1 195 0 0
+197 ite 1 126 196 6
+198 next 1 6 197

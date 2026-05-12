@@ -1,0 +1,379 @@
+; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 42:7]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 42:7]
+3 input 1 _GEN_3_invalid ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+4 input 1 _GEN_26_invalid ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+5 input 1 _GEN_49_invalid ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+6 state 1 _cycles
+; r_counter.init
+7 sort bitvec 5
+8 zero 7
+9 state 7 r_counter ; @[src/main/scala/chisel3/util/Counter.scala 61:40]
+10 init 7 9 8
+; a_counter.init
+11 zero 7
+12 state 7 a_counter ; @[src/main/scala/chisel3/util/Counter.scala 61:40]
+13 init 7 12 11
+; b_counter.init
+14 zero 7
+15 state 7 b_counter ; @[src/main/scala/chisel3/util/Counter.scala 61:40]
+16 init 7 15 14
+17 state 1 out ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+; _resetCount.init
+18 zero 1
+19 state 1 _resetCount
+20 init 1 19 18
+21 one 1
+22 ugte 1 6 21
+23 not 1 22
+24 not 1 23
+25 const 7 10100
+26 eq 1 9 25 ; @[src/main/scala/chisel3/util/Counter.scala 73:24]
+27 sort bitvec 6
+28 uext 27 9 1
+29 one 1
+30 uext 27 29 5
+31 add 27 28 30 ; @[src/main/scala/chisel3/util/Counter.scala 77:24]
+32 slice 7 31 4 0 ; @[src/main/scala/chisel3/util/Counter.scala 77:24]
+33 zero 1
+34 uext 7 33 4
+35 neq 1 34 9 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+36 one 1
+37 ite 1 35 3 36 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+38 one 1
+39 uext 7 38 4
+40 eq 1 39 9
+41 zero 1
+42 ite 1 40 41 37 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+43 sort bitvec 2
+44 const 43 10
+45 uext 7 44 3
+46 eq 1 45 9
+47 zero 1
+48 ite 1 46 47 42 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+49 ones 43
+50 uext 7 49 3
+51 eq 1 50 9
+52 zero 1
+53 ite 1 51 52 48 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+54 sort bitvec 3
+55 const 54 100
+56 uext 7 55 2
+57 eq 1 56 9
+58 zero 1
+59 ite 1 57 58 53 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+60 const 54 101
+61 uext 7 60 2
+62 eq 1 61 9
+63 zero 1
+64 ite 1 62 63 59 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+65 const 54 110
+66 uext 7 65 2
+67 eq 1 66 9
+68 or 1 67 64 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+69 ones 54
+70 uext 7 69 2
+71 eq 1 70 9
+72 zero 1
+73 ite 1 71 72 68 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+74 sort bitvec 4
+75 const 74 1000
+76 uext 7 75 1
+77 eq 1 76 9
+78 zero 1
+79 ite 1 77 78 73 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+80 const 74 1001
+81 uext 7 80 1
+82 eq 1 81 9
+83 zero 1
+84 ite 1 82 83 79 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+85 const 74 1010
+86 uext 7 85 1
+87 eq 1 86 9
+88 zero 1
+89 ite 1 87 88 84 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+90 const 74 1011
+91 uext 7 90 1
+92 eq 1 91 9
+93 or 1 92 89 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+94 const 74 1100
+95 uext 7 94 1
+96 eq 1 95 9
+97 zero 1
+98 ite 1 96 97 93 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+99 const 74 1101
+100 uext 7 99 1
+101 eq 1 100 9
+102 zero 1
+103 ite 1 101 102 98 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+104 const 74 1110
+105 uext 7 104 1
+106 eq 1 105 9
+107 zero 1
+108 ite 1 106 107 103 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+109 ones 74
+110 uext 7 109 1
+111 eq 1 110 9
+112 zero 1
+113 ite 1 111 112 108 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+114 const 7 10000
+115 eq 1 114 9
+116 zero 1
+117 ite 1 115 116 113 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+118 const 7 10001
+119 eq 1 118 9
+120 zero 1
+121 ite 1 119 120 117 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+122 const 7 10010
+123 eq 1 122 9
+124 zero 1
+125 ite 1 123 124 121 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+126 const 7 10011
+127 eq 1 126 9
+128 zero 1
+129 ite 1 127 128 125 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:{27,27}]
+130 eq 1 2 129 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:27]
+131 not 1 130 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:13]
+132 const 7 10100
+133 eq 1 12 132 ; @[src/main/scala/chisel3/util/Counter.scala 73:24]
+134 uext 27 12 1
+135 one 1
+136 uext 27 135 5
+137 add 27 134 136 ; @[src/main/scala/chisel3/util/Counter.scala 77:24]
+138 slice 7 137 4 0 ; @[src/main/scala/chisel3/util/Counter.scala 77:24]
+139 zero 1
+140 uext 7 139 4
+141 neq 1 140 12 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+142 and 1 141 4 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+143 one 1
+144 uext 7 143 4
+145 eq 1 144 12
+146 or 1 145 142 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+147 const 43 10
+148 uext 7 147 3
+149 eq 1 148 12
+150 or 1 149 146 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+151 ones 43
+152 uext 7 151 3
+153 eq 1 152 12
+154 zero 1
+155 ite 1 153 154 150 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+156 const 54 100
+157 uext 7 156 2
+158 eq 1 157 12
+159 zero 1
+160 ite 1 158 159 155 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+161 const 54 101
+162 uext 7 161 2
+163 eq 1 162 12
+164 zero 1
+165 ite 1 163 164 160 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+166 const 54 110
+167 uext 7 166 2
+168 eq 1 167 12
+169 or 1 168 165 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+170 ones 54
+171 uext 7 170 2
+172 eq 1 171 12
+173 zero 1
+174 ite 1 172 173 169 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+175 const 74 1000
+176 uext 7 175 1
+177 eq 1 176 12
+178 zero 1
+179 ite 1 177 178 174 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+180 const 74 1001
+181 uext 7 180 1
+182 eq 1 181 12
+183 zero 1
+184 ite 1 182 183 179 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+185 const 74 1010
+186 uext 7 185 1
+187 eq 1 186 12
+188 or 1 187 184 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+189 const 74 1011
+190 uext 7 189 1
+191 eq 1 190 12
+192 zero 1
+193 ite 1 191 192 188 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+194 const 74 1100
+195 uext 7 194 1
+196 eq 1 195 12
+197 zero 1
+198 ite 1 196 197 193 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+199 const 74 1101
+200 uext 7 199 1
+201 eq 1 200 12
+202 zero 1
+203 ite 1 201 202 198 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+204 const 74 1110
+205 uext 7 204 1
+206 eq 1 205 12
+207 zero 1
+208 ite 1 206 207 203 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+209 ones 74
+210 uext 7 209 1
+211 eq 1 210 12
+212 zero 1
+213 ite 1 211 212 208 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+214 const 7 10000
+215 eq 1 214 12
+216 zero 1
+217 ite 1 215 216 213 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+218 const 7 10001
+219 eq 1 218 12
+220 or 1 219 217 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+221 const 7 10010
+222 eq 1 221 12
+223 zero 1
+224 ite 1 222 223 220 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 130:{26,26}]
+225 const 7 10100
+226 eq 1 15 225 ; @[src/main/scala/chisel3/util/Counter.scala 73:24]
+227 uext 27 15 1
+228 one 1
+229 uext 27 228 5
+230 add 27 227 229 ; @[src/main/scala/chisel3/util/Counter.scala 77:24]
+231 slice 7 230 4 0 ; @[src/main/scala/chisel3/util/Counter.scala 77:24]
+232 zero 1
+233 uext 7 232 4
+234 neq 1 233 15 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+235 and 1 234 5 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+236 one 1
+237 uext 7 236 4
+238 eq 1 237 15
+239 zero 1
+240 ite 1 238 239 235 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+241 const 43 10
+242 uext 7 241 3
+243 eq 1 242 15
+244 or 1 243 240 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+245 ones 43
+246 uext 7 245 3
+247 eq 1 246 15
+248 or 1 247 244 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+249 const 54 100
+250 uext 7 249 2
+251 eq 1 250 15
+252 zero 1
+253 ite 1 251 252 248 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+254 const 54 101
+255 uext 7 254 2
+256 eq 1 255 15
+257 zero 1
+258 ite 1 256 257 253 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+259 const 54 110
+260 uext 7 259 2
+261 eq 1 260 15
+262 or 1 261 258 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+263 ones 54
+264 uext 7 263 2
+265 eq 1 264 15
+266 zero 1
+267 ite 1 265 266 262 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+268 const 74 1000
+269 uext 7 268 1
+270 eq 1 269 15
+271 zero 1
+272 ite 1 270 271 267 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+273 const 74 1001
+274 uext 7 273 1
+275 eq 1 274 15
+276 zero 1
+277 ite 1 275 276 272 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+278 const 74 1010
+279 uext 7 278 1
+280 eq 1 279 15
+281 zero 1
+282 ite 1 280 281 277 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+283 const 74 1011
+284 uext 7 283 1
+285 eq 1 284 15
+286 zero 1
+287 ite 1 285 286 282 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+288 const 74 1100
+289 uext 7 288 1
+290 eq 1 289 15
+291 zero 1
+292 ite 1 290 291 287 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+293 const 74 1101
+294 uext 7 293 1
+295 eq 1 294 15
+296 zero 1
+297 ite 1 295 296 292 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+298 const 74 1110
+299 uext 7 298 1
+300 eq 1 299 15
+301 zero 1
+302 ite 1 300 301 297 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+303 ones 74
+304 uext 7 303 1
+305 eq 1 304 15
+306 zero 1
+307 ite 1 305 306 302 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+308 const 7 10000
+309 eq 1 308 15
+310 zero 1
+311 ite 1 309 310 307 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+312 const 7 10001
+313 eq 1 312 15
+314 or 1 313 311 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+315 const 7 10010
+316 eq 1 315 15
+317 zero 1
+318 ite 1 316 317 314 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+319 const 7 10011
+320 eq 1 319 15
+321 zero 1
+322 ite 1 320 321 318 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 131:{26,26}]
+323 not 1 2 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 51:25]
+324 not 1 322 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 51:25]
+325 one 1
+326 ugte 1 19 325
+327 not 1 326
+328 constraint 130 ; assume @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 128:13]
+329 and 1 17 323
+330 and 1 329 24
+331 implies 1 330 322
+332 not 1 331
+333 bad 332 ; assert @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 51:25]
+334 implies 1 327 2
+335 constraint 334 ; _resetActive
+; _cycles.next
+336 zero 1
+337 uext 43 6 1
+338 one 1
+339 uext 43 338 1
+340 add 43 337 339
+341 slice 1 340 0 0
+342 ite 1 23 341 6
+343 ite 1 2 336 342
+344 next 1 6 343
+; r_counter.next
+345 zero 1
+346 uext 7 345 4
+347 ite 7 26 346 32
+348 next 7 9 347
+; a_counter.next
+349 zero 1
+350 uext 7 349 4
+351 ite 7 133 350 138
+352 next 7 12 351
+; b_counter.next
+353 zero 1
+354 uext 7 353 4
+355 ite 7 226 354 231
+356 next 7 15 355
+; out.next
+357 const 7 10011
+358 eq 1 357 12
+359 zero 1
+360 ite 1 358 359 224
+361 next 1 17 360
+; _resetCount.next
+362 uext 43 19 1
+363 one 1
+364 uext 43 363 1
+365 add 43 362 364
+366 slice 1 365 0 0
+367 ite 1 327 366 19
+368 next 1 19 367

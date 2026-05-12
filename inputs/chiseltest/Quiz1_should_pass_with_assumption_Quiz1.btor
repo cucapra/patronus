@@ -1,0 +1,50 @@
+; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 81:7]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 81:7]
+3 sort bitvec 16
+4 state 3 counter ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 82:24]
+; _resetCount.init
+5 zero 1
+6 state 1 _resetCount
+7 init 1 6 5
+8 sort bitvec 17
+9 uext 8 4 1
+10 one 1
+11 uext 8 10 16
+12 add 8 9 11 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 83:22]
+13 slice 3 12 15 0 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 83:22]
+14 sort bitvec 4
+15 const 14 1010
+16 uext 3 15 12
+17 ugt 1 4 16
+18 not 1 17 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 84:18]
+19 not 1 2 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 84:9]
+20 not 1 18 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 84:9]
+21 const 14 1001
+22 uext 3 21 12
+23 ugt 1 4 22
+24 not 1 23 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 86:20]
+25 not 1 24 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 86:11]
+26 one 1
+27 ugte 1 6 26
+28 not 1 27
+29 implies 1 19 18
+30 not 1 29
+31 bad 30 ; assert @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 84:9]
+32 implies 1 19 24
+33 constraint 32 ; assume @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 86:11]
+34 implies 1 28 2
+35 constraint 34 ; _resetActive
+; counter.next
+36 zero 3
+37 ite 3 2 36 13
+38 next 3 4 37
+; _resetCount.next
+39 sort bitvec 2
+40 uext 39 6 1
+41 one 1
+42 uext 39 41 1
+43 add 39 40 42
+44 slice 1 43 0 0
+45 ite 1 28 44 6
+46 next 1 6 45

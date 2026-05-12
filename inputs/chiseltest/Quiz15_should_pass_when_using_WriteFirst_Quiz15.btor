@@ -1,0 +1,102 @@
+; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 205:7]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 205:7]
+3 input 1 iWrite ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 206:18]
+4 sort bitvec 32
+5 input 4 iData ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 207:17]
+6 sort bitvec 8
+7 input 6 iWAddr ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 208:18]
+8 input 1 iRead ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 209:17]
+9 input 6 iRAddr ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 210:18]
+10 input 4 mem_oData_MPORT_rand_data ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 213:24]
+11 input 6 _GEN_0_invalid ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 214:{16,27}]
+12 input 1 _GEN_3_invalid ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 214:{16,27}]
+13 input 4 _GEN_4_invalid ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 214:{16,27}]
+14 input 6 _GEN_5_invalid ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 215:{20,20}]
+15 input 6 _GEN_7_invalid ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 215:{20,20}]
+16 sort array 6 4
+17 state 16 mem ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 213:24]
+18 state 1 mem_oData_MPORT_en_pipe_0
+19 state 6 mem_oData_MPORT_addr_pipe_0
+20 state 1 _cycles
+21 state 1 mem_oData_MPORT_do_rand_r1 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 213:24]
+22 state 1 out ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+23 state 4 out_1 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+; _resetCount.init
+24 zero 1
+25 state 1 _resetCount
+26 init 1 25 24
+27 read 4 17 19
+28 one 1
+29 ugte 1 20 28
+30 not 1 29
+31 not 1 30 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 215:{20,20} 213:24]
+32 not 1 3
+33 not 1 3
+34 not 1 3
+35 not 1 8
+36 not 1 8
+37 ite 6 36 14 9 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 215:{20,20}]
+38 not 1 8
+39 and 1 3 8 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 221:20]
+40 eq 1 7 9 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 221:39]
+41 ite 4 21 10 27 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 211:17], @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 213:{24,24}]
+42 eq 1 41 23 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 222:18]
+43 not 1 2 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 222:11]
+44 not 1 42 ; @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 222:11]
+45 one 1
+46 ugte 1 25 45
+47 not 1 46
+48 and 1 22 43
+49 and 1 48 31
+50 implies 1 49 42
+51 not 1 50
+52 bad 51 ; assert @[src/test/scala/chiseltest/formal/examples/ZipCpuQuizzes.scala 222:11]
+53 implies 1 47 2
+54 constraint 53 ; _resetActive
+55 not 1 3
+56 ite 6 55 11 7
+57 not 1 3
+58 one 1
+59 ite 1 57 12 58
+60 not 1 3
+61 ite 4 60 13 5
+; mem.next
+62 and 1 3 59
+63 write 16 17 56 61
+64 ite 16 62 63 17
+65 next 16 17 64
+; mem_oData_MPORT_en_pipe_0.next
+66 next 1 18 8
+; mem_oData_MPORT_addr_pipe_0.next
+67 not 1 8
+68 ite 6 67 15 37
+69 ite 6 8 68 19
+70 next 6 19 69
+; _cycles.next
+71 zero 1
+72 sort bitvec 2
+73 uext 72 20 1
+74 one 1
+75 uext 72 74 1
+76 add 72 73 75
+77 slice 1 76 0 0
+78 ite 1 30 77 20
+79 ite 1 2 71 78
+80 next 1 20 79
+; mem_oData_MPORT_do_rand_r1.next
+81 not 1 8
+82 next 1 21 81
+; out.next
+83 and 1 39 40
+84 next 1 22 83
+; out_1.next
+85 next 4 23 5
+; _resetCount.next
+86 uext 72 25 1
+87 one 1
+88 uext 72 87 1
+89 add 72 86 88
+90 slice 1 89 0 0
+91 ite 1 47 90 25
+92 next 1 25 91

@@ -1,0 +1,87 @@
+; @[src/test/scala/chiseltest/formal/MemoryTests.scala 194:7]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 194:7]
+3 sort bitvec 8
+4 input 3 m_data_rand_data ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 179:22]
+5 input 1 _GEN_0_invalid ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 185:{20,20}]
+6 input 1 _GEN_2_invalid ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 185:{20,20}]
+; m.init
+7 zero 3
+8 sort bitvec 2
+9 sort array 8 3
+10 state 9 m ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 179:22]
+11 init 9 10 7
+12 state 1 m_data_en_pipe_0
+13 state 8 m_data_addr_pipe_0
+14 state 1 _cycles
+15 state 1 en ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 176:19]
+16 state 1 m_data_do_rand_r1 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 179:22]
+17 state 1 out ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+; _resetCount.init
+18 zero 1
+19 state 1 _resetCount
+20 init 1 19 18
+21 read 3 10 13
+22 one 1
+23 ugte 1 14 22
+24 not 1 23
+25 not 1 24 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 185:{20,20} 179:22]
+26 not 1 15 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 177:9]
+27 not 1 15
+28 not 1 15
+29 and 1 28 5 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 185:{20,20}]
+30 not 1 15
+31 not 1 15
+32 ite 1 31 6 29 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 185:{20,20}]
+33 ite 3 16 4 21 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 179:{22,22}]
+34 zero 1
+35 uext 3 34 7
+36 eq 1 33 35 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 196:17]
+37 not 1 2 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 196:11]
+38 not 1 36 ; @[src/test/scala/chiseltest/formal/MemoryTests.scala 196:11]
+39 one 1
+40 ugte 1 19 39
+41 not 1 40
+42 and 1 17 37
+43 and 1 42 25
+44 implies 1 43 36
+45 not 1 44
+46 bad 45 ; assert @[src/test/scala/chiseltest/formal/MemoryTests.scala 196:11]
+47 implies 1 41 2
+48 constraint 47 ; _resetActive
+; m.next
+49 next 9 10 10
+; m_data_en_pipe_0.next
+50 next 1 12 15
+; m_data_addr_pipe_0.next
+51 uext 8 32 1
+52 ite 8 15 51 13
+53 next 8 13 52
+; _cycles.next
+54 zero 1
+55 uext 8 14 1
+56 one 1
+57 uext 8 56 1
+58 add 8 55 57
+59 slice 1 58 0 0
+60 ite 1 24 59 14
+61 ite 1 2 54 60
+62 next 1 14 61
+; en.next
+63 zero 1
+64 ite 1 2 63 26
+65 next 1 15 64
+; m_data_do_rand_r1.next
+66 not 1 15
+67 next 1 16 66
+; out.next
+68 not 1 15
+69 next 1 17 68
+; _resetCount.next
+70 uext 8 19 1
+71 one 1
+72 uext 8 71 1
+73 add 8 70 72
+74 slice 1 73 0 0
+75 ite 1 41 74 19
+76 next 1 19 75

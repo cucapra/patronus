@@ -1,0 +1,511 @@
+; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 29:7]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 29:7]
+3 input 1 io_write ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 34:14]
+4 sort bitvec 32
+5 input 4 io_writeData ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 34:14]
+6 input 1 io_read ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 34:14]
+7 sort bitvec 3
+8 state 7 dut_ctrlSfr_shape ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 248:24]
+9 sort bitvec 7
+10 state 9 dut_ctrlSfr_operation ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 248:24]
+11 state 1 _cycles
+12 state 1 out ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+13 state 7 out_1_shape ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+14 state 9 out_1_operation ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+15 state 1 out_2 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+16 state 7 out_3 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+17 state 1 out_4 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+18 state 9 out_5 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+19 state 1 out_6 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+20 state 9 out_7 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+21 state 1 out_8 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+22 state 7 out_9 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+23 state 1 out_10 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+24 state 7 out_11_shape ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+25 state 9 out_11_operation ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+26 state 1 out_12 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+27 state 7 out_13_shape ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+28 state 9 out_13_operation ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+29 state 1 out_14 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+30 state 7 out_15_shape ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+31 state 9 out_15_operation ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+32 state 1 out_16 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+33 state 7 out_17_shape ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+34 state 9 out_17_operation ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+35 state 1 out_18 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+36 state 7 out_19 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+37 state 1 out_20 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+38 state 9 out_21 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+39 state 1 out_22 ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+40 state 7 out_23_shape ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+41 state 9 out_23_operation ; @[src/main/scala/chiseltest/formal/past.scala 42:23]
+; _resetCount.init
+42 zero 1
+43 state 1 _resetCount
+44 init 1 43 42 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 36:10]
+45 slice 7 5 18 16 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 250:34]
+46 ones 7
+47 eq 1 45 46 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 250:43]
+48 ite 7 47 8 45 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 250:21]
+49 slice 9 5 6 0 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 251:38]
+50 ones 9
+51 eq 1 49 50 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 251:45]
+52 ite 9 51 10 49 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 251:25]
+53 one 1
+54 uext 7 53 2
+55 eq 1 48 54 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 267:11]
+56 sort bitvec 2
+57 const 56 10
+58 uext 7 57 1
+59 eq 1 48 58 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 267:28]
+60 or 1 55 59 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 267:19]
+61 const 7 100
+62 eq 1 48 61 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 267:45]
+63 or 1 60 62 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 267:36]
+64 slice 7 52 6 4 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 270:20]
+65 sort bitvec 4
+66 slice 65 52 3 0 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 272:22]
+67 one 1
+68 uext 65 67 3
+69 ugt 1 66 68
+70 not 1 69 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 272:29]
+71 zero 1
+72 uext 65 71 3
+73 eq 1 66 72 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 273:29]
+74 zero 1
+75 uext 7 74 2
+76 eq 1 75 64 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 270:36]
+77 and 1 76 70 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 270:36]
+78 const 56 10
+79 uext 7 78 1
+80 eq 1 79 64 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 270:36]
+81 ite 1 80 73 77 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 270:36]
+82 const 7 100
+83 eq 1 82 64 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 270:36]
+84 ite 1 83 70 81 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 270:36]
+85 and 1 63 84 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 255:30]
+86 zero 1
+87 uext 7 86 2
+88 eq 1 64 87 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 278:21]
+89 eq 1 64 48 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 278:48]
+90 or 1 88 89 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 278:29]
+91 and 1 85 90 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 256:40]
+92 ite 7 91 48 8 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 258:7 259:21 248:24]
+93 ite 9 91 52 10 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 248:24 258:7 260:25] @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 36:10]
+94 ite 7 3 92 8 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 253:18 248:24]
+95 ite 9 3 93 10 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 253:18 248:24]
+96 sort bitvec 16
+97 sort bitvec 13
+98 zero 97
+99 concat 96 98 8 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 264:32]
+100 sort bitvec 25
+101 sort bitvec 9
+102 zero 101
+103 concat 100 99 102 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 264:49]
+104 concat 4 103 10 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 264:65] @[src/main/scala/chiseltest/experimental/Observe.scala 9:56] @[src/main/scala/chiseltest/experimental/Observe.scala 9:56]
+105 one 1
+106 ugte 1 11 105
+107 not 1 106
+108 not 1 107 ; @[src/main/scala/chiseltest/experimental/Observe.scala 9:{56,56}]
+109 one 1
+110 uext 7 109 2
+111 eq 1 8 110 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:63]
+112 const 56 10
+113 uext 7 112 1
+114 eq 1 8 113 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:63]
+115 const 7 100
+116 eq 1 8 115 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:63]
+117 ones 7
+118 eq 1 8 117 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:63]
+119 or 1 111 114 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:63]
+120 or 1 119 116 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:63]
+121 or 1 120 118 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:63]
+122 not 1 121 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:48]
+123 not 1 122 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 45:10]
+124 not 1 2 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 45:9]
+125 not 1 123 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 45:9] @[src/main/scala/chiseltest/experimental/Observe.scala 9:{56,56}]
+126 zero 1
+127 uext 9 126 6
+128 eq 1 10 127 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+129 one 1
+130 uext 9 129 6
+131 eq 1 10 130 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+132 sort bitvec 6
+133 const 132 100000
+134 uext 9 133 1
+135 eq 1 10 134 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+136 const 9 1000000
+137 eq 1 10 136 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+138 const 9 1000001
+139 eq 1 10 138 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+140 ones 9
+141 eq 1 10 140 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+142 or 1 128 131 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+143 or 1 142 135 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+144 or 1 143 137 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+145 or 1 144 139 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+146 or 1 145 141 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+147 not 1 146 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:48]
+148 not 1 147 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 46:10]
+149 not 1 148 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 46:9]
+150 ones 7
+151 neq 1 8 150 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 51:21]
+152 not 1 151 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 51:9]
+153 ones 9
+154 neq 1 10 153 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 52:25]
+155 not 1 154 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 52:9]
+156 and 1 121 146 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 202:23]
+157 not 1 156 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 202:10]
+158 concat 56 131 128 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 203:26]
+159 redor 1 158 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 203:26]
+160 concat 56 139 137 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 205:26]
+161 redor 1 160 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 205:26]
+162 and 1 161 116 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+163 ite 1 135 114 162 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+164 or 1 159 163 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+165 zero 1
+166 ite 1 157 165 164 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+167 not 1 166 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 57:9] @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 34:14], @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 36:10]
+168 slice 9 104 6 0 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 74:47]
+169 slice 7 104 18 16 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 74:47]
+170 eq 1 169 8 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 80:41]
+171 not 1 6 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:57]
+172 or 1 171 170 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:68]
+173 not 1 172 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 80:9]
+174 eq 1 168 10 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 81:45]
+175 or 1 171 174 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:68]
+176 not 1 175 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 81:9]
+177 sort bitvec 10
+178 concat 177 13 14 ; @[src/main/scala/chiseltest/formal/past.scala 70:48]
+179 concat 177 8 10 ; @[src/main/scala/chiseltest/formal/past.scala 70:66]
+180 eq 1 178 179 ; @[src/main/scala/chiseltest/formal/past.scala 70:55]
+181 not 1 12 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:57]
+182 or 1 181 180 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:68]
+183 not 1 182 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 86:9]
+184 slice 9 5 6 0 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 89:49]
+185 slice 7 5 18 16 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 89:49]
+186 ones 7
+187 eq 1 185 186 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 98:40]
+188 and 1 3 187 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 98:21]
+189 eq 1 16 8 ; @[src/main/scala/chiseltest/formal/past.scala 70:55]
+190 not 1 15 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:57]
+191 or 1 190 189 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:68]
+192 not 1 191 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 96:9]
+193 ones 9
+194 eq 1 184 193 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 104:44]
+195 and 1 3 194 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 104:21]
+196 eq 1 18 10 ; @[src/main/scala/chiseltest/formal/past.scala 70:55]
+197 not 1 17 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:57]
+198 or 1 197 196 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:68]
+199 not 1 198 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 102:9]
+200 neq 1 20 10 ; @[src/main/scala/chiseltest/formal/past.scala 76:55]
+201 and 1 19 200 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 113:64]
+202 neq 1 22 8 ; @[src/main/scala/chiseltest/formal/past.scala 76:55]
+203 and 1 21 202 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 114:72]
+204 one 1
+205 uext 7 204 2
+206 eq 1 185 205 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:63]
+207 const 56 10
+208 uext 7 207 1
+209 eq 1 185 208 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:63]
+210 const 7 100
+211 eq 1 185 210 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:63]
+212 or 1 206 209 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:63]
+213 or 1 212 211 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:63]
+214 or 1 213 187 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:63]
+215 not 1 214 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 192:48]
+216 concat 177 24 25 ; @[src/main/scala/chiseltest/formal/past.scala 70:48]
+217 eq 1 216 179 ; @[src/main/scala/chiseltest/formal/past.scala 70:55]
+218 not 1 23 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:57]
+219 or 1 218 217 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:68]
+220 not 1 219 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 119:9]
+221 zero 1
+222 uext 9 221 6
+223 eq 1 184 222 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+224 one 1
+225 uext 9 224 6
+226 eq 1 184 225 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+227 const 132 100000
+228 uext 9 227 1
+229 eq 1 184 228 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+230 const 9 1000000
+231 eq 1 184 230 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+232 const 9 1000001
+233 eq 1 184 232 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+234 or 1 223 226 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+235 or 1 234 229 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+236 or 1 235 231 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+237 or 1 236 233 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+238 or 1 237 194 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:67]
+239 not 1 238 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 193:48]
+240 concat 177 27 28 ; @[src/main/scala/chiseltest/formal/past.scala 70:48]
+241 eq 1 240 179 ; @[src/main/scala/chiseltest/formal/past.scala 70:55]
+242 not 1 26 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:57]
+243 or 1 242 241 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:68]
+244 not 1 243 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 125:9]
+245 and 1 121 238 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 202:23]
+246 not 1 245 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 202:10]
+247 concat 56 226 223 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 203:26]
+248 redor 1 247 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 203:26]
+249 concat 56 233 231 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 205:26]
+250 redor 1 249 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 205:26]
+251 and 1 250 116 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+252 ite 1 229 114 251 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+253 or 1 248 252 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+254 zero 1
+255 ite 1 246 254 253 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+256 not 1 255 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 139:11]
+257 concat 177 30 31 ; @[src/main/scala/chiseltest/formal/past.scala 70:48]
+258 eq 1 257 179 ; @[src/main/scala/chiseltest/formal/past.scala 70:55]
+259 not 1 29 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:57]
+260 or 1 259 258 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:68]
+261 not 1 260 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 135:9]
+262 and 1 214 146 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 202:23]
+263 not 1 262 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 202:10]
+264 and 1 161 211 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+265 ite 1 135 209 264 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+266 or 1 159 265 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+267 zero 1
+268 ite 1 263 267 266 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+269 not 1 268 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 149:11]
+270 concat 177 33 34 ; @[src/main/scala/chiseltest/formal/past.scala 70:48]
+271 eq 1 270 179 ; @[src/main/scala/chiseltest/formal/past.scala 70:55]
+272 not 1 32 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:57]
+273 or 1 272 271 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:68]
+274 not 1 273 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 145:9]
+275 ite 7 187 8 185 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 158:20]
+276 ite 9 194 10 184 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 159:24]
+277 one 1
+278 uext 7 277 2
+279 eq 1 275 278 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:70]
+280 const 56 10
+281 uext 7 280 1
+282 eq 1 275 281 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:70]
+283 const 7 100
+284 eq 1 275 283 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:70]
+285 ones 7
+286 eq 1 275 285 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:70]
+287 or 1 279 282 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:70]
+288 or 1 287 284 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:70]
+289 or 1 288 286 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:70]
+290 zero 1
+291 uext 9 290 6
+292 eq 1 276 291 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:101]
+293 one 1
+294 uext 9 293 6
+295 eq 1 276 294 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:101]
+296 const 132 100000
+297 uext 9 296 1
+298 eq 1 276 297 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:101]
+299 const 9 1000000
+300 eq 1 276 299 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:101]
+301 const 9 1000001
+302 eq 1 276 301 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:101]
+303 ones 9
+304 eq 1 276 303 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:101]
+305 or 1 292 295 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:101]
+306 or 1 305 298 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:101]
+307 or 1 306 300 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:101]
+308 or 1 307 302 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:101]
+309 or 1 308 304 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 198:101]
+310 and 1 289 309 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 202:23]
+311 not 1 310 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 202:10]
+312 concat 56 295 292 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 203:26]
+313 redor 1 312 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 203:26]
+314 concat 56 302 300 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 205:26]
+315 redor 1 314 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 205:26]
+316 and 1 315 284 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+317 ite 1 298 282 316 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+318 or 1 313 317 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+319 zero 1
+320 ite 1 311 319 318 ; @[src/main/scala/chisel3/util/Mux.scala 126:16]
+321 not 1 215 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 164:5]
+322 not 1 239 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 165:7]
+323 and 1 321 322 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 164:39]
+324 and 1 323 320 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 165:49]
+325 and 1 3 324 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 170:21]
+326 ones 7
+327 neq 1 185 326 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 170:64]
+328 eq 1 8 36 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 171:18]
+329 not 1 35 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:57]
+330 or 1 329 328 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:68]
+331 not 1 330 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 168:9]
+332 ones 9
+333 neq 1 184 332 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 177:68]
+334 eq 1 10 38 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 178:22]
+335 not 1 37 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:57]
+336 or 1 335 334 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:68]
+337 not 1 336 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 175:9]
+338 not 1 324 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 185:34]
+339 concat 177 40 41 ; @[src/main/scala/chiseltest/formal/past.scala 70:48]
+340 eq 1 339 179 ; @[src/main/scala/chiseltest/formal/past.scala 70:55]
+341 not 1 39 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:57]
+342 or 1 341 340 ; @[src/test/scala/chiseltest/formal/examples/SvaDemos.scala 137:68]
+343 not 1 342 ; @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 185:9]
+344 one 1
+345 ugte 1 43 344
+346 not 1 345
+347 implies 1 124 123
+348 not 1 347
+349 bad 348 ; assert @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 45:9]
+350 implies 1 124 148
+351 not 1 350
+352 bad 351 ; assert_1 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 46:9]
+353 implies 1 124 151
+354 not 1 353
+355 bad 354 ; assert_2 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 51:9]
+356 implies 1 124 154
+357 not 1 356
+358 bad 357 ; assert_3 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 52:9]
+359 implies 1 124 166
+360 not 1 359
+361 bad 360 ; assert_4 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 57:9]
+362 implies 1 124 172
+363 not 1 362
+364 bad 363 ; assert_5 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 80:9]
+365 implies 1 124 175
+366 not 1 365
+367 bad 366 ; assert_6 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 81:9]
+368 and 1 124 108
+369 implies 1 368 182
+370 not 1 369
+371 bad 370 ; assert_7 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 86:9]
+372 and 1 124 108
+373 implies 1 372 191
+374 not 1 373
+375 bad 374 ; assert_8 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 96:9]
+376 and 1 124 108
+377 implies 1 376 198
+378 not 1 377
+379 bad 378 ; assert_9 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 102:9]
+380 and 1 124 108
+381 implies 1 380 219
+382 not 1 381
+383 bad 382 ; assert_10 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 119:9]
+384 and 1 124 108
+385 implies 1 384 243
+386 not 1 385
+387 bad 386 ; assert_11 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 125:9]
+388 and 1 124 108
+389 implies 1 388 260
+390 not 1 389
+391 bad 390 ; assert_12 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 135:9]
+392 and 1 124 108
+393 implies 1 392 273
+394 not 1 393
+395 bad 394 ; assert_13 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 145:9]
+396 and 1 124 108
+397 implies 1 396 330
+398 not 1 397
+399 bad 398 ; assert_14 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 168:9]
+400 and 1 124 108
+401 implies 1 400 336
+402 not 1 401
+403 bad 402 ; assert_15 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 175:9]
+404 and 1 124 108
+405 implies 1 404 342
+406 not 1 405
+407 bad 406 ; assert_16 @[src/test/scala/chiseltest/formal/examples/VGBComparisonOfFormalAndSimulation.scala 185:9]
+408 implies 1 346 2
+409 constraint 408 ; _resetActive
+; dut_ctrlSfr_shape.next
+410 one 7
+411 ite 7 2 410 94
+412 next 7 8 411
+; dut_ctrlSfr_operation.next
+413 zero 9
+414 ite 9 2 413 95
+415 next 9 10 414
+; _cycles.next
+416 zero 1
+417 uext 56 11 1
+418 one 1
+419 uext 56 418 1
+420 add 56 417 419
+421 slice 1 420 0 0
+422 ite 1 107 421 11
+423 ite 1 2 416 422
+424 next 1 11 423
+; out.next
+425 not 1 3
+426 next 1 12 425
+; out_1_shape.next
+427 next 7 13 8
+; out_1_operation.next
+428 next 9 14 10
+; out_2.next
+429 and 1 3 187
+430 next 1 15 429
+; out_3.next
+431 next 7 16 8
+; out_4.next
+432 and 1 3 194
+433 next 1 17 432
+; out_5.next
+434 next 9 18 10
+; out_6.next
+435 and 1 3 187
+436 next 1 19 435
+; out_7.next
+437 next 9 20 10
+; out_8.next
+438 and 1 3 194
+439 next 1 21 438
+; out_9.next
+440 next 7 22 8
+; out_10.next
+441 and 1 3 215
+442 next 1 23 441
+; out_11_shape.next
+443 next 7 24 8
+; out_11_operation.next
+444 next 9 25 10
+; out_12.next
+445 and 1 3 239
+446 next 1 26 445
+; out_13_shape.next
+447 next 7 27 8
+; out_13_operation.next
+448 next 9 28 10
+; out_14.next
+449 and 1 188 256
+450 next 1 29 449
+; out_15_shape.next
+451 next 7 30 8
+; out_15_operation.next
+452 next 9 31 10
+; out_16.next
+453 and 1 195 269
+454 next 1 32 453
+; out_17_shape.next
+455 next 7 33 8
+; out_17_operation.next
+456 next 9 34 10
+; out_18.next
+457 and 1 325 327
+458 next 1 35 457
+; out_19.next
+459 slice 7 5 18 16
+460 next 7 36 459
+; out_20.next
+461 and 1 325 333
+462 next 1 37 461
+; out_21.next
+463 slice 9 5 6 0
+464 next 9 38 463
+; out_22.next
+465 and 1 3 338
+466 next 1 39 465
+; out_23_shape.next
+467 next 7 40 8
+; out_23_operation.next
+468 next 9 41 10
+; _resetCount.next
+469 uext 56 43 1
+470 one 1
+471 uext 56 470 1
+472 add 56 469 471
+473 slice 1 472 0 0
+474 ite 1 346 473 43
+475 next 1 43 474

@@ -1,0 +1,40 @@
+; @[src/test/scala/chiseltest/formal/ResetAssumptionTests.scala 13:7]
+1 sort bitvec 1
+2 input 1 reset ; @[src/test/scala/chiseltest/formal/ResetAssumptionTests.scala 13:7]
+3 sort bitvec 2
+4 state 3 counter ; @[src/test/scala/chiseltest/formal/ResetAssumptionTests.scala 14:24]
+; _resetCount.init
+5 zero 1
+6 state 1 _resetCount
+7 init 1 6 5
+8 sort bitvec 3
+9 uext 8 4 1
+10 one 1
+11 uext 8 10 2
+12 add 8 9 11 ; @[src/test/scala/chiseltest/formal/ResetAssumptionTests.scala 15:22]
+13 slice 3 12 1 0 ; @[src/test/scala/chiseltest/formal/ResetAssumptionTests.scala 15:22]
+14 const 3 10
+15 ugte 1 4 14
+16 not 1 15 ; @[src/test/scala/chiseltest/formal/ResetAssumptionTests.scala 16:18]
+17 not 1 2 ; @[src/test/scala/chiseltest/formal/ResetAssumptionTests.scala 16:9]
+18 not 1 16 ; @[src/test/scala/chiseltest/formal/ResetAssumptionTests.scala 16:9]
+19 one 1
+20 ugte 1 6 19
+21 not 1 20
+22 implies 1 17 16
+23 not 1 22
+24 bad 23 ; assert @[src/test/scala/chiseltest/formal/ResetAssumptionTests.scala 16:9]
+25 implies 1 21 2
+26 constraint 25 ; _resetActive
+; counter.next
+27 zero 3
+28 ite 3 2 27 13
+29 next 3 4 28
+; _resetCount.next
+30 uext 3 6 1
+31 one 1
+32 uext 3 31 1
+33 add 3 30 32
+34 slice 1 33 0 0
+35 ite 1 21 34 6
+36 next 1 6 35
