@@ -1,4 +1,4 @@
-// Copyright 2024 Cornell University
+// Copyright 2024-2026 Cornell University
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
@@ -6,7 +6,6 @@ use crate::value_summary::Value;
 use crate::{GuardCtx, ValueSummary};
 use patronus::expr::{Context, ExprRef, Type, TypeCheck};
 use patronus::sim::InitKind;
-use patronus::system::analysis::count_expr_uses;
 use patronus::system::TransitionSystem;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -122,7 +121,7 @@ struct Dependencies {}
 
 impl Dependencies {
     fn calculate(ctx: &Context, sys: &TransitionSystem) -> Self {
-        let uses = count_expr_uses(ctx, sys);
+        // let uses = count_expr_uses(ctx, sys);
 
         todo!()
     }

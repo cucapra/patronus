@@ -1,11 +1,11 @@
-// Copyright 2024 Cornell University
+// Copyright 2024-2026 Cornell University
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
 use boolean_expression::{BDD, BDDFunc};
 use patronus::expr::*;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
-use smallvec::{smallvec, Array, SmallVec};
+use smallvec::{Array, SmallVec, smallvec};
 use std::hash::Hash;
 
 #[derive(Debug, Clone)]
@@ -184,6 +184,18 @@ impl<V: Value> ValueSummary<V> {
         }
 
         Self { entries: out }
+    }
+
+    pub fn apply_un_op(self, op: &mut impl FnMut(V) -> V) -> Self {
+        let entries = self
+            .entries
+            .into_iter()
+            .map(|e| Entry {
+                guard: e.guard,
+                value: op(e.value),
+            })
+            .collect();
+        Self { entries }
     }
 
     /// Indicates that this value summary is trivially true.
