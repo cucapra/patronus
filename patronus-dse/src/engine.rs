@@ -4,7 +4,7 @@
 
 use crate::value_summary::Value;
 use crate::{GuardCtx, ValueSummary};
-use patronus::expr::{Context, ExprRef, Type, TypeCheck};
+use patronus::expr::{Context, ExprRef, TypeCheck};
 use patronus::sim::InitKind;
 use patronus::system::TransitionSystem;
 use rustc_hash::FxHashMap;

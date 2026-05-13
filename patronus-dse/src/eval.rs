@@ -8,10 +8,8 @@
 
 use crate::value_summary::{Value, ValueContext};
 use crate::{GuardCtx, ValueSummary};
-use baa::BitVecValue;
 use patronus::expr::{Expr, ExprRef, ForEachChild};
 use smallvec::SmallVec;
-// type ValueStack = Vec<[ValueSummary<>]>
 
 /// Returns a symbolic value for an expression if it is available.
 pub trait GetExprValue<V: Value> {
@@ -86,30 +84,28 @@ pub fn eval(
             Expr::BVNot(_, _) => un_op(&mut stack, |e| ctx.not(e)),
             Expr::BVNegate(_, _) => un_op(&mut stack, |e| ctx.negate(e)),
             // binary
-            // Expr::BVEqual(_, _) => bin_op(&mut stack, |a, b| a.is_equal(&b).into()),
-            // Expr::BVImplies(_, _) => bin_op(&mut stack, |a, b| a.not().or(&b)),
-            // Expr::BVGreater(_, _) => bin_op(&mut stack, |a, b| a.is_greater(&b).into()),
-            // Expr::BVGreaterSigned(_, _, _) => {
-            //     bin_op(&mut stack, |a, b| a.is_greater_signed(&b).into())
-            // }
-            // Expr::BVGreaterEqual(_, _) => {
-            //     bin_op(&mut stack, |a, b| a.is_greater_or_equal(&b).into())
-            // }
-            // Expr::BVGreaterEqualSigned(_, _, _) => {
-            //     bin_op(&mut stack, |a, b| a.is_greater_or_equal_signed(&b).into())
-            // }
-            // Expr::BVConcat(_, _, _) => bin_op(&mut stack, |a, b| a.concat(&b)),
-            // // binary arithmetic
-            // Expr::BVAnd(_, _, _) => bin_op(&mut stack, |a, b| a.and(&b)),
-            // Expr::BVOr(_, _, _) => bin_op(&mut stack, |a, b| a.or(&b)),
-            // Expr::BVXor(_, _, _) => bin_op(&mut stack, |a, b| a.xor(&b)),
-            // Expr::BVShiftLeft(_, _, _) => bin_op(&mut stack, |a, b| a.shift_left(&b)),
-            // Expr::BVArithmeticShiftRight(_, _, _) => {
-            //     bin_op(&mut stack, |a, b| a.arithmetic_shift_right(&b))
-            // }
-            // Expr::BVShiftRight(_, _, _) => bin_op(&mut stack, |a, b| a.shift_right(&b)),
+            Expr::BVEqual(_, _) => bin_op(gc, &mut stack, |a, b| ctx.equal(a, b)),
+            Expr::BVImplies(_, _) => bin_op(gc, &mut stack, |a, b| ctx.implies(a, b)),
+            Expr::BVGreater(_, _) => bin_op(gc, &mut stack, |a, b| ctx.greater(a, b)),
+            Expr::BVGreaterSigned(_, _, _) => {
+                bin_op(gc, &mut stack, |a, b| ctx.greater_signed(a, b))
+            }
+            Expr::BVGreaterEqual(_, _) => bin_op(gc, &mut stack, |a, b| ctx.greater_or_equal(a, b)),
+            Expr::BVGreaterEqualSigned(_, _, _) => {
+                bin_op(gc, &mut stack, |a, b| ctx.greater_or_equal_signed(a, b))
+            }
+            Expr::BVConcat(_, _, _) => bin_op(gc, &mut stack, |a, b| ctx.concat(a, b)),
+            // binary arithmetic
+            Expr::BVAnd(_, _, _) => bin_op(gc, &mut stack, |a, b| ctx.and(a, b)),
+            Expr::BVOr(_, _, _) => bin_op(gc, &mut stack, |a, b| ctx.or(a, b)),
+            Expr::BVXor(_, _, _) => bin_op(gc, &mut stack, |a, b| ctx.xor(a, b)),
+            Expr::BVShiftLeft(_, _, _) => bin_op(gc, &mut stack, |a, b| ctx.shift_left(a, b)),
+            Expr::BVArithmeticShiftRight(_, _, _) => {
+                bin_op(gc, &mut stack, |a, b| ctx.arithmetic_shift_right(a, b))
+            }
+            Expr::BVShiftRight(_, _, _) => bin_op(gc, &mut stack, |a, b| ctx.shift_right(a, b)),
             Expr::BVAdd(_, _, _) => bin_op(gc, &mut stack, |a, b| ctx.add(a, b)),
-            // Expr::BVMul(_, _, _) => bin_op(&mut stack, |a, b| a.mul(&b)),
+            Expr::BVMul(_, _, _) => bin_op(gc, &mut stack, |a, b| ctx.mul(a, b)),
             // div, rem and mod are still TODO
             Expr::BVSignedDiv(_, _, _)
             | Expr::BVUnsignedDiv(_, _, _)
@@ -118,7 +114,7 @@ pub fn eval(
             | Expr::BVUnsignedRem(_, _, _) => {
                 todo!("implement eval support for {:?}", ctx[e])
             }
-            // Expr::BVSub(_, _, _) => bin_op(&mut stack, |a, b| a.sub(&b)),
+            Expr::BVSub(_, _, _) => bin_op(gc, &mut stack, |a, b| ctx.sub(a, b)),
             // BVArrayRead needs array support!
             Expr::BVIte { .. } => {
                 // TODO: calculate cond first and then selectively compute tru and fals depending on result
@@ -219,7 +215,6 @@ fn bin_op(
 mod tests {
     use super::*;
     use patronus::expr::{Context, SerializableIrNode};
-    use smallvec::smallvec;
 
     #[test]
     fn simple_eval() {

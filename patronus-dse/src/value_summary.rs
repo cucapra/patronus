@@ -285,7 +285,6 @@ impl ValueSummary<ExprRef> {
             !self.entries.is_empty(),
             "A value summary must always contain at least one entry!"
         );
-        let default = self.entries.last().unwrap();
         let mut out = self.entries.last().unwrap().value;
         for entry in self.entries.iter().take(self.entries.len() - 1) {
             let guard = gc.guard_to_expr(ctx, entry.guard);
@@ -480,7 +479,7 @@ impl Value for ExprRef {
         ec[*self].is_false()
     }
 
-    fn concrete(&self, ec: &ValueContext) -> Option<Self::Concrete> {
+    fn concrete(&self, _ec: &ValueContext) -> Option<Self::Concrete> {
         todo!()
     }
 
