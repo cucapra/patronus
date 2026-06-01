@@ -4,7 +4,7 @@
 
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
-use std::sync::atomic::AtomicU64;
+use rustc_hash::{FxHashMap, FxHashSet};
 use crate::mc::bmc::TransitionSystemEncoding;
 use crate::expr::*;
 use crate::mc::{check_assuming, ModelCheckResult};
@@ -13,22 +13,11 @@ use crate::smt::*;
 use crate::system::TransitionSystem;
 
 type Result<T> = crate::smt::Result<T>;
-type ClauseId = usize;
+type CubeId = usize;
 
-// Initial state constant
-const INIT_STATE: u64 = 0;
-
-// Current state constant
-const CUR_STATE: u64 = 1;
-
-// Next state constant
-const NXT_STATE: u64 = 2;
-
-// Maximum number of frames
-const MAX_FRAMES: usize = 1000;
-
-// Global activation literal counter
-static ACT_COUNTER: AtomicU64 = AtomicU64::new(0);
+const CUR_STATE: u64 = 1; // Current state constant
+const NXT_STATE: u64 = 2; // Next state constant
+const MAX_FRAMES: usize = 1000; // Maximum number of frames allowed by PDR
 
 // ------------------------------------------------------------------------------------------------
 // Core PDR data structures
@@ -45,13 +34,6 @@ trait Formula {
 /// `Cube` represents a conjunction of literals
 #[derive(Debug, Default, Clone)]
 struct Cube {
-    literals: Vec<ExprRef>, // Set of literals
-}
-
-/// `Clause` represents a disjunction of literals
-#[derive(Debug, Clone)]
-struct Clause {
-    act: ExprRef, // Activation literal
     literals: Vec<ExprRef>, // Set of literals
 }
 
@@ -77,50 +59,43 @@ impl Formula for Cube {
     }
 }
 
-impl Formula for Clause {
-   fn to_expr(&self, ctx: &mut Context) -> ExprRef {
-       self.literals
-           .iter()
-           .cloned()
-           .fold(ctx.get_false(), |acc, e| ctx.or(acc, e))
-   }
-   fn negate(&self, ctx: &mut Context) -> ExprRef {
-       self.literals
-           .iter()
-           .cloned()
-           .fold(
-               ctx.get_true(),
-               |acc, e| {
-                   let neg_lit = ctx.not(e);
-                   ctx.and(acc, neg_lit)
-                }
-            )
-   }
-}
-
-/// `ProofObj` is composed of a cube and a frame to block it at
-struct ProofObj {
-    cube: Cube,
-    frame: usize,
+/// `TimedCube` is composed of a cube and a frame to block it at
+#[derive(Debug, Default, Clone)]
+struct TimedCube {
+    cube: Cube, // Contained cube
+    frame: usize, // Frame to block at
 }
 
 // Custom comparators for `ProofObligation`
-impl Eq for ProofObj {}
-impl PartialEq for ProofObj {
+impl Eq for TimedCube {}
+impl PartialEq for TimedCube {
     fn eq(&self, other: &Self) -> bool {
         self.frame.eq(&other.frame)
     }
 }
-impl PartialOrd for ProofObj {
+impl PartialOrd for TimedCube {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
-impl Ord for ProofObj {
+impl Ord for TimedCube {
     fn cmp(&self, other: &Self) -> Ordering {
         self.frame.cmp(&other.frame)
     }
 }
+
+/// `BlockedCube` contains the activation literal and original cube for a cube blocked by PDR
+#[derive(Debug, Clone)]
+struct BlockedCube {
+    act: ExprRef,
+    cube: Cube,
+}
+
+// ------------------------------------------------------------------------------------------------
+// PDR helper functions
+// ------------------------------------------------------------------------------------------------
+
+// TODO: Implement function to create `Witness`
 
 // ------------------------------------------------------------------------------------------------
 // Main PDR state and subroutines
@@ -131,21 +106,59 @@ impl Ord for ProofObj {
 /// **Representation Invariant**: `frames` must always have length > 0,
 /// where the first frame is the initial frame and the last frame is the
 /// infinite frame
-#[derive(Debug, Default, Clone)]
 struct PdrState {
-    clauses: Vec<Clause>, // Collection of clauses used by PDR
-    frames: Vec<Vec<ClauseId>>, // Delta trace of clauses in each frame
+    act_counter: u64,
+    cubes: FxHashMap<CubeId, BlockedCube>, // Collection of activation literals for blocked cubes
+    frames: Vec<Vec<CubeId>>, // Delta trace of clauses in each frame
 }
 
 impl PdrState {
-    /// Asserts the representation invariant
-    #[inline]
-    fn rep_ok(&self) {
-        debug_assert!(self.frames.len() > 0);
+    fn init(
+        ctx: &mut Context,
+        smt_ctx: &mut impl SolverContext,
+        sys: &TransitionSystem,
+        enc: &impl TransitionSystemEncoding
+    ) -> Self {
+        // Get an activation literal for the initial state
+        let init_act = ctx.bv_symbol("act_0", 1);
+        let mut init_cube = Cube::default();
+
+        // Poll all initial states from the system
+        for state in &sys.states {
+            if let Some(init) = state.init {
+                let sym = enc.get_at(ctx, state.symbol, CUR_STATE);
+                let lit = ctx.equal(sym, init);
+                init_cube.literals.push(lit);
+            }
+        }
+
+        // Assert activation literal in solver
+        let clause = init_cube.negate(&mut *ctx);
+        let imp = ctx.implies(init_act, clause);
+        smt_ctx.assert(ctx, imp).expect("pdr init failed");
+
+        // Return initialized PDR state
+        Self {
+            act_counter: 1,
+            cubes: [
+                BlockedCube {
+                    act: init_act,
+                    cube: init_cube,
+                }
+            ].into_iter().map(|e| (0, e)).collect(),
+            frames: vec![vec![0usize]],
+        }
     }
 
-    fn new() -> Self {
-        todo!("Finish implementation")
+    /// Returns the index to the frontier (last) frame
+    #[inline]
+    fn depth(&self) -> usize {
+        self.frames.len() - 1
+    }
+
+    /// Add an empty frame
+    fn add_frame(&mut self) {
+        self.frames.push(Vec::new());
     }
 
     /// Return all clauses activation literals associated with a frame
@@ -154,17 +167,17 @@ impl PdrState {
             .iter()
             .copied()
             // Get all activation literals associated with clauses in the frame
-            .map(|id| self.clauses[id].act)
+            .map(|id| self.cubes.get(&id).cloned().unwrap().act)
             .collect()
     }
 
-    // Extract the final state after SMT query
-    fn extract_witness(
-        &self,
+    // Extract the final next state after SMT query
+    fn extract_state_values(
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
-        enc: &impl TransitionSystemEncoding) -> Result<Cube> {
+        enc: &impl TransitionSystemEncoding
+    ) -> Result<Cube> {
         // Get bad state
         let mut bad_cube = Vec::with_capacity(sys.states.len());
 
@@ -186,9 +199,10 @@ impl PdrState {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
-        enc: &impl TransitionSystemEncoding) -> Result<Option<Cube>> {
-        // Frontier frame is frame before infinite frame
-        let front_idx = self.frames.len() - 1;
+        enc: &impl TransitionSystemEncoding
+    ) -> Result<Option<Cube>> {
+        // Get current frontier frame index
+        let front_idx = self.depth();
 
         // Bad states
         let bad_states : Vec<ExprRef> =
@@ -211,7 +225,7 @@ impl PdrState {
         // Run SMT query (SAT?[F_f /\ P]), where F_f is the frontier frame and
         // P is the safety property
         match check_assuming(ctx, smt_ctx, assumptions)? {
-            CheckSatResponse::Sat => Ok(Some(self.extract_witness(ctx, smt_ctx, sys, enc)?)),
+            CheckSatResponse::Sat => Ok(Some(PdrState::extract_state_values(ctx, smt_ctx, sys, enc)?)),
             CheckSatResponse::Unsat => Ok(None),
             CheckSatResponse::Unknown => Err(
                 Error::UnexpectedResponse(
@@ -231,7 +245,8 @@ impl PdrState {
         &self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
-        proof_obj: &ProofObj) -> Result<CheckSatResponse> {
+        proof_obj: &TimedCube
+    ) -> Result<CheckSatResponse> {
         // Start with frame assumptions
         let mut assumptions = self.frame_assumptions(proof_obj.frame);
 
@@ -251,10 +266,11 @@ impl PdrState {
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
         enc: &impl TransitionSystemEncoding,
-        proof_obj: &ProofObj) -> Result<Option<Cube>> {
+        proof_obj: &TimedCube
+    ) -> Result<Option<Cube>> {
         // Perform relative inductiveness check
         match self.rel_ind_check(ctx, smt_ctx, proof_obj)? {
-            CheckSatResponse::Sat => Ok(Some(self.extract_witness(ctx, smt_ctx, sys, enc)?)),
+            CheckSatResponse::Sat => Ok(Some(PdrState::extract_state_values(ctx, smt_ctx, sys, enc)?)),
             CheckSatResponse::Unsat => Ok(None), // Cube blocked by frame: no witness
             CheckSatResponse::Unknown => Err(
                 Error::UnexpectedResponse(
@@ -272,7 +288,8 @@ impl PdrState {
         &self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
-        proof_obj: &ProofObj) -> Result<Cube> {
+        proof_obj: &TimedCube
+    ) -> Result<Cube> {
         // Final remaining literals
         let mut rem_literals = Vec::new();
 
@@ -295,37 +312,85 @@ impl PdrState {
         Ok(Cube { literals: rem_literals })
     }
 
+    /// Check if a cube syntactically subsumes another cube
+    /// (i.e. $c_q \subseteq c_b$, where $c_a$ and $c_b$ are cubes with sets of literals)
+    fn subsumes(a: &Cube, b: &Cube) -> bool {
+        // Get set of literals
+        let lit_set: FxHashSet<ExprRef> =
+            b.literals.iter().cloned().map(|e| e).collect();
+
+        // Check that all `a` literals exist in `b`
+        a.literals
+            .iter()
+            .all(|e| lit_set.contains(e))
+    }
+
     /// Add blocked clause to frames
-    fn add_clause(
+    fn add_blocked_cube(
         &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
-        clause: &Clause) -> Result<()> {
-        todo!("Finish implementation")
+        blocked_cube: &Cube
+    ) -> Result<()> {
+        // Create clause from blocked cube
+        let clause = { blocked_cube.negate(&mut *ctx) };
+
+        // Cube ID
+        let id = self.act_counter;
+        self.act_counter += 1;
+
+        // Go through each frame and remove subsumed cubes
+        for idx in 0..self.frames.len() {
+            // Remove all subsumed cubes
+            let cleaned_frame: Vec<CubeId> =
+                self.frames[idx]
+                    .iter()
+                    .filter(
+                        |c| !PdrState::subsumes(blocked_cube, &self.cubes.get(*c).unwrap().cube)
+                    )
+                    .copied()
+                    .collect();
+
+            // Replace frame
+            self.frames[idx] = cleaned_frame;
+        }
+
+        // Create new activation literal for blocked cube
+        let act = ctx.bv_symbol(format!("act_{}", id).as_str(), 1);
+
+        // Add blocked cube to frontier frame
+        let frontier_idx = self.depth();
+        self.frames[frontier_idx].push(id as usize);
+        self.cubes.insert(
+            id as CubeId,
+            BlockedCube { act, cube: blocked_cube.clone(), }
+        );
+
+        // Assert the new negated cube (clause) in the solver with the activation literal
+        let imp = ctx.implies(act, clause);
+        smt_ctx.assert(ctx, imp)
     }
 
     /// Try to block bad cube
     ///
     /// Returns whether cube was blocked successfully
     fn block_cube(
-        &self,
+        &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
         enc: &impl TransitionSystemEncoding,
-        cube: &Cube) -> Result<bool> {
-        // Check representation invariant
-        self.rep_ok();
-
+        cube: &Cube
+    ) -> Result<bool> {
         // Min-queue for proof obligations
         let mut worklist = BinaryHeap::new();
 
         // Add first proof obligation (try to block at frontier frame)
         worklist.push(
             Reverse(
-                ProofObj {
+                TimedCube {
                     cube: cube.clone(),
-                    frame: self.frames.len() - 1,
+                    frame: self.depth(),
                 }
             )
         );
@@ -339,11 +404,11 @@ impl PdrState {
 
             match self.solve_relative(&mut *ctx, &mut *smt_ctx, sys, enc, &proof_obj)? {
                 Some(wit) => {
-                    // Cube was unable to be blocked: create new proof obligation
+                    // Cube was unable to be blocked: create new proof obligations
                     worklist.push(Reverse(
-                        ProofObj {
+                        TimedCube {
                             cube: wit,
-                            frame: self.frames.len() - 1,
+                            frame: proof_obj.frame - 1,
                         }
                     ));
                     worklist.push(Reverse(proof_obj));
@@ -351,12 +416,14 @@ impl PdrState {
                 None => {
                     // Cube was blocked by frame: generalize and add to frames
                     let gen_cube = { self.generalize(&mut *ctx, &mut *smt_ctx, &proof_obj)? };
-                    let mut gen_obj = ProofObj {
+
+                   /*
+                   let mut gen_obj = TimedCube {
                         cube : gen_cube,
                         frame: proof_obj.frame,
                     };
 
-                    // Push generalized cube to farthest possible frame
+                    // Push generalized cube to the farthest possible frame
                     while gen_obj.frame < self.frames.len() {
                         match self.rel_ind_check(&mut *ctx, &mut *smt_ctx, &proof_obj)? {
                             // Relative inductiveness check fails: cannot move forward
@@ -366,8 +433,12 @@ impl PdrState {
                         }
                     }
 
-                    // Add generalized cube to frames
-                    todo!("Finish implementation");
+                    // Restore original working frame
+                    gen_obj.frame -= 1;
+                    */
+
+                    // Add blocked cube to frame
+                    self.add_blocked_cube(&mut *ctx, &mut *smt_ctx, &gen_cube)?;
                 }
             }
         }
@@ -378,10 +449,11 @@ impl PdrState {
     /// Try to propagate all frame clauses to the next frame
     ///
     /// Returns whether Fixpoint reached (therefore signaling the termination of the algorithm)
-    fn propagate_clauses(
-        &mut self, ctx:
-        &mut Context,
-        smt_ctx: &mut impl SolverContext) -> Result<bool> {
+    fn propagate_blocked_cubes(
+        &mut self,
+        ctx: &mut Context,
+        smt_ctx: &mut impl SolverContext
+    ) -> Result<bool> {
         // Iterate though each frame
         for (idx, frame) in self.frames.clone().into_iter().enumerate() {
             // Skip first frame (initial state)
@@ -392,13 +464,13 @@ impl PdrState {
                 for &id in &frame {
                     // Get frame assumptions and add negated clause
                     let mut assumptions = self.frame_assumptions(idx);
-                    assumptions.push(ctx.not(self.clauses[id].act));
+                    assumptions.push(ctx.not(self.cubes.get(&id).cloned().unwrap().act));
 
                     // Run SMT query
                     match check_assuming(ctx, smt_ctx, assumptions)? {
                         CheckSatResponse::Sat | CheckSatResponse::Unknown => (), // Cannot move clause forward
                         CheckSatResponse::Unsat => {
-                            // Move clause to the next frame
+                            // Move blocked cube to the next frame
                             self.frames[idx + 1].push(id);
                             num_move += 1;
                         }
@@ -433,8 +505,34 @@ pub fn pdr(
     // For now, only work with bitvectors
     smt_ctx.set_logic(Logic::QfBv)?;
 
-    // Initialize system with reset state and starting inputs
-    enc.init_at(ctx, smt_ctx, INIT_STATE)?;
+    // Initialize system with current state and next state variables
+    enc.init_at(ctx, smt_ctx, CUR_STATE)?;
+    enc.unroll(ctx, smt_ctx)?;
+
+    // Create PDR instance
+    let mut state = PdrState::init(ctx, smt_ctx, sys, &enc);
+
+    // Main PDR loop
+    for _ in 0..MAX_FRAMES {
+        // Extract bad cube
+        let bad_cube = state.get_bad_cube(ctx, smt_ctx, sys, &enc)?;
+
+        match bad_cube {
+            Some(bad_cube) => {
+                // Bad cube found: block the bad cube
+                todo!("Finish implementation");
+            },
+            None => {
+                // No bad cube found: try to find inductive invariant
+                state.add_frame();
+
+                if state.propagate_blocked_cubes(ctx, smt_ctx)? {
+                    // Inductive invariant holds: success
+                    return Ok(ModelCheckResult::Success);
+                }
+            },
+        }
+    }
 
     Ok(ModelCheckResult::Unknown)
 }
