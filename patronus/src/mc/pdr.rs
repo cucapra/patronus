@@ -176,7 +176,7 @@ impl PdrState {
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
         enc: &impl TransitionSystemEncoding
-    ) -> Self {
+    ) -> Result<Self> {
         // Get an activation literal for the initial state
         let init_act = ctx.bv_symbol("act_0", 1);
         let mut init_cube = Cube::default();
@@ -191,12 +191,12 @@ impl PdrState {
         }
 
         // Assert activation literal in solver
-        let clause = init_cube.negate(&mut *ctx);
-        let imp = ctx.implies(init_act, clause);
-        smt_ctx.assert(ctx, imp).expect("pdr init failed");
+        let cube_expr = init_cube.to_expr(ctx);
+        let imp = ctx.implies(init_act, cube_expr);
+        smt_ctx.assert(ctx, imp)?;
 
         // Return initialized PDR state
-        Self {
+        Ok(Self {
             act_counter: 1u64,
             cubes: [
                 BlockedCube {
@@ -205,7 +205,7 @@ impl PdrState {
                 }
             ].into_iter().map(|e| (0, e)).collect(),
             frames: vec![vec![0usize]],
-        }
+        })
     }
 
     /// Returns the index to the frontier (last) frame
@@ -223,9 +223,8 @@ impl PdrState {
     fn frame_assumptions(&self, frame_idx: usize) -> Vec<ExprRef> {
         self.frames[frame_idx]
             .iter()
-            .copied()
             // Get all activation literals associated with clauses in the frame
-            .map(|id| self.cubes.get(&id).cloned().unwrap().act)
+            .map(|id| self.cubes.get(id).unwrap().act)
             .collect()
     }
 
@@ -509,32 +508,35 @@ impl PdrState {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext
     ) -> Result<bool> {
+        for idx in 1..(self.frames.len() - 1) {
+            todo!("Implement propagate_blocked_cubes")
+        }
+
         // Iterate though each frame
-        for (idx, frame) in self.frames.clone().into_iter().enumerate() {
+        for (idx, frame) in self.frames.iter().enumerate().skip(1) {
             // Skip first frame (initial state)
-            if idx > 0 {
-                let mut num_move = 0usize; // Number of clauses moved to the next frame
+            let mut num_move = 0usize; // Number of clauses moved to the next frame
 
-                // Iterate through each clause in the frame
-                for &id in &frame {
-                    // Get frame assumptions and add negated clause
-                    let mut assumptions = self.frame_assumptions(idx);
-                    assumptions.push(ctx.not(self.cubes.get(&id).cloned().unwrap().act));
+            // Iterate through each clause in the frame
+            for &id in frame {
+                // TODO: Get frame assumptions and add negated clause
+                todo!("Implement propagate_blocked_cubes");
+                let mut assumptions = self.frame_assumptions(idx);
+                assumptions.push(ctx.not(self.cubes[&id].act));
 
-                    // Run SMT query
-                    match check_assuming(ctx, smt_ctx, assumptions)? {
-                        CheckSatResponse::Sat | CheckSatResponse::Unknown => (), // Cannot move clause forward
-                        CheckSatResponse::Unsat => {
-                            // Move blocked cube to the next frame
-                            self.frames[idx + 1].push(id);
-                            num_move += 1;
-                        }
+                // Run SMT query
+                match check_assuming(ctx, smt_ctx, assumptions)? {
+                    CheckSatResponse::Sat | CheckSatResponse::Unknown => (), // Cannot move clause forward
+                    CheckSatResponse::Unsat => {
+                        // Move blocked cube to the next frame
+                        self.frames[idx + 1].push(id);
+                        num_move += 1;
                     }
+                }
 
-                    if num_move == frame.len() {
-                        // Reached Fixpoint, return success
-                        return Ok(true);
-                    }
+                if num_move == frame.len() {
+                    // Reached Fixpoint, return success
+                    return Ok(true);
                 }
             }
         }
@@ -554,18 +556,18 @@ pub fn pdr(
         (_, Some(enc)) => enc,
     };
 
-    // Check that system has states
+    // TODO: Check that system has states
     assert!(!sys.states.is_empty());
 
-    // For now, only work with bitvectors
-    smt_ctx.set_logic(Logic::QfBv)?;
+    // TODO: deal with constraints
+    assert!(sys.constraints.is_empty());
 
     // Initialize system with current state and next state variables
     enc.init_at(ctx, smt_ctx, CUR_STATE)?;
     enc.unroll(ctx, smt_ctx)?;
 
     // Create PDR instance
-    let mut state = PdrState::init(ctx, smt_ctx, sys, &enc);
+    let mut state = PdrState::init(ctx, smt_ctx, sys, &enc)?;
 
     // Main PDR loop
     for _ in 0..MAX_FRAMES {
