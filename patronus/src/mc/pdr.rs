@@ -4,11 +4,11 @@
 
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
-use baa::Value;
+use baa::{ArrayOps, BitVecOps, BitVecValue, Value};
 use rustc_hash::{FxHashMap, FxHashSet};
 use crate::mc::bmc::TransitionSystemEncoding;
 use crate::expr::*;
-use crate::mc::{check_assuming, get_smt_value, ModelCheckResult};
+use crate::mc::{check_assuming, get_smt_value, InitValue, ModelCheckResult, Witness};
 use crate::mc::bmc::start_bmc_or_pdr;
 use crate::smt::*;
 use crate::system::TransitionSystem;
@@ -16,6 +16,7 @@ use crate::system::TransitionSystem;
 type Result<T> = crate::smt::Result<T>;
 type CubeId = usize;
 type Step = u64;
+type CexChain = Vec<CexEntry>;
 
 const CUR_STATE: Step = 1; // Current state constant
 const NXT_STATE: Step = 2; // Next state constant
@@ -25,6 +26,7 @@ const MAX_FRAMES: usize = 1000; // Maximum number of frames allowed by PDR
 // Core PDR data structures
 // ------------------------------------------------------------------------------------------------
 
+/// `Formula` specifies methods on SMT logic formulas
 trait Formula {
     /// Convert the formula into a conventional `ExprRef` SMT expression
     fn to_expr(&self, ctx: &mut Context) -> ExprRef;
@@ -94,10 +96,10 @@ struct BlockedCube {
 }
 
 /// `CexEntry` is a node in a counterexample trace
+#[derive(Debug, Clone)]
 struct CexEntry {
     state_values: Vec<Value>,
     inputs: Vec<Value>,
-    next: Option<Box<CexEntry>>,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -109,7 +111,7 @@ struct CexEntry {
 fn subsumes(a: &Cube, b: &Cube) -> bool {
     // Get set of literals
     let lit_set: FxHashSet<ExprRef> =
-        b.literals.iter().cloned().map(|e| e).collect();
+        b.literals.iter().cloned().collect();
 
     // Check that all `a` literals exist in `b`
     a.literals
@@ -153,7 +155,87 @@ fn extract_input_values(
     Ok(input_values)
 }
 
-// TODO: Implement function to create `Witness`
+/// Constructs a witness from a counterexample trace
+///
+/// **Requires**: the first step of the trace be the initial state
+/// and the last step of the trace be a bad state
+fn construct_witness(
+    ctx: &mut Context,
+    sys: &TransitionSystem,
+    cex_chain: &CexChain,
+) -> Witness {
+    // Resulting witness
+    let mut witness = Witness::default();
+
+    // Add all state names
+    for state in &sys.states {
+        witness.init_names
+            .push(Some(ctx.get_symbol_name(state.symbol).unwrap().to_string()));
+    }
+
+    // Add all input names
+    for &input in &sys.inputs {
+        witness.input_names
+            .push(Some(ctx.get_symbol_name(input).unwrap().to_string()));
+    }
+
+    // Add the initial states
+    for entry in cex_chain.iter() {
+        for val in &entry.state_values {
+            // Map witness value to an init BitVec or Array
+            let wit_val = match val {
+                Value::BitVec(v) => InitValue::BitVec(v.clone()),
+                Value::Array(v) => {
+                    let indices = (0..v.num_elements())
+                        .map(|i| BitVecValue::from_u64(i as u64, v.index_width()))
+                        .collect();
+
+                    InitValue::Array(v.clone(), indices)
+                },
+            };
+
+            // Add to initial value list
+            witness.init.push(wit_val);
+        }
+    }
+
+    // Iterate through the CEX chain and add input values to witness
+    for entry in cex_chain.iter() {
+        witness.inputs
+            .push(entry.inputs.iter().cloned().map(Some).collect());
+    }
+
+    // Last entry of CEX chain must be a bad state (by assumption)
+    let last_entry = cex_chain.last().unwrap();
+    let mut store = SymbolValueStore::default();
+
+    // Define relevant states
+    for (state, val) in sys.states.iter().zip(last_entry.state_values.iter()) {
+        match val {
+            Value::BitVec(bv) => store.define_bv(state.symbol, bv),
+            Value::Array(av) => store.define_array(state.symbol, av.clone()),
+        }
+    }
+
+    // Define relevant inputs
+    for (input, val) in sys.states.iter().zip(last_entry.inputs.iter()) {
+        match val {
+            Value::BitVec(bv) => store.define_bv(input.symbol, bv),
+            Value::Array(av) => store.define_array(input.symbol, av.clone()),
+        }
+    }
+
+    // Simulate final state and add activated bad states
+    for (idx, &bad_expr) in sys.bad_states.iter().enumerate() {
+        if let Value::BitVec(bv) = eval_expr(ctx, &store, bad_expr) {
+            if !bv.is_zero() {
+                witness.failed_safety.push(idx as u32);
+            }
+        }
+    }
+
+    witness
+}
 
 // ------------------------------------------------------------------------------------------------
 // Main PDR state and subroutines
@@ -204,14 +286,14 @@ impl PdrState {
                     cube: init_cube,
                 }
             ].into_iter().map(|e| (0, e)).collect(),
-            frames: vec![vec![0usize]],
+            frames: vec![vec![0usize], vec![]],
         })
     }
 
-    /// Returns the index to the frontier (last) frame
+    /// Returns the number of finite-range (relatively-inductive) frames
     #[inline]
     fn depth(&self) -> usize {
-        self.frames.len() - 1
+        self.frames.len()
     }
 
     /// Add an empty frame
@@ -259,7 +341,7 @@ impl PdrState {
         enc: &impl TransitionSystemEncoding
     ) -> Result<Option<Cube>> {
         // Get current frontier frame index
-        let front_idx = self.depth();
+        let front_idx = self.depth() - 1;
 
         // Bad states
         let bad_states : Vec<ExprRef> =
@@ -311,7 +393,7 @@ impl PdrState {
         { assumptions.push(proof_obj.cube.to_expr(&mut *ctx)); }
         { assumptions.push(proof_obj.cube.negate(&mut *ctx)); }
 
-        Ok(check_assuming(ctx, smt_ctx, assumptions)?)
+        check_assuming(ctx, smt_ctx, assumptions)
     }
 
     /// Check for relative inductiveness, but also return witness in case check fails
@@ -427,19 +509,19 @@ impl PdrState {
         sys: &TransitionSystem,
         enc: &impl TransitionSystemEncoding,
         cube: &Cube
-    ) -> Result<Option<CexEntry>> {
+    ) -> Result<Option<CexChain>> {
         // Min-queue for proof obligations
         let mut worklist = BinaryHeap::new();
 
         // Counterexample trace
-        let mut cex_trace: Option<CexEntry> = None;
+        let mut cex_chain = CexChain::new();
 
         // Add first proof obligation (try to block at frontier frame)
         worklist.push(
             Reverse(
                 TimedCube {
                     cube: cube.clone(),
-                    frame: self.depth(),
+                    frame: self.depth() - 1,
                 }
             )
         );
@@ -448,7 +530,7 @@ impl PdrState {
         while let Some(Reverse(proof_obj)) = worklist.pop() {
             // Check intersection with initial states
             if proof_obj.frame == 0 {
-                return Ok(cex_trace);
+                return Ok(Some(cex_chain.iter().rev().cloned().collect()));
             }
 
             match self.solve_relative(&mut *ctx, &mut *smt_ctx, sys, enc, &proof_obj)? {
@@ -463,10 +545,9 @@ impl PdrState {
                     worklist.push(Reverse(proof_obj));
 
                     // Prepend new counterexample entry
-                    cex_trace = Some (CexEntry {
+                    cex_chain.push(CexEntry {
                         state_values: extract_state_values(ctx, smt_ctx, sys, enc, NXT_STATE)?,
                         inputs: extract_input_values(ctx, smt_ctx, sys, enc, NXT_STATE)?,
-                        next: if let Some(cex) = cex_trace { Some(Box::new(cex)) } else { None },
                     });
                 }
                 None => {
@@ -508,36 +589,32 @@ impl PdrState {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext
     ) -> Result<bool> {
-        for idx in 1..(self.frames.len() - 1) {
-            todo!("Implement propagate_blocked_cubes")
-        }
+        // Iterate through all frames before the last
+        for idx in 1..(self.depth() - 1) {
+            // Number of clauses that have been moved
+            let mut num_left = self.frames[idx].len();
 
-        // Iterate though each frame
-        for (idx, frame) in self.frames.iter().enumerate().skip(1) {
-            // Skip first frame (initial state)
-            let mut num_move = 0usize; // Number of clauses moved to the next frame
+            // Iterate through all clauses
+            for id_idx in 0..self.frames[idx].len() {
+                // Current cube ID
+                let id = self.frames[idx][id_idx];
 
-            // Iterate through each clause in the frame
-            for &id in frame {
-                // TODO: Get frame assumptions and add negated clause
-                todo!("Implement propagate_blocked_cubes");
-                let mut assumptions = self.frame_assumptions(idx);
-                assumptions.push(ctx.not(self.cubes[&id].act));
-
-                // Run SMT query
-                match check_assuming(ctx, smt_ctx, assumptions)? {
-                    CheckSatResponse::Sat | CheckSatResponse::Unknown => (), // Cannot move clause forward
-                    CheckSatResponse::Unsat => {
-                        // Move blocked cube to the next frame
-                        self.frames[idx + 1].push(id);
-                        num_move += 1;
+                // Try to block the clause in the next frame
+                if self.rel_ind_check(
+                    ctx,
+                    smt_ctx,
+                    &TimedCube {
+                        cube: self.cubes[&id].cube.clone(),
+                        frame: idx + 1,
                     }
+                )? == CheckSatResponse::Unsat {
+                    self.frames[idx + 1].push(id);
+                    num_left -= 1;
                 }
+            }
 
-                if num_move == frame.len() {
-                    // Reached Fixpoint, return success
-                    return Ok(true);
-                }
+            if num_left == 0 {
+                return Ok(true);
             }
         }
 
@@ -556,10 +633,7 @@ pub fn pdr(
         (_, Some(enc)) => enc,
     };
 
-    // TODO: Check that system has states
-    assert!(!sys.states.is_empty());
-
-    // TODO: deal with constraints
+    // TODO: Deal with constraints
     assert!(sys.constraints.is_empty());
 
     // Initialize system with current state and next state variables
