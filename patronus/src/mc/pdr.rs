@@ -18,8 +18,8 @@ type CubeId = usize;
 type Step = u64;
 type CexChain = Vec<CexEntry>;
 
-const CUR_STATE: Step = 1; // Current state constant
-const NXT_STATE: Step = 2; // Next state constant
+const CUR_STEP: Step = 1; // Current state constant
+const NXT_STEP: Step = 2; // Next state constant
 const MAX_FRAMES: usize = 1000; // Maximum number of frames allowed by PDR
 
 // ------------------------------------------------------------------------------------------------
@@ -45,14 +45,14 @@ impl Formula for Cube {
     fn to_expr(&self, ctx: &mut Context) -> ExprRef {
         self.literals
             .iter()
-            .cloned()
+            .copied()
             .fold(ctx.get_true(), |acc, e| ctx.and(acc, e))
     }
 
     fn negate(&self, ctx: &mut Context) -> ExprRef {
         self.literals
             .iter()
-            .cloned()
+            .copied()
             .fold(
                 ctx.get_false(),
                 |acc, e| {
@@ -106,12 +106,32 @@ struct CexEntry {
 // PDR helper functions
 // ------------------------------------------------------------------------------------------------
 
+/// Convert an SMT expression to its stepped version
+fn expr_at_step(
+   ctx: &mut Context,
+   enc: &impl TransitionSystemEncoding,
+   expr: ExprRef,
+   step: Step
+) -> ExprRef {
+   simple_transform_expr(
+       ctx,
+       expr,
+       |ctx, e, _| {
+           if ctx[e].is_symbol() {
+               Some(enc.get_at(ctx, e, step))
+           } else {
+               None
+           }
+       }
+   )
+}
+
 /// Check if a cube syntactically subsumes another cube
-/// (i.e. $c_q \subseteq c_b$, where $c_a$ and $c_b$ are cubes with sets of literals)
+/// (i.e. `c_q \subseteq c_b`, where `c_a` and `c_b` are cubes with sets of literals)
 fn subsumes(a: &Cube, b: &Cube) -> bool {
     // Get set of literals
     let lit_set: FxHashSet<ExprRef> =
-        b.literals.iter().cloned().collect();
+        b.literals.iter().copied().collect();
 
     // Check that all `a` literals exist in `b`
     a.literals
@@ -155,15 +175,61 @@ fn extract_input_values(
     Ok(input_values)
 }
 
+/// Extract bitvectors from solver as bit-level cubes
+///
+/// TODO: Add array support
+fn get_bit_level_cube(
+    ctx: &mut Context,
+    smt_ctx: &mut impl SolverContext,
+    sys: &TransitionSystem,
+    enc: &impl TransitionSystemEncoding,
+    step: Step
+) -> Result<Cube> {
+    let mut literals = Vec::new();
+
+    // Get values associated with states
+    let vals = extract_state_values(ctx, smt_ctx, sys, enc, step)?;
+
+    debug_assert_eq!(vals.len(), sys.states.len());
+
+    for (state, val) in sys.states.iter().zip(vals.iter()) {
+        match val {
+            Value::BitVec(bv) => {
+                // Bit vector width
+                let width = bv.width();
+
+                // Iterate through all bits of the bitvector
+                for idx in 0..width {
+                    // Get value of bit
+                    let bit = ctx.slice(state.symbol, idx, idx);
+                    let bit_val = if bv.is_bit_set(idx) { ctx.get_true() }
+                                            else { ctx.get_false() };
+
+                    // Set equality and add to list of literals
+                    let literal = ctx.equal(bit, bit_val);
+                    literals.push(literal);
+                }
+            },
+            Value::Array(av) => {
+               todo!("Finish implementation") // TODO: Focus on getting the relevant indices
+            },
+        }
+    }
+
+    Ok(Cube { literals })
+}
+
 /// Constructs a witness from a counterexample trace
 ///
 /// **Requires**: the first step of the trace be the initial state
 /// and the last step of the trace be a bad state
 fn construct_witness(
-    ctx: &mut Context,
+    ctx: &Context,
     sys: &TransitionSystem,
     cex_chain: &CexChain,
 ) -> Witness {
+    assert!(!cex_chain.is_empty());
+
     // Resulting witness
     let mut witness = Witness::default();
 
@@ -179,28 +245,29 @@ fn construct_witness(
             .push(Some(ctx.get_symbol_name(input).unwrap().to_string()));
     }
 
+    // Initial state is first entry of trace
+    let first_entry = cex_chain.first().unwrap();
+
     // Add the initial states
-    for entry in cex_chain.iter() {
-        for val in &entry.state_values {
-            // Map witness value to an init BitVec or Array
-            let wit_val = match val {
-                Value::BitVec(v) => InitValue::BitVec(v.clone()),
-                Value::Array(v) => {
-                    let indices = (0..v.num_elements())
-                        .map(|i| BitVecValue::from_u64(i as u64, v.index_width()))
-                        .collect();
+    for val in &first_entry.state_values {
+        // Map witness value to an init BitVec or Array
+        let wit_val = match val {
+            Value::BitVec(v) => InitValue::BitVec(v.clone()),
+            Value::Array(v) => {
+                let indices = (0..v.num_elements())
+                    .map(|i| BitVecValue::from_u64(i as u64, v.index_width()))
+                    .collect();
 
-                    InitValue::Array(v.clone(), indices)
-                },
-            };
+                InitValue::Array(v.clone(), indices)
+            },
+        };
 
-            // Add to initial value list
-            witness.init.push(wit_val);
-        }
+        // Add to initial value list
+        witness.init.push(wit_val);
     }
 
     // Iterate through the CEX chain and add input values to witness
-    for entry in cex_chain.iter() {
+    for entry in cex_chain {
         witness.inputs
             .push(entry.inputs.iter().cloned().map(Some).collect());
     }
@@ -208,6 +275,9 @@ fn construct_witness(
     // Last entry of CEX chain must be a bad state (by assumption)
     let last_entry = cex_chain.last().unwrap();
     let mut store = SymbolValueStore::default();
+
+    assert_eq!(last_entry.state_values.len(), sys.states.len());
+    assert_eq!(last_entry.inputs.len(), sys.inputs.len());
 
     // Define relevant states
     for (state, val) in sys.states.iter().zip(last_entry.state_values.iter()) {
@@ -218,19 +288,17 @@ fn construct_witness(
     }
 
     // Define relevant inputs
-    for (input, val) in sys.states.iter().zip(last_entry.inputs.iter()) {
+    for (input, val) in sys.inputs.iter().zip(last_entry.inputs.iter()) {
         match val {
-            Value::BitVec(bv) => store.define_bv(input.symbol, bv),
-            Value::Array(av) => store.define_array(input.symbol, av.clone()),
+            Value::BitVec(bv) => store.define_bv(*input, bv),
+            Value::Array(av) => store.define_array(*input, av.clone()),
         }
     }
 
     // Simulate final state and add activated bad states
     for (idx, &bad_expr) in sys.bad_states.iter().enumerate() {
-        if let Value::BitVec(bv) = eval_expr(ctx, &store, bad_expr) {
-            if !bv.is_zero() {
-                witness.failed_safety.push(idx as u32);
-            }
+        if let Value::BitVec(bv) = eval_expr(ctx, &store, bad_expr) && !bv.is_zero() {
+            witness.failed_safety.push(idx as u32);
         }
     }
 
@@ -243,7 +311,7 @@ fn construct_witness(
 
 /// `PdrState` is the frames accumulated by PDR
 ///
-/// **Representation Invariant**: `frames` must always have length > 0,
+/// **Representation Invariant**: `frames` must always have length >= 2,
 /// where the first frame is the initial frame and the last frame is the
 /// infinite frame
 struct PdrState {
@@ -266,7 +334,7 @@ impl PdrState {
         // Poll all initial states from the system
         for state in &sys.states {
             if let Some(init) = state.init {
-                let sym = enc.get_at(ctx, state.symbol, CUR_STATE);
+                let sym = enc.get_at(ctx, state.symbol, CUR_STEP);
                 let lit = ctx.equal(sym, init);
                 init_cube.literals.push(lit);
             }
@@ -280,59 +348,43 @@ impl PdrState {
         // Return initialized PDR state
         Ok(Self {
             act_counter: 1u64,
-            cubes: [
-                BlockedCube {
+            cubes: std::iter::once(BlockedCube {
                     act: init_act,
                     cube: init_cube,
-                }
-            ].into_iter().map(|e| (0, e)).collect(),
+                }).map(|e| (0, e)).collect(),
             frames: vec![vec![0usize], vec![]],
         })
     }
 
     /// Returns the number of finite-range (relatively-inductive) frames
     #[inline]
-    fn depth(&self) -> usize {
-        self.frames.len()
+    const fn depth(&self) -> usize {
+        self.frames.len() - 1
     }
 
     /// Add an empty frame
     fn add_frame(&mut self) {
-        self.frames.push(Vec::new());
+        self.frames.insert(self.depth(), Vec::new());
     }
 
     /// Return all clauses activation literals associated with a frame
     fn frame_assumptions(&self, frame_idx: usize) -> Vec<ExprRef> {
-        self.frames[frame_idx]
-            .iter()
-            // Get all activation literals associated with clauses in the frame
-            .map(|id| self.cubes.get(id).unwrap().act)
-            .collect()
-    }
+        let mut act_literals = Vec::new();
 
-    // Extract the final next state after SMT query
-    fn extract_bad_cube(
-        ctx: &mut Context,
-        smt_ctx: &mut impl SolverContext,
-        sys: &TransitionSystem,
-        enc: &impl TransitionSystemEncoding
-    ) -> Result<Cube> {
-        // Get bad state
-        let mut bad_cube = Vec::with_capacity(sys.states.len());
-
-        // Construct witness
-        for state in &sys.states {
-            let sym = enc.get_at(ctx, state.symbol, NXT_STATE);
-            let val = smt_ctx.get_value(ctx, sym)?;
-            let lit = ctx.equal(sym, val);
-            bad_cube.push(lit);
+        // Also reads the last infinite frame
+        for idx in frame_idx..=self.depth() {
+            // Push activation literals from this frame into collection
+            act_literals.extend(
+                self.frames[idx]
+                    .iter()
+                    .map(|id| self.cubes[id].act)
+            );
         }
 
-        Ok(Cube { literals: bad_cube })
+        act_literals
     }
 
-    /// Find a bad cube based on assertion of frontier frame (i.e. the last frame before
-    /// the infinite frame)
+    /// Find a bad cube based on assertion of frontier frame
     fn get_bad_cube(
         &self,
         ctx: &mut Context,
@@ -347,7 +399,7 @@ impl PdrState {
         let bad_states : Vec<ExprRef> =
             sys.bad_states
                 .iter()
-                .map(|b| enc.get_at(ctx, *b, NXT_STATE))
+                .map(|b| enc.get_at(ctx, *b, NXT_STEP))
                 .collect();
 
         // Bad variables to assert
@@ -364,7 +416,10 @@ impl PdrState {
         // Run SMT query (SAT?[F_f /\ P]), where F_f is the frontier frame and
         // P is the safety property
         match check_assuming(ctx, smt_ctx, assumptions)? {
-            CheckSatResponse::Sat => Ok(Some(PdrState::extract_bad_cube(ctx, smt_ctx, sys, enc)?)),
+            CheckSatResponse::Sat => {
+                let bad_cube = get_bit_level_cube(ctx, smt_ctx, sys, enc, CUR_STEP)?;
+                Ok(Some(bad_cube))
+            },
             CheckSatResponse::Unsat => Ok(None),
             CheckSatResponse::Unknown => Err(
                 Error::UnexpectedResponse(
@@ -375,7 +430,7 @@ impl PdrState {
         }
     }
 
-    /// Check for relative inductiveness by running the SMT query `SAT?[F_k /\ c /\ T /\ \neg c']`,
+    /// Check for relative inductiveness by running the SMT query `SAT?[F_k /\ \neg c /\ T /\ c']`,
     /// where `F_k` is the relative frame, `c` is a cube, `c'` is the next state cube, and
     /// `T` is the transition relation
     ///
@@ -384,14 +439,45 @@ impl PdrState {
         &self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
+        enc: &impl TransitionSystemEncoding,
         proof_obj: &TimedCube
     ) -> Result<CheckSatResponse> {
         // Start with frame assumptions
         let mut assumptions = self.frame_assumptions(proof_obj.frame);
 
-        // Add `c` and `\neg c'` (transition relation is already in solver)
-        { assumptions.push(proof_obj.cube.to_expr(&mut *ctx)); }
-        { assumptions.push(proof_obj.cube.negate(&mut *ctx)); }
+        // Yield relevant cube expressions
+        let cube_expr = proof_obj.cube.to_expr(ctx);
+        let neg_cube_expr = proof_obj.cube.negate(ctx);
+
+        // Only add assertion for `c` in the next step if not relative to the initial frame
+        if proof_obj.frame > 0 {
+            assumptions.push(
+                expr_at_step(
+                    ctx,
+                    enc,
+                    neg_cube_expr,
+                    CUR_STEP
+                )
+            );
+            assumptions.push(
+                expr_at_step(
+                    ctx,
+                    enc,
+                    cube_expr,
+                    NXT_STEP
+                )
+            );
+        }
+        else {
+            assumptions.push(
+                expr_at_step(
+                    ctx,
+                    enc,
+                    cube_expr,
+                    CUR_STEP
+                )
+            );
+        }
 
         check_assuming(ctx, smt_ctx, assumptions)
     }
@@ -408,8 +494,11 @@ impl PdrState {
         proof_obj: &TimedCube
     ) -> Result<Option<Cube>> {
         // Perform relative inductiveness check
-        match self.rel_ind_check(ctx, smt_ctx, proof_obj)? {
-            CheckSatResponse::Sat => Ok(Some(PdrState::extract_bad_cube(ctx, smt_ctx, sys, enc)?)),
+        match self.rel_ind_check(ctx, smt_ctx, enc, proof_obj)? {
+            CheckSatResponse::Sat => {
+                let bad_cube = get_bit_level_cube(ctx, smt_ctx, sys, enc, CUR_STEP)?;
+                Ok(Some(bad_cube))
+            },
             CheckSatResponse::Unsat => Ok(None), // Cube blocked by frame: no witness
             CheckSatResponse::Unknown => Err(
                 Error::UnexpectedResponse(
@@ -427,28 +516,47 @@ impl PdrState {
         &self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
+        enc: &impl TransitionSystemEncoding,
         proof_obj: &TimedCube
     ) -> Result<Cube> {
-        // Final remaining literals
-        let mut rem_literals = Vec::new();
+        // Remaining literals from generalization
+        let mut rem_literals = proof_obj.cube.literals
+            .iter()
+            .enumerate()
+            .collect::<FxHashMap<_, _>>();
 
         for idx in 0..proof_obj.cube.literals.len() {
-            let mut literals = proof_obj.cube.literals.clone();
+            // If only one literal remaining, do not try to drop
+            if rem_literals.len() <= 1 {
+                break;
+            }
 
             // Drop literal
-            literals.swap_remove(idx);
+            let rem_expr = rem_literals.remove(&idx).unwrap();
+
+            // Collect remaining literals
+            let literals = rem_literals
+                .values()
+                .map(|e| **e)
+                .collect();
+
+            // Create updated proof obligation
+            let test_obj = TimedCube {
+                cube: Cube { literals },
+                frame: proof_obj.frame,
+            };
 
             // Check if literal-dropped cube is still blocked by frame
-            match self.rel_ind_check(ctx, smt_ctx, proof_obj)? {
-                CheckSatResponse::Sat | CheckSatResponse::Unknown => rem_literals.push(
-                    proof_obj.cube.literals[idx]
-                ), // Unable to drop literal
+            match self.rel_ind_check(ctx, smt_ctx, enc, &test_obj)? {
+                CheckSatResponse::Sat | CheckSatResponse::Unknown => {
+                    rem_literals.insert(idx, rem_expr);
+                }, // Unable to drop literal: restore state
                 CheckSatResponse::Unsat => (), // Able to drop literal
             }
         }
 
         // Create new cube with unsuccessfully dropped literals
-        Ok(Cube { literals: rem_literals })
+        Ok(Cube { literals: rem_literals.values().map(|e| **e).collect() })
     }
 
 
@@ -457,17 +565,18 @@ impl PdrState {
         &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
+        enc: &impl TransitionSystemEncoding,
         blocked_cube: &TimedCube
     ) -> Result<()> {
         // Create clause from blocked cube
-        let clause = { blocked_cube.cube.negate(&mut *ctx) };
+        let clause = blocked_cube.cube.negate(&mut *ctx);
 
         // Cube ID
         let id = self.act_counter;
         self.act_counter += 1;
 
         // Go through each frame and remove subsumed cubes
-        for idx in 0..(blocked_cube.frame + 1) {
+        for idx in 1..=blocked_cube.frame {
             // Remove all subsumed cubes
             let cleaned_frame: Vec<CubeId> =
                 self.frames[idx]
@@ -483,19 +592,18 @@ impl PdrState {
         }
 
         // Create new activation literal for blocked cube
-        let act = ctx.bv_symbol(format!("act_{}", id).as_str(), 1);
+        let act = ctx.bv_symbol(format!("act_{id}").as_str(), 1);
 
         // Add blocked cube to frontier frame
-        for idx in 0..(blocked_cube.frame + 1) {
-            self.frames[idx].push(id as usize);
-            self.cubes.insert(
-                id as CubeId,
-                BlockedCube { act, cube: blocked_cube.clone().cube, }
-            );
-        }
+        self.frames[blocked_cube.frame].push(id as usize);
+        self.cubes.insert(
+            id as CubeId,
+            BlockedCube { act, cube: blocked_cube.clone().cube, }
+        );
 
         // Assert the new negated cube (clause) in the solver with the activation literal
-        let imp = ctx.implies(act, clause);
+        let clause_exp = expr_at_step(ctx, enc, clause, CUR_STEP);
+        let imp = ctx.implies(act, clause_exp);
         smt_ctx.assert(ctx, imp)
     }
 
@@ -528,53 +636,68 @@ impl PdrState {
 
         // Iterate through proof obligations
         while let Some(Reverse(proof_obj)) = worklist.pop() {
-            // Check intersection with initial states
+            // Special case: reached initial frame
             if proof_obj.frame == 0 {
-                return Ok(Some(cex_chain.iter().rev().cloned().collect()));
+                match self.rel_ind_check(ctx, smt_ctx, enc, &proof_obj)? {
+                    CheckSatResponse::Sat => {
+                        // Push initial state CEX entry
+                        cex_chain.push(
+                            CexEntry {
+                                state_values: extract_state_values(ctx, smt_ctx, sys, enc, CUR_STEP)?,
+                                inputs: extract_input_values(ctx, smt_ctx, sys, enc, CUR_STEP)?,
+                            }
+                        );
+
+                        // Reverse chain to restore order
+                        return Ok(Some(cex_chain.iter().rev().cloned().collect()));
+                    },
+                    CheckSatResponse::Unsat => continue,
+                    CheckSatResponse::Unknown => return Err(Error::UnexpectedResponse(
+                        String::from("`block_cube`"),
+                        String::from("unknown result at critical step"),
+                    ))
+                }
             }
 
-            match self.solve_relative(&mut *ctx, &mut *smt_ctx, sys, enc, &proof_obj)? {
-                Some(wit) => {
-                    // Cube was unable to be blocked: create new proof obligations
-                    worklist.push(Reverse(
-                        TimedCube {
-                            cube: wit,
-                            frame: proof_obj.frame - 1,
-                        }
-                    ));
-                    worklist.push(Reverse(proof_obj));
-
-                    // Prepend new counterexample entry
-                    cex_chain.push(CexEntry {
-                        state_values: extract_state_values(ctx, smt_ctx, sys, enc, NXT_STATE)?,
-                        inputs: extract_input_values(ctx, smt_ctx, sys, enc, NXT_STATE)?,
-                    });
-                }
-                None => {
-                    // Cube was blocked by frame: generalize and add to frames
-                    let gen_cube = { self.generalize(&mut *ctx, &mut *smt_ctx, &proof_obj)? };
-
-                   let mut gen_obj = TimedCube {
-                        cube : gen_cube,
-                        frame: proof_obj.frame,
-                    };
-
-                    // Push generalized cube to the farthest possible frame
-                    while gen_obj.frame < self.frames.len() {
-                        match self.rel_ind_check(&mut *ctx, &mut *smt_ctx, &proof_obj)? {
-                            // Relative inductiveness check fails: cannot move forward
-                            CheckSatResponse::Sat | CheckSatResponse::Unknown => break,
-                            // Relative inductiveness check succeeds: try next frame
-                            CheckSatResponse::Unsat => gen_obj.frame += 1,
-                        }
+            if let Some(wit) = self.solve_relative(&mut *ctx, &mut *smt_ctx, sys, enc, &proof_obj)? {
+                // Cube was unable to be blocked: create new proof obligations
+               worklist.push(Reverse(
+                    TimedCube {
+                        cube: wit,
+                        frame: proof_obj.frame - 1,
                     }
+                ));
+                worklist.push(Reverse(proof_obj));
 
-                    // Restore original working frame
-                    gen_obj.frame -= 1;
+                // Prepend new counterexample entry
+                cex_chain.push(CexEntry {
+                    state_values: extract_state_values(ctx, smt_ctx, sys, enc, NXT_STEP)?,
+                    inputs: extract_input_values(ctx, smt_ctx, sys, enc, NXT_STEP)?,
+                });
+            } else {
+                // Cube was blocked by frame: generalize and add to frames
+                let gen_cube = { self.generalize(&mut *ctx, &mut *smt_ctx, enc, &proof_obj)? };
 
-                    // Add blocked cube to frame
-                    self.add_blocked_cube(&mut *ctx, &mut *smt_ctx, &gen_obj)?;
+                let mut gen_obj = TimedCube {
+                    cube : gen_cube,
+                    frame: proof_obj.frame,
+                };
+
+                // Push generalized cube to the farthest possible frame
+                while gen_obj.frame < self.depth() {
+                    match self.rel_ind_check(&mut *ctx, &mut *smt_ctx, enc, &gen_obj)? {
+                        // Relative inductiveness check fails: cannot move forward
+                        CheckSatResponse::Sat | CheckSatResponse::Unknown => {
+                            gen_obj.frame -= 1;
+                            break;
+                        },
+                        // Relative inductiveness check succeeds: try next frame
+                        CheckSatResponse::Unsat => gen_obj.frame += 1,
+                   }
                 }
+
+                // Add blocked cube to frame
+               self.add_blocked_cube(&mut *ctx, &mut *smt_ctx, enc, &gen_obj)?;
             }
         }
 
@@ -587,14 +710,15 @@ impl PdrState {
     fn propagate_blocked_cubes(
         &mut self,
         ctx: &mut Context,
-        smt_ctx: &mut impl SolverContext
+        smt_ctx: &mut impl SolverContext,
+        enc: &impl TransitionSystemEncoding
     ) -> Result<bool> {
         // Iterate through all frames before the last
         for idx in 1..(self.depth() - 1) {
-            // Number of clauses that have been moved
-            let mut num_left = self.frames[idx].len();
+            // Cubes that remain in this frame
+            let mut rem_cubes = Vec::new();
 
-            // Iterate through all clauses
+            // Iterate through all blocked cubes
             for id_idx in 0..self.frames[idx].len() {
                 // Current cube ID
                 let id = self.frames[idx][id_idx];
@@ -603,17 +727,23 @@ impl PdrState {
                 if self.rel_ind_check(
                     ctx,
                     smt_ctx,
+                    enc,
                     &TimedCube {
                         cube: self.cubes[&id].cube.clone(),
                         frame: idx + 1,
                     }
                 )? == CheckSatResponse::Unsat {
                     self.frames[idx + 1].push(id);
-                    num_left -= 1;
+                } else {
+                    rem_cubes.push(id);
                 }
             }
 
-            if num_left == 0 {
+            // Replace this frame with the remaining cubes
+            self.frames[idx] = rem_cubes;
+
+            // If all blocked cubes moved, inductive invariant found
+            if self.frames[idx].is_empty() {
                 return Ok(true);
             }
         }
@@ -637,7 +767,7 @@ pub fn pdr(
     assert!(sys.constraints.is_empty());
 
     // Initialize system with current state and next state variables
-    enc.init_at(ctx, smt_ctx, CUR_STATE)?;
+    enc.init_at(ctx, smt_ctx, CUR_STEP)?;
     enc.unroll(ctx, smt_ctx)?;
 
     // Create PDR instance
@@ -648,20 +778,21 @@ pub fn pdr(
         // Extract bad cube
         let bad_cube = state.get_bad_cube(ctx, smt_ctx, sys, &enc)?;
 
-        match bad_cube {
-            Some(bad_cube) => {
-                // Bad cube found: block the bad cube
-                todo!("Finish implementation");
-            },
-            None => {
-                // No bad cube found: try to find inductive invariant
-                state.add_frame();
+        if let Some(bad_cube) = bad_cube {
+            // Bad cube found: block the bad cube
+            if let Some(cex_chain) = state.block_cube(ctx, smt_ctx, sys, &enc, &bad_cube)? {
+                let wit = construct_witness(ctx, sys, &cex_chain);
+                return Ok(ModelCheckResult::Fail(wit));
+            }
+        }
+        else {
+            // No bad cube found: try to find inductive invariant
+            state.add_frame();
 
-                if state.propagate_blocked_cubes(ctx, smt_ctx)? {
-                    // Inductive invariant holds: success
-                    return Ok(ModelCheckResult::Success);
-                }
-            },
+            if state.propagate_blocked_cubes(ctx, smt_ctx, &enc)? {
+                // Inductive invariant holds: success
+                return Ok(ModelCheckResult::Success);
+            }
         }
     }
 
