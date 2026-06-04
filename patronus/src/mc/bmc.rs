@@ -238,6 +238,7 @@ pub fn get_smt_value(
     Ok(value)
 }
 
+#[derive(Debug)]
 pub enum ModelCheckResult {
     Success,
     Unknown,
