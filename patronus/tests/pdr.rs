@@ -61,6 +61,6 @@ mod pdr_tests {
     fn test_trivial_fail() {
         test_dep_check();
         // run_pdr_str(TRIVIAL_FAIL, Some(format!("{SMT_OUT}/trivial_fail.smt2").as_str()));
-        run_pdr_str(TRIVIAL_FAIL, None);
+        assert!(matches!(run_pdr_str(TRIVIAL_FAIL, None), ModelCheckResult::Fail(_)));
     }
 }

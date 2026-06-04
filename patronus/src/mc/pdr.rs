@@ -343,6 +343,7 @@ impl PdrState {
         // Assert activation literal in solver
         let cube_expr = init_cube.to_expr(ctx);
         let imp = ctx.implies(init_act, cube_expr);
+        smt_ctx.declare_const(ctx, init_act)?;
         smt_ctx.assert(ctx, imp)?;
 
         // Return initialized PDR state
@@ -370,6 +371,9 @@ impl PdrState {
     /// Return all clauses activation literals associated with a frame
     fn frame_assumptions(&self, frame_idx: usize) -> Vec<ExprRef> {
         let mut act_literals = Vec::new();
+
+        // Always add initial activation literal (to prevent intersection with initial state)
+        act_literals.push(self.cubes[&0].act);
 
         // Also reads the last infinite frame
         for idx in frame_idx..=self.depth() {
@@ -430,9 +434,31 @@ impl PdrState {
         }
     }
 
+    /// Check whether cube intersects with initial state
+    fn init_check(
+        &self,
+        ctx: &mut Context,
+        smt_ctx: &mut impl SolverContext,
+        enc: &impl TransitionSystemEncoding,
+        cube: &Cube
+    ) -> Result<CheckSatResponse> {
+        // Assert the initial frame
+        let mut assumptions = self.frame_assumptions(0);
+
+        // Assert the cube holds
+        let cube_expr = cube.to_expr(ctx);
+        let cube_expr = expr_at_step(ctx, enc, cube_expr, CUR_STEP);
+        assumptions.push(cube_expr);
+
+        check_assuming(ctx, smt_ctx, assumptions)
+    }
+
     /// Check for relative inductiveness by running the SMT query `SAT?[F_k /\ \neg c /\ T /\ c']`,
     /// where `F_k` is the relative frame, `c` is a cube, `c'` is the next state cube, and
     /// `T` is the transition relation
+    ///
+    /// **Checks**: relative inductive check is not evaluated against initial frame
+    ///             (Use `init_check` for initial state overlap test)
     ///
     /// Returns a `CheckSatResponse` with the query result
     fn rel_ind_check(
@@ -442,6 +468,9 @@ impl PdrState {
         enc: &impl TransitionSystemEncoding,
         proof_obj: &TimedCube
     ) -> Result<CheckSatResponse> {
+        // Check for initial frame violation
+        assert_ne!(proof_obj.frame, 0);
+
         // Start with frame assumptions
         let mut assumptions = self.frame_assumptions(proof_obj.frame);
 
@@ -450,34 +479,22 @@ impl PdrState {
         let neg_cube_expr = proof_obj.cube.negate(ctx);
 
         // Only add assertion for `c` in the next step if not relative to the initial frame
-        if proof_obj.frame > 0 {
-            assumptions.push(
-                expr_at_step(
-                    ctx,
-                    enc,
-                    neg_cube_expr,
-                    CUR_STEP
-                )
-            );
-            assumptions.push(
-                expr_at_step(
-                    ctx,
-                    enc,
-                    cube_expr,
-                    NXT_STEP
-                )
-            );
-        }
-        else {
-            assumptions.push(
-                expr_at_step(
-                    ctx,
-                    enc,
-                    cube_expr,
-                    CUR_STEP
-                )
-            );
-        }
+        assumptions.push(
+            expr_at_step(
+                ctx,
+                enc,
+                neg_cube_expr,
+                CUR_STEP
+            )
+        );
+        assumptions.push(
+            expr_at_step(
+                ctx,
+                enc,
+                cube_expr,
+                NXT_STEP
+            )
+        );
 
         check_assuming(ctx, smt_ctx, assumptions)
     }
@@ -593,6 +610,7 @@ impl PdrState {
 
         // Create new activation literal for blocked cube
         let act = ctx.bv_symbol(format!("act_{id}").as_str(), 1);
+        smt_ctx.declare_const(ctx, act)?;
 
         // Add blocked cube to frontier frame
         self.frames[blocked_cube.frame].push(id as usize);
@@ -638,7 +656,7 @@ impl PdrState {
         while let Some(Reverse(proof_obj)) = worklist.pop() {
             // Special case: reached initial frame
             if proof_obj.frame == 0 {
-                match self.rel_ind_check(ctx, smt_ctx, enc, &proof_obj)? {
+                match self.init_check(ctx, smt_ctx, enc, &proof_obj.cube)? {
                     CheckSatResponse::Sat => {
                         // Push initial state CEX entry
                         cex_chain.push(
