@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Once;
 use patronus::btor2;
 use patronus::expr::Context;
@@ -23,7 +24,7 @@ fn dep_check() {
 }
 
 // SMT output directory
-const _SMT_OUT: &str = "patronus/tests/smt_out";
+const SMT_OUT: &str = "tests/patronus_out";
 
 // Trivial circuit whose initial state violates the safety property
 const TRIVIAL_FAIL: &str =  r"
@@ -63,6 +64,37 @@ const COUNT_2: &str = r"
 11 bad 10
 ";
 
+/// 4-bit downscale of `inputs/unittest/aman_goel.btor` (AVR figure 1, Goel & Sakallah).
+/// Two registers start equal (u = v = 1) and step together (v' = v+1;
+/// u' = u<v ? u+v : v+1), so the reachable states are the diagonal u == v and
+/// u+v is always even; bad = (u+v == 1) is unreachable. The inductive invariant
+/// PDR must discover is u == v (mutually inductive bit-pair clauses), which makes
+/// this a generalization stress test. The 16-bit original (`test_aman_goel`) needs
+/// predecessor shrinking / core-based generalization to converge in reasonable time.
+const AMAN_GOEL_4: &str = r"
+1 sort bitvec 1
+2 input 1 clk
+3 sort bitvec 4
+4 const 3 0001
+5 state 3 u
+6 init 3 5 4
+7 state 3 v
+8 init 3 7 4
+9 add 3 5 7
+10 neq 1 9 4
+11 const 1 1
+12 not 1 10
+13 and 1 11 12
+14 bad 13
+15 add 3 7 4
+16 add 3 5 7
+17 ult 1 5 7
+18 ite 3 17 16 15
+19 next 3 5 18
+20 add 3 7 4
+21 next 3 7 20
+";
+
 /// Run PDR on a BTOR string and return the result
 fn run_pdr_str(btor: &str, out_file: Option<&str>) -> ModelCheckResult {
     // System initialization
@@ -73,7 +105,8 @@ fn run_pdr_str(btor: &str, out_file: Option<&str>) -> ModelCheckResult {
         || BITWUZLA.start(None).expect("solver failed"),
         |out_file| {
             // Output file
-            let file = std::fs::File::create(out_file).unwrap();
+            let path = Path::new(out_file);
+            let file = std::fs::File::create(path).unwrap();
             BITWUZLA.start(Some(file)).expect("start failed")
         }
     );
@@ -89,7 +122,8 @@ fn run_pdr_file(btor_file: &str, out_file: Option<&str>) -> ModelCheckResult {
         || BITWUZLA.start(None).expect("solver failed"),
         |out_file| {
             // Output file
-            let file = std::fs::File::create(out_file).unwrap();
+            let path = Path::new(out_file);
+            let file = std::fs::File::create(path).unwrap();
             BITWUZLA.start(Some(file)).expect("start failed")
         }
     );
@@ -104,31 +138,67 @@ mod pdr_tests {
     #[test]
     fn test_trivial_fail() {
         dep_check();
-        assert!(matches!(run_pdr_str(TRIVIAL_FAIL, None), ModelCheckResult::Fail(_)));
+        assert!(
+            matches!(
+                run_pdr_str(TRIVIAL_FAIL, Some(format!("{SMT_OUT}/trivial_fail.smt2").as_str())),
+                ModelCheckResult::Fail(_)
+            )
+        );
     }
 
     #[test]
     fn test_trivial_input_fail() {
         dep_check();
-        assert!(matches!(run_pdr_str(TRIGGER_BAD, None), ModelCheckResult::Fail(_)));
+        assert!(
+            matches!(
+                run_pdr_str(TRIGGER_BAD, Some(format!("{SMT_OUT}/trivial_input_fail.smt2").as_str())),
+                ModelCheckResult::Fail(_)
+            )
+        );
     }
 
     #[test]
     fn test_simple_fail() {
         dep_check();
-        assert!(matches!(run_pdr_str(COUNT_2, None), ModelCheckResult::Fail(_)));
+        assert!(
+            matches!(
+                run_pdr_str(COUNT_2, Some(format!("{SMT_OUT}/simple_fail.smt2").as_str())),
+                ModelCheckResult::Fail(_)
+            )
+        );
     }
 
     #[test]
     fn test_delay_success() {
         dep_check();
-        assert!(matches!(run_pdr_file("../inputs/unittest/delay.btor", None), ModelCheckResult::Success));
+        assert!(
+            matches!(
+                run_pdr_file("../inputs/unittest/delay.btor", Some(format!("{SMT_OUT}/delay.smt2").as_str())),
+                ModelCheckResult::Success
+            )
+        );
     }
 
     #[test]
     fn test_swap_success() {
         dep_check();
-        assert!(matches!(run_pdr_file("../inputs/unittest/swap.btor", None), ModelCheckResult::Success));
+        assert!(
+            matches!(
+                run_pdr_file("../inputs/unittest/swap.btor", Some(format!("{SMT_OUT}/swap.smt2").as_str())),
+                ModelCheckResult::Success
+            )
+        );
+    }
+
+    #[test]
+    fn test_aman_goel_4bit() {
+        dep_check();
+        assert!(
+            matches!(
+                run_pdr_str(AMAN_GOEL_4, Some(format!("{SMT_OUT}/aman_goel_4bit.smt2").as_str())),
+                ModelCheckResult::Success)
+            )
+        ;
     }
 
     #[ignore = "Need more PDR optimizations"]
