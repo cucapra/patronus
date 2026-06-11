@@ -1028,7 +1028,7 @@ pub fn pdr(
     let mut state = BasePdr::init(ctx, sys);
 
     // PDR loop
-    while state.frontier().get_step().unwrap() + 1 < MAX_FRAMES {
+    while state.frontier().get_step().unwrap() < MAX_FRAMES {
         // Try to get bad cube
         let bad_cube = state.get_bad_cube(ctx, smt_ctx, sys, &enc)?;
 
