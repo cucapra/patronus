@@ -572,7 +572,6 @@ impl BasePdr {
     fn init(
         ctx: &mut Context,
         sys: &TransitionSystem,
-        enc: &impl TransitionSystemEncoding
     ) -> Self {
         let mut init_cube = Cube::default();
 
@@ -580,8 +579,7 @@ impl BasePdr {
         // and initial values
         for state in &sys.states {
             if let Some(init) = state.init {
-                let sym = enc.get_at(ctx, state.symbol, CUR_STEP);
-                let lit = ctx.equal(sym, init);
+                let lit = ctx.equal(state.symbol, init);
                 init_cube.literals.push(lit);
             }
         }
@@ -625,7 +623,7 @@ impl BasePdr {
         })
     }
 
-    /// Run extended query relative inductiveness query
+    /// Run relative inductiveness query
     /// (i.e. `SAT?[R_{i - 1} /\ \neg c /\ T c']`)
     ///
     /// # Arguments
@@ -650,15 +648,15 @@ impl BasePdr {
 
         // Get frame assumption
         let frame_assumption = self.frame_assumptions(ctx, cube.frame.decrement());
-        assumptions.push(frame_assumption);
+        assumptions.push(expr_at_step(ctx, enc, frame_assumption, CUR_STEP));
 
         // Next step cube
         let cube_expr = cube.cube.to_expr(ctx);
-        let cube_nxt = expr_at_step(ctx, enc, cube_expr, CUR_STEP);
+        let cube_nxt = expr_at_step(ctx, enc, cube_expr, NXT_STEP);
         assumptions.push(cube_nxt);
 
         // Current step negation cube
-        if query_type == RelIndType::Standard {
+        if query_type == RelIndType::Extended {
             let neg_cube_expr = cube.cube.negate(ctx);
             let neg_cube_cur = expr_at_step(ctx, enc, neg_cube_expr, CUR_STEP);
             assumptions.push(neg_cube_cur);
@@ -717,13 +715,14 @@ impl BasePdr {
     ) -> Result<bool> {
         // Get initial states
         let init_frame = self.frame_assumptions(ctx, FrameId::Step(0));
+        let init_cur = expr_at_step(ctx, enc, init_frame, CUR_STEP);
 
         // Assert cube at current step
         let cube_expr = cube.to_expr(ctx);
         let cube_cur = expr_at_step(ctx, enc, cube_expr, CUR_STEP);
 
         // Run SMT query
-        match query(ctx, smt_ctx, vec![init_frame, cube_cur])? {
+        match query(ctx, smt_ctx, vec![init_cur, cube_cur])? {
             CheckSatResponse::Sat => Ok(true),
             CheckSatResponse::Unsat => Ok(false),
             CheckSatResponse::Unknown => Err(
@@ -761,7 +760,7 @@ impl BasePdr {
             .enumerate()
             .collect::<FxHashMap<_, _>>();
 
-        for idx in 0..self.cubes.len() {
+        for idx in 0..cube.cube.literals.len() {
             // If only one literal or less remaining, exit
             if rem_lits.len() <= 1 {
                 break;
@@ -787,7 +786,7 @@ impl BasePdr {
             // Test for initial state intersection and relative inductiveness
             if !self.intersects_init(ctx, smt_ctx, enc, &drop_cube.cube)? &&
                 self.rel_ind(ctx, smt_ctx, enc, &drop_cube, RelIndType::Standard)?
-                == CheckSatResponse::Sat {
+                == CheckSatResponse::Unsat {
                 // Check succeeded: permanently remove literal
                 rem_lits.remove(&idx);
             }
@@ -819,23 +818,14 @@ impl BasePdr {
     /// For cubes associated with infinite frame
     fn add_blocked_cube(
         &mut self,
-        ctx: &mut Context,
-        enc: &impl TransitionSystemEncoding,
         cube: &TimedCube,
     ) {
         // Get frontier index
         let front = cube.frame.get_step().unwrap();
 
-        // Get current step of cube literals
-        let cur_lits: Vec<ExprRef> = cube.cube.literals
-            .iter()
-            .copied()
-            .map(|e| expr_at_step(ctx, enc, e, CUR_STEP))
-            .collect();
-
         // Add cube to registry
         let id = self.cube_id;
-        self.cubes.insert(id, Cube { literals: cur_lits });
+        self.cubes.insert(id, cube.cube.clone());
         self.cube_id += 1;
 
         // Add new cube to all frames
@@ -873,9 +863,10 @@ impl Pdr for BasePdr {
 
         // Get frame assumptions for frontier frame
         let front_assumption = self.frame_assumptions(ctx, front);
+        let front_cur = expr_at_step(ctx, enc, front_assumption, CUR_STEP);
 
         // Run query SAT?[R_N /\ \neg P]
-        match query(ctx, smt_ctx, vec![front_assumption, bad_expr])? {
+        match query(ctx, smt_ctx, vec![front_cur, bad_expr])? {
             CheckSatResponse::Sat => {
                 // Safety property violation found: return witness cube
                 let bad_cube = get_bit_level_cube(ctx, smt_ctx, sys, enc, CUR_STEP)?;
@@ -945,16 +936,11 @@ impl Pdr for BasePdr {
                 );
                 worklist.push(Reverse(ProofObj(obj, cex)));
             } else {
-                // DEBUG
-                eprintln!("Trying to add blocked cube");
-
                 // Generalize cube
                 let gen_cube = self.generalize(ctx, smt_ctx, enc, &obj)?;
 
                 // Refine frame trace with cube
                 self.add_blocked_cube(
-                    ctx,
-                    enc,
                     &TimedCube { cube: gen_cube, frame: obj.frame, }
                 );
             }
@@ -1039,7 +1025,7 @@ pub fn pdr(
     enc.unroll(ctx, smt_ctx)?;
 
     // Initialize PDR
-    let mut state = BasePdr::init(ctx, sys, &enc);
+    let mut state = BasePdr::init(ctx, sys);
 
     // PDR loop
     while state.frontier().get_step().unwrap() + 1 < MAX_FRAMES {
@@ -1047,9 +1033,6 @@ pub fn pdr(
         let bad_cube = state.get_bad_cube(ctx, smt_ctx, sys, &enc)?;
 
         if let Some(bad) = bad_cube {
-            // DEBUG
-            eprintln!("{bad:?}");
-
             // Try to block cube
             if let Some(cex) =state.block_cube(
                 ctx,
