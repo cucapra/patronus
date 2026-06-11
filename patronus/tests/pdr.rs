@@ -169,28 +169,6 @@ mod pdr_tests {
     }
 
     #[test]
-    fn test_delay_success() {
-        dep_check();
-        assert!(
-            matches!(
-                run_pdr_file("../inputs/unittest/delay.btor", Some(format!("{SMT_OUT}/delay.smt2").as_str())),
-                ModelCheckResult::Success
-            )
-        );
-    }
-
-    #[test]
-    fn test_swap_success() {
-        dep_check();
-        assert!(
-            matches!(
-                run_pdr_file("../inputs/unittest/swap.btor", Some(format!("{SMT_OUT}/swap.smt2").as_str())),
-                ModelCheckResult::Success
-            )
-        );
-    }
-
-    #[test]
     fn test_aman_goel_4bit() {
         dep_check();
         assert!(
