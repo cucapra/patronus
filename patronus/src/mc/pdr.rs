@@ -385,7 +385,7 @@ fn query(
 /// # Returns
 /// Concrete [`Witness`]
 fn construct_witness(
-    ctx: &mut Context,
+    ctx: &Context,
     sys: &TransitionSystem,
     cex_trace: &CexEntry
 ) -> Witness {
@@ -397,7 +397,6 @@ fn construct_witness(
         sys.states
             .iter()
             .map(|e| Some(ctx.get_symbol_name(e.symbol).unwrap().to_string()))
-            .collect::<Vec<_>>()
     );
 
     // Add all input names
@@ -641,7 +640,7 @@ impl BasePdr {
         smt_ctx: &mut impl SolverContext,
         enc: &impl TransitionSystemEncoding,
         cube: &TimedCube,
-        query_type: RelIndType
+        query_type: &RelIndType
     ) -> Result<CheckSatResponse> {
         // Query assumptions
         let mut assumptions = Vec::new();
@@ -656,7 +655,7 @@ impl BasePdr {
         assumptions.push(cube_nxt);
 
         // Current step negation cube
-        if query_type == RelIndType::Extended {
+        if *query_type == RelIndType::Extended {
             let neg_cube_expr = cube.cube.negate(ctx);
             let neg_cube_cur = expr_at_step(ctx, enc, neg_cube_expr, CUR_STEP);
             assumptions.push(neg_cube_cur);
@@ -685,7 +684,7 @@ impl BasePdr {
         enc: &impl TransitionSystemEncoding,
         cube: &TimedCube,
     ) -> Result<Option<Cube>> {
-        if self.rel_ind(ctx, smt_ctx, enc, cube, RelIndType::Extended)? == CheckSatResponse::Sat {
+        if self.rel_ind(ctx, smt_ctx, enc, cube, &RelIndType::Extended)? == CheckSatResponse::Sat {
             let wit = get_bit_level_cube(ctx, smt_ctx, sys, enc, CUR_STEP)?;
             Ok(Some(wit))
         } else {
@@ -743,7 +742,7 @@ impl BasePdr {
     /// * `ctx` - SMT solver context
     /// * `smt_ctx` - SMT solver
     /// * `enc` - Transition system encoding
-    /// * `cube` - [`TimedCube`] with cube to generalize and blocked frame
+    /// * `cube` - [`TimedCube`] with cube to generalize and blocked frame identifier
     ///
     /// # Returns
     /// Generalized cube
@@ -785,7 +784,7 @@ impl BasePdr {
 
             // Test for initial state intersection and relative inductiveness
             if !self.intersects_init(ctx, smt_ctx, enc, &drop_cube.cube)? &&
-                self.rel_ind(ctx, smt_ctx, enc, &drop_cube, RelIndType::Standard)?
+                self.rel_ind(ctx, smt_ctx, enc, &drop_cube, &RelIndType::Standard)?
                 == CheckSatResponse::Unsat {
                 // Check succeeded: permanently remove literal
                 rem_lits.remove(&idx);
@@ -909,9 +908,9 @@ impl Pdr for BasePdr {
 
         // Try to solve all proof obligations
         while let Some(Reverse(ProofObj(obj, cex))) = worklist.pop() {
-            // If initial frame reached, exit
+            // If initial frame reached, concrete counterexample trace found: fail
             if obj.frame == FrameId::Step(0) {
-                return Ok(Some(Rc::try_unwrap(cex).unwrap()));
+                return Ok(Some(Rc::unwrap_or_clone(cex)));
             }
 
             if let Some(wit)  = self.solve_rel(ctx, smt_ctx, sys, enc, &obj)? {
@@ -946,6 +945,7 @@ impl Pdr for BasePdr {
             }
         }
 
+        // All proof obligations blocked: success
         Ok(None)
     }
 
@@ -973,7 +973,7 @@ impl Pdr for BasePdr {
                 };
 
                 // Check that cube is still blocked in next frame
-                if self.rel_ind(ctx, smt_ctx, enc, &query_cube, RelIndType::Standard)?
+                if self.rel_ind(ctx, smt_ctx, enc, &query_cube, &RelIndType::Standard)?
                     == CheckSatResponse::Unsat {
                     // Add blocked cube to next frame
                     self.frames[idx + 1].push(id);
