@@ -67,6 +67,25 @@ const COUNT_2: &str = r"
 11 bad 10
 ";
 
+/// Two bit counter that start from 2 and is incremented every cycle, and asserts that counter
+/// register is never 0 (which is not true due to overflow)
+const OVERFLOW: &str = r"
+1 sort bitvec 1
+2 input 1 clk ; Overflow.sv:1.23-1.26
+3 sort bitvec 2
+4 const 3 10
+5 state 3 count
+6 init 3 5 4
+7 redor 1 5
+8 const 1 1
+9 not 1 7
+10 and 1 8 9
+11 bad 10 Overflow.sv:9.9-9.31
+12 uext 3 8 1
+13 add 3 5 12
+14 next 3 5 13
+";
+
 /// 4-bit downscale of `inputs/unittest/aman_goel.btor` (AVR figure 1, Goel & Sakallah).
 /// Two registers start equal (u = v = 1) and step together (v' = v+1;
 /// u' = u<v ? u+v : v+1), so the reachable states are the diagonal u == v and
@@ -255,6 +274,20 @@ mod pdr_tests {
 
         let (ctx, sys, res) =
             run_pdr_str(TRIGGER_BAD, Some(format!("{SMT_OUT}/trivial_input_fail.smt").as_str()));
+
+        if let ModelCheckResult::Fail(wit) = res {
+            validate_witness(&ctx, &sys, &wit);
+        } else {
+            panic!("test_input_fail failed");
+        }
+    }
+
+    #[test]
+    fn test_overflow_fail() {
+        dep_check();
+
+        let (ctx, sys, res) =
+            run_pdr_str(OVERFLOW, Some(format!("{SMT_OUT}/overflow_fail.smt").as_str()));
 
         if let ModelCheckResult::Fail(wit) = res {
             validate_witness(&ctx, &sys, &wit);
