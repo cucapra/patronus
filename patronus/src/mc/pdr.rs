@@ -2,16 +2,19 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
+use crate::expr::*;
+use crate::mc::bmc::start_bmc_or_pdr;
+use crate::mc::{
+    InitValue, ModelCheckResult, TransitionSystemEncoding, Witness, check_assuming,
+    check_assuming_end, get_smt_value,
+};
+use crate::smt::*;
+use crate::system::TransitionSystem;
+use baa::{ArrayOps, BitVecOps, BitVecValue, Value};
+use rustc_hash::FxHashMap;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::rc::Rc;
-use baa::{ArrayOps, BitVecOps, BitVecValue, Value};
-use rustc_hash::FxHashMap;
-use crate::expr::*;
-use crate::mc::{check_assuming, check_assuming_end, get_smt_value, InitValue, ModelCheckResult, TransitionSystemEncoding, Witness};
-use crate::mc::bmc::start_bmc_or_pdr;
-use crate::smt::*;
-use crate::system::TransitionSystem;
 
 type Step = u64;
 
@@ -165,17 +168,13 @@ fn expr_at_step(
     expr: ExprRef,
     step: Step,
 ) -> ExprRef {
-    simple_transform_expr(
-        ctx,
-        expr,
-        |ctx, e, _ | {
-            if ctx[e].is_symbol() {
-                Some(enc.get_at(ctx, e, step))
-            } else {
-                None
-            }
+    simple_transform_expr(ctx, expr, |ctx, e, _| {
+        if ctx[e].is_symbol() {
+            Some(enc.get_at(ctx, e, step))
+        } else {
+            None
         }
-    )
+    })
 }
 
 /// Extract states values from solver at a certain time step
@@ -200,7 +199,7 @@ fn extract_state_values(
     smt_ctx: &mut impl SolverContext,
     sys: &TransitionSystem,
     enc: &impl TransitionSystemEncoding,
-    step: Step
+    step: Step,
 ) -> Result<Vec<(ExprRef, Value)>> {
     let mut state_vals = Vec::with_capacity(sys.states.len());
 
@@ -268,7 +267,7 @@ fn get_bit_level_cube(
     smt_ctx: &mut impl SolverContext,
     sys: &TransitionSystem,
     enc: &impl TransitionSystemEncoding,
-    step: Step
+    step: Step,
 ) -> Result<Cube> {
     let mut literals = Vec::new();
 
@@ -297,7 +296,7 @@ fn get_bit_level_cube(
                     let lit = ctx.equal(bit, bit_val);
                     literals.push(lit);
                 }
-            },
+            }
             Value::Array(_av) => todo!("Add array support"),
         }
     }
@@ -320,7 +319,7 @@ fn get_bit_level_cube(
 fn query(
     ctx: &Context,
     smt_ctx: &mut impl SolverContext,
-    assumptions: impl IntoIterator<Item = ExprRef>
+    assumptions: impl IntoIterator<Item = ExprRef>,
 ) -> Result<CheckSatResponse> {
     // Run SMT query and remove SMT frame
     let smt_res = check_assuming(ctx, smt_ctx, assumptions);
@@ -342,11 +341,7 @@ fn query(
 ///
 /// # Returns
 /// Concrete [`Witness`]
-fn construct_witness(
-    ctx: &Context,
-    sys: &TransitionSystem,
-    cex_trace: &CexEntry
-) -> Witness {
+fn construct_witness(ctx: &Context, sys: &TransitionSystem, cex_trace: &CexEntry) -> Witness {
     // Result witness
     let mut wit = Witness::default();
 
@@ -354,7 +349,7 @@ fn construct_witness(
     wit.init_names.extend(
         sys.states
             .iter()
-            .map(|e| Some(ctx.get_symbol_name(e.symbol).unwrap().to_string()))
+            .map(|e| Some(ctx.get_symbol_name(e.symbol).unwrap().to_string())),
     );
 
     // Add all input names
@@ -362,7 +357,7 @@ fn construct_witness(
         sys.inputs
             .iter()
             .copied()
-            .map(|e| Some(ctx.get_symbol_name(e).unwrap().to_string()))
+            .map(|e| Some(ctx.get_symbol_name(e).unwrap().to_string())),
     );
 
     // Add the initial states
@@ -385,9 +380,8 @@ fn construct_witness(
     let mut ptr = cex_trace.clone();
 
     loop {
-        wit.inputs.push(
-            ptr.inputs.iter().cloned().map(|(_, v)| Some(v)).collect()
-        );
+        wit.inputs
+            .push(ptr.inputs.iter().cloned().map(|(_, v)| Some(v)).collect());
 
         // Check if next pointer is valid
         if let Some(next) = &ptr.next {
@@ -419,7 +413,9 @@ fn construct_witness(
 
     // Simulate final state and add activated bad states to witness
     for (idx, &bad_expr) in sys.bad_states.iter().enumerate() {
-        if let Value::BitVec(bv) = eval_expr(ctx, &store, bad_expr) && !bv.is_zero() {
+        if let Value::BitVec(bv) = eval_expr(ctx, &store, bad_expr)
+            && !bv.is_zero()
+        {
             wit.failed_safety.push(idx as u32);
         }
     }
@@ -456,7 +452,7 @@ trait Pdr {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
-        enc: &impl TransitionSystemEncoding
+        enc: &impl TransitionSystemEncoding,
     ) -> Result<Option<Cube>>;
 
     /// Adds empty frame to frame trace
@@ -520,10 +516,7 @@ impl BasePdr {
     /// * `ctx` - SMT expression context
     /// * `sys` - Transition system information
     /// * `enc` - Transition system encoding
-    fn init(
-        ctx: &mut Context,
-        sys: &TransitionSystem,
-    ) -> Self {
+    fn init(ctx: &mut Context, sys: &TransitionSystem) -> Self {
         let mut init_cube = Cube::default();
 
         // Get all initial states from the system and create equalities between symbol
@@ -552,7 +545,6 @@ impl BasePdr {
     /// # Panics
     /// If [`FrameId::Infty`] is passed as the frame identifier
     fn frame_assumptions(&self, ctx: &mut Context, frame: FrameId) -> ExprRef {
-
         assert!(frame < self.frames.len());
 
         if frame == 0 {
@@ -560,12 +552,10 @@ impl BasePdr {
             self.frames[0][0].to_expr(ctx)
         } else {
             // Else, just get conjunction of negated cubes (clauses)
-            self.frames[frame]
-                .iter()
-                .fold(ctx.get_true(), |acc, cube| {
-                    let clause =  cube.negate(ctx);
-                    ctx.and(acc, clause)
-                })
+            self.frames[frame].iter().fold(ctx.get_true(), |acc, cube| {
+                let clause = cube.negate(ctx);
+                ctx.and(acc, clause)
+            })
         }
     }
 
@@ -587,7 +577,7 @@ impl BasePdr {
         smt_ctx: &mut impl SolverContext,
         enc: &impl TransitionSystemEncoding,
         cube: &TimedCube,
-        query_type: &RelIndType
+        query_type: &RelIndType,
     ) -> Result<CheckSatResponse> {
         // Query assumptions
         let mut assumptions = Vec::new();
@@ -657,7 +647,7 @@ impl BasePdr {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         enc: &impl TransitionSystemEncoding,
-        cube: &Cube
+        cube: &Cube,
     ) -> Result<bool> {
         // Get initial states
         let init_frame = self.frame_assumptions(ctx, 0);
@@ -671,12 +661,10 @@ impl BasePdr {
         match query(ctx, smt_ctx, vec![init_cur, cube_cur])? {
             CheckSatResponse::Sat => Ok(true),
             CheckSatResponse::Unsat => Ok(false),
-            CheckSatResponse::Unknown => Err(
-                Error::UnexpectedResponse(
-                    String::from("`intersects_init`"),
-                    String::from("unknown response"),
-                )
-            )
+            CheckSatResponse::Unknown => Err(Error::UnexpectedResponse(
+                String::from("`intersects_init`"),
+                String::from("unknown response"),
+            )),
         }
     }
 
@@ -698,10 +686,12 @@ impl BasePdr {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         enc: &impl TransitionSystemEncoding,
-        cube: &TimedCube
+        cube: &TimedCube,
     ) -> Result<Cube> {
         // Remaining, un-dropped literals
-        let mut rem_lits = cube.cube.literals
+        let mut rem_lits = cube
+            .cube
+            .literals
             .iter()
             .enumerate()
             .collect::<FxHashMap<_, _>>();
@@ -717,37 +707,26 @@ impl BasePdr {
             copy_lits.remove(&idx);
 
             // Create literal-dropped cube
-            let lits = copy_lits
-                .values()
-                .copied()
-                .copied()
-                .collect::<Vec<_>>();
+            let lits = copy_lits.values().copied().copied().collect::<Vec<_>>();
             let drop_cube = TimedCube {
-                cube: Cube {
-                    literals: lits,
-                },
+                cube: Cube { literals: lits },
                 frame: cube.frame,
             };
 
             // Test for initial state intersection and relative inductiveness
-            if !self.intersects_init(ctx, smt_ctx, enc, &drop_cube.cube)? &&
-                self.rel_ind(ctx, smt_ctx, enc, &drop_cube, &RelIndType::Extended)?
-                == CheckSatResponse::Unsat {
+            if !self.intersects_init(ctx, smt_ctx, enc, &drop_cube.cube)?
+                && self.rel_ind(ctx, smt_ctx, enc, &drop_cube, &RelIndType::Extended)?
+                    == CheckSatResponse::Unsat
+            {
                 // Check succeeded: permanently remove literal
                 rem_lits.remove(&idx);
             }
         }
 
         // Collect all remaining literals into cube
-        Ok(
-            Cube {
-                literals: rem_lits
-                    .values()
-                    .copied()
-                    .copied()
-                    .collect(),
-            }
-        )
+        Ok(Cube {
+            literals: rem_lits.values().copied().copied().collect(),
+        })
     }
 
     /// Add blocked cubes to preceding frames
@@ -762,10 +741,7 @@ impl BasePdr {
     ///
     /// # Panics
     /// For cubes associated with infinite frame
-    fn add_blocked_cube(
-        &mut self,
-        cube: &TimedCube,
-    ) {
+    fn add_blocked_cube(&mut self, cube: &TimedCube) {
         // Get frontier index
         let front = cube.frame;
 
@@ -786,13 +762,14 @@ impl Pdr for BasePdr {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
-        enc: &impl TransitionSystemEncoding
+        enc: &impl TransitionSystemEncoding,
     ) -> Result<Option<Cube>> {
         // Get frontier frame identifier
         let front = self.frontier();
 
         // Get next-state bad state literals
-        let bad_lits: Vec<ExprRef> = sys.bad_states
+        let bad_lits: Vec<ExprRef> = sys
+            .bad_states
             .iter()
             .map(|&b| expr_at_step(ctx, enc, b, CUR_STEP))
             .collect();
@@ -812,14 +789,15 @@ impl Pdr for BasePdr {
                 // Safety property violation found: return witness cube
                 let bad_cube = get_bit_level_cube(ctx, smt_ctx, sys, enc, CUR_STEP)?;
                 Ok(Some(bad_cube))
-            },
+            }
             CheckSatResponse::Unsat => Ok(None), // No safety property violation found
-            CheckSatResponse::Unknown => Err( // Unknown query result: return error for soundness
+            CheckSatResponse::Unknown => Err(
+                // Unknown query result: return error for soundness
                 Error::UnexpectedResponse(
                     String::from("`get_bad_cube` in `BasePdr`"),
                     String::from("unknown query"),
-                )
-            )
+                ),
+            ),
         }
     }
 
@@ -833,7 +811,7 @@ impl Pdr for BasePdr {
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
         enc: &impl TransitionSystemEncoding,
-        cube: &TimedCube
+        cube: &TimedCube,
     ) -> Result<Option<CexEntry>> {
         // Min-queue of proof obligations
         let mut worklist = BinaryHeap::new();
@@ -855,7 +833,7 @@ impl Pdr for BasePdr {
                 return Ok(Some(Rc::unwrap_or_clone(cex)));
             }
 
-            if let Some(wit)  = self.solve_rel(ctx, smt_ctx, sys, enc, &obj)? {
+            if let Some(wit) = self.solve_rel(ctx, smt_ctx, sys, enc, &obj)? {
                 // Create new counterexample entry for predecessor
                 let cex_entry = Rc::new(CexEntry {
                     states: extract_state_values(ctx, smt_ctx, sys, enc, CUR_STEP)?,
@@ -864,26 +842,20 @@ impl Pdr for BasePdr {
                 });
 
                 // Counterexample found: try to block predecessor and current obligation
-                worklist.push(
-                    Reverse(
-                        ProofObj(
-                            TimedCube {
-                                cube: wit,
-                                frame: obj.frame - 1,
-                            },
-                            cex_entry,
-                        )
-                    )
-                );
+                worklist.push(Reverse(ProofObj(
+                    TimedCube {
+                        cube: wit,
+                        frame: obj.frame - 1,
+                    },
+                    cex_entry,
+                )));
                 worklist.push(Reverse(ProofObj(obj, cex)));
             } else {
                 // TODO: Add generalization later
                 // let gen_cube = self.generalize(ctx, smt_ctx, enc, &obj)?;
 
                 // Refine frame trace with cube
-                self.add_blocked_cube(
-                    &obj
-                );
+                self.add_blocked_cube(&obj);
             }
         }
 
@@ -895,7 +867,7 @@ impl Pdr for BasePdr {
         &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
-        enc: &impl TransitionSystemEncoding
+        enc: &impl TransitionSystemEncoding,
     ) -> Result<bool> {
         // Get frame index
         let front = self.frontier();
@@ -916,7 +888,8 @@ impl Pdr for BasePdr {
 
                 // Check that cube is still blocked in next frame
                 if self.rel_ind(ctx, smt_ctx, enc, &query_cube, &RelIndType::Standard)?
-                    == CheckSatResponse::Unsat {
+                    == CheckSatResponse::Unsat
+                {
                     // Add blocked cube to next frame
                     self.frames[idx + 1].push(cube.clone());
                     num_left -= 1;
@@ -976,12 +949,16 @@ pub fn pdr(
 
         if let Some(bad) = bad_cube {
             // Try to block cube
-            if let Some(cex) =state.block_cube(
+            if let Some(cex) = state.block_cube(
                 ctx,
                 smt_ctx,
                 sys,
                 &enc,
-                &TimedCube { cube: bad, frame: state.frontier(), })? {
+                &TimedCube {
+                    cube: bad,
+                    frame: state.frontier(),
+                },
+            )? {
                 // Cube could not be blocked: construct witness and fail
                 let wit = construct_witness(ctx, sys, &cex);
                 return Ok(ModelCheckResult::Fail(wit));
