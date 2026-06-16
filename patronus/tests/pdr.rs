@@ -1,12 +1,12 @@
-use std::path::Path;
-use std::sync::Once;
 use baa::{BitVecOps, Value};
 use patronus::btor2;
 use patronus::expr::Context;
-use patronus::mc::{pdr, InitValue, ModelCheckResult, Witness};
+use patronus::mc::{InitValue, ModelCheckResult, Witness, pdr};
 use patronus::sim::{InitKind, Interpreter, Simulator};
-use patronus::smt::{Solver, BITWUZLA};
+use patronus::smt::{BITWUZLA, Solver};
 use patronus::system::TransitionSystem;
+use std::path::Path;
+use std::sync::Once;
 
 // Test initialization
 static INIT: Once = Once::new();
@@ -30,7 +30,7 @@ fn dep_check() {
 const SMT_OUT: &str = "tests/patronus_out";
 
 // Trivial circuit whose initial state violates the safety property
-const TRIVIAL_FAIL: &str =  r"
+const TRIVIAL_FAIL: &str = r"
 1 sort bitvec 1
 2 ones 1
 3 state 1
@@ -152,7 +152,10 @@ const SWAP: &str = r"
 ";
 
 /// Run PDR on a BTOR string and return the result
-fn run_pdr_str(btor: &str, out_file: Option<&str>) -> (Context, TransitionSystem, ModelCheckResult) {
+fn run_pdr_str(
+    btor: &str,
+    out_file: Option<&str>,
+) -> (Context, TransitionSystem, ModelCheckResult) {
     // System initialization
     let mut ctx = Context::default();
     let sys = btor2::parse_str(&mut ctx, btor, Some("test_pdr")).expect("parse failed");
@@ -162,10 +165,12 @@ fn run_pdr_str(btor: &str, out_file: Option<&str>) -> (Context, TransitionSystem
         |out_file| {
             // Output file
             let path = Path::new(out_file);
-            if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).unwrap(); }
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
             let file = std::fs::File::create(path).unwrap();
             BITWUZLA.start(Some(file)).expect("start failed")
-        }
+        },
     );
 
     let res = pdr(&mut ctx, &mut smt_ctx, &sys).expect("pdr failed");
@@ -173,7 +178,10 @@ fn run_pdr_str(btor: &str, out_file: Option<&str>) -> (Context, TransitionSystem
 }
 
 /// Run PDR on a BTOR file and return the result
-fn run_pdr_file(btor_file: &str, out_file: Option<&str>) -> (Context, TransitionSystem, ModelCheckResult) {
+fn run_pdr_file(
+    btor_file: &str,
+    out_file: Option<&str>,
+) -> (Context, TransitionSystem, ModelCheckResult) {
     // System initialization
     let (mut ctx, sys) = btor2::parse_file(btor_file).expect("parse failed");
     let mut smt_ctx = out_file.map_or_else(
@@ -181,10 +189,12 @@ fn run_pdr_file(btor_file: &str, out_file: Option<&str>) -> (Context, Transition
         |out_file| {
             // Output file
             let path = Path::new(out_file);
-            if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).unwrap(); }
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
             let file = std::fs::File::create(path).unwrap();
             BITWUZLA.start(Some(file)).expect("start failed")
-        }
+        },
     );
 
     let res = pdr(&mut ctx, &mut smt_ctx, &sys).expect("pdr failed");
@@ -252,8 +262,10 @@ mod pdr_tests {
     fn test_trivial_fail() {
         dep_check();
 
-        let (ctx, sys, res) =
-            run_pdr_str(TRIVIAL_FAIL, Some(format!("{SMT_OUT}/trivial_fail.smt").as_str()));
+        let (ctx, sys, res) = run_pdr_str(
+            TRIVIAL_FAIL,
+            Some(format!("{SMT_OUT}/trivial_fail.smt").as_str()),
+        );
 
         if let ModelCheckResult::Fail(wit) = res {
             validate_witness(&ctx, &sys, &wit);
@@ -266,8 +278,10 @@ mod pdr_tests {
     fn test_trivial_input_fail() {
         dep_check();
 
-        let (ctx, sys, res) =
-            run_pdr_str(TRIGGER_BAD, Some(format!("{SMT_OUT}/trivial_input_fail.smt").as_str()));
+        let (ctx, sys, res) = run_pdr_str(
+            TRIGGER_BAD,
+            Some(format!("{SMT_OUT}/trivial_input_fail.smt").as_str()),
+        );
 
         if let ModelCheckResult::Fail(wit) = res {
             validate_witness(&ctx, &sys, &wit);
@@ -280,8 +294,10 @@ mod pdr_tests {
     fn test_overflow_fail() {
         dep_check();
 
-        let (ctx, sys, res) =
-            run_pdr_str(OVERFLOW, Some(format!("{SMT_OUT}/overflow_fail.smt").as_str()));
+        let (ctx, sys, res) = run_pdr_str(
+            OVERFLOW,
+            Some(format!("{SMT_OUT}/overflow_fail.smt").as_str()),
+        );
 
         if let ModelCheckResult::Fail(wit) = res {
             validate_witness(&ctx, &sys, &wit);
@@ -308,8 +324,7 @@ mod pdr_tests {
     fn test_delay() {
         dep_check();
 
-        let (_, _, res) =
-            run_pdr_str(DELAY, Some(format!("{SMT_OUT}/delay.smt").as_str()));
+        let (_, _, res) = run_pdr_str(DELAY, Some(format!("{SMT_OUT}/delay.smt").as_str()));
         assert!(matches!(res, ModelCheckResult::Success));
     }
 
@@ -317,8 +332,7 @@ mod pdr_tests {
     fn test_swap() {
         dep_check();
 
-        let (_, _, res) =
-            run_pdr_str(SWAP, Some(format!("{SMT_OUT}/swap.smt").as_str()));
+        let (_, _, res) = run_pdr_str(SWAP, Some(format!("{SMT_OUT}/swap.smt").as_str()));
         assert!(matches!(res, ModelCheckResult::Success));
     }
 
