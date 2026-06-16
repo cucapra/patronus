@@ -86,13 +86,7 @@ const OVERFLOW: &str = r"
 14 next 3 5 13
 ";
 
-/// 4-bit downscale of `inputs/unittest/aman_goel.btor` (AVR figure 1, Goel & Sakallah).
-/// Two registers start equal (u = v = 1) and step together (v' = v+1;
-/// u' = u<v ? u+v : v+1), so the reachable states are the diagonal u == v and
-/// u+v is always even; bad = (u+v == 1) is unreachable. The inductive invariant
-/// PDR must discover is u == v (mutually inductive bit-pair clauses), which makes
-/// this a generalization stress test. The 16-bit original (`test_aman_goel`) needs
-/// predecessor shrinking / core-based generalization to converge in reasonable time.
+/// Four-bit example circuit from thesis
 const AMAN_GOEL_4: &str = r"
 1 sort bitvec 1
 2 input 1 clk

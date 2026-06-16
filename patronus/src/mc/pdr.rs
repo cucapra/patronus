@@ -731,7 +731,7 @@ impl BasePdr {
 
             // Test for initial state intersection and relative inductiveness
             if !self.intersects_init(ctx, smt_ctx, enc, &drop_cube.cube)? &&
-                self.rel_ind(ctx, smt_ctx, enc, &drop_cube, &RelIndType::Standard)?
+                self.rel_ind(ctx, smt_ctx, enc, &drop_cube, &RelIndType::Extended)?
                 == CheckSatResponse::Unsat {
                 // Check succeeded: permanently remove literal
                 rem_lits.remove(&idx);
@@ -877,12 +877,12 @@ impl Pdr for BasePdr {
                 );
                 worklist.push(Reverse(ProofObj(obj, cex)));
             } else {
-                // Generalize cube
-                let gen_cube = self.generalize(ctx, smt_ctx, enc, &obj)?;
+                // TODO: Add generalization later
+                // let gen_cube = self.generalize(ctx, smt_ctx, enc, &obj)?;
 
                 // Refine frame trace with cube
                 self.add_blocked_cube(
-                    &TimedCube { cube: gen_cube, frame: obj.frame, }
+                    &obj
                 );
             }
         }
