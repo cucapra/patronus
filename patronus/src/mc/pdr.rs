@@ -4,7 +4,6 @@
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-use std::iter::once;
 use std::rc::Rc;
 use baa::{ArrayOps, BitVecOps, BitVecValue, Value};
 use rustc_hash::FxHashMap;
@@ -15,7 +14,6 @@ use crate::smt::*;
 use crate::system::TransitionSystem;
 
 type Step = u64;
-type CubeId = usize;
 
 /// Current step constant
 const CUR_STEP: Step = 1;
@@ -30,27 +28,6 @@ const MAX_FRAMES: usize = 1000;
 // Core PDR data structures
 // -------------------------------------------------------------------------------------------------
 
-/// Methods on logic formulas
-trait Formula {
-    /// Convert this formula into an SMT expression
-    ///
-    /// # Arguments
-    /// * `ctx` - SMT expression context
-    ///
-    /// # Returns
-    /// SMT expression representing this logic formula
-    fn to_expr(&self, ctx: &mut Context) -> ExprRef;
-
-    /// Negate this formula into an SMT expression
-    ///
-    /// # Arguments
-    /// * `ctx` - SMT expression context
-    ///
-    /// # Returns
-    /// SMT expression representing the negated logic formula
-    fn negate(&self, ctx: &mut Context) -> ExprRef;
-}
-
 /// A conjunction of literals
 #[derive(Debug, Default, Clone)]
 struct Cube {
@@ -58,7 +35,14 @@ struct Cube {
     literals: Vec<ExprRef>,
 }
 
-impl Formula for Cube {
+impl Cube {
+    /// Convert this cube into an SMT expression
+    ///
+    /// # Arguments
+    /// * `ctx` - SMT expression context
+    ///
+    /// # Returns
+    /// SMT expression representing this logic formula
     fn to_expr(&self, ctx: &mut Context) -> ExprRef {
         // Conjunct all literals
         self.literals
@@ -67,6 +51,13 @@ impl Formula for Cube {
             .fold(ctx.get_true(), |acc, e| ctx.and(acc, e))
     }
 
+    /// Negate this cube into an SMT expression
+    ///
+    /// # Arguments
+    /// * `ctx` - SMT expression context
+    ///
+    /// # Returns
+    /// SMT expression representing the negated logic formula
     fn negate(&self, ctx: &mut Context) -> ExprRef {
         // Negate and then disjunct literals
         self.literals
@@ -80,40 +71,7 @@ impl Formula for Cube {
 }
 
 /// Possible frame identifiers
-#[derive(Debug, PartialOrd, PartialEq, Eq, Ord, Clone, Copy)]
-enum FrameId {
-    /// Finite frame with associated index
-    Step(usize),
-
-    /// Infinite frame
-    Infty,
-}
-
-impl FrameId {
-    /// Decrement frame index for finite frame ID
-    ///
-    /// # Returns
-    /// Decremented frame ID
-    fn decrement(&self) -> Self {
-        if let Self::Step(step) = self {
-            Self::Step(step - 1)
-        } else {
-            Self::Infty
-        }
-    }
-
-    /// Get some finite frame index
-    ///
-    /// # Returns
-    /// [`Some(step)`] for finite identifiers, else [`None`] for infinite identifiers
-    const fn get_step(&self) -> Option<usize> {
-        if let Self::Step(step) = self {
-            Some(*step)
-        } else {
-            None
-        }
-    }
-}
+type FrameId = usize;
 
 /// Cube and relevant frame identifier
 #[derive(Debug, Clone)]
@@ -122,7 +80,7 @@ struct TimedCube {
     cube: Cube,
 
     /// Some frame associated with cube
-    frame: FrameId,
+    frame: usize,
 }
 
 // Custom comparators for `TimedCube` based on frame identifier
@@ -547,14 +505,8 @@ trait Pdr {
 ///
 /// **Representation Invariant**: `frames.len() > 0`
 struct BasePdr {
-    /// Cube ID counter
-    cube_id: CubeId,
-
-    /// Map between unique ID and blocked cubes
-    cubes: FxHashMap<CubeId, Cube>,
-
-    /// Frame trace containing frames with blocked cube identifiers
-    frames: Vec<Vec<CubeId>>,
+    /// Frame trace containing frames with blocked cubes
+    frames: Vec<Vec<Cube>>,
 }
 
 impl BasePdr {
@@ -584,9 +536,7 @@ impl BasePdr {
         }
 
         Self {
-            cube_id: 1,
-            cubes: once(init_cube).map(|e| (0, e)).collect(),
-            frames: vec![vec![0usize]],
+            frames: vec![vec![init_cube]],
         }
     }
 
@@ -602,24 +552,21 @@ impl BasePdr {
     /// # Panics
     /// If [`FrameId::Infty`] is passed as the frame identifier
     fn frame_assumptions(&self, ctx: &mut Context, frame: FrameId) -> ExprRef {
-        assert_ne!(frame, FrameId::Infty);
 
-        frame.get_step().map_or_else(|| panic!("No infinite frame in `BasePdr`"), |step| {
-            assert!(step < self.frames.len());
+        assert!(frame < self.frames.len());
 
-            if step == 0 {
-                // Special case: init frame is just conjunction
-                self.cubes[&0].to_expr(ctx)
-            } else {
-                // Else, just get conjunction of negated cubes (clauses)
-                self.frames[step]
-                    .iter()
-                    .fold(ctx.get_true(), |acc, id| {
-                        let clause = self.cubes[id].negate(ctx);
-                        ctx.and(acc, clause)
-                    })
-            }
-        })
+        if frame == 0 {
+            // Special case: init frame is just conjunction
+            self.frames[0][0].to_expr(ctx)
+        } else {
+            // Else, just get conjunction of negated cubes (clauses)
+            self.frames[frame]
+                .iter()
+                .fold(ctx.get_true(), |acc, cube| {
+                    let clause =  cube.negate(ctx);
+                    ctx.and(acc, clause)
+                })
+        }
     }
 
     /// Run relative inductiveness query
@@ -646,7 +593,7 @@ impl BasePdr {
         let mut assumptions = Vec::new();
 
         // Get frame assumption
-        let frame_assumption = self.frame_assumptions(ctx, cube.frame.decrement());
+        let frame_assumption = self.frame_assumptions(ctx, cube.frame - 1);
         assumptions.push(expr_at_step(ctx, enc, frame_assumption, CUR_STEP));
 
         // Next step cube
@@ -713,7 +660,7 @@ impl BasePdr {
         cube: &Cube
     ) -> Result<bool> {
         // Get initial states
-        let init_frame = self.frame_assumptions(ctx, FrameId::Step(0));
+        let init_frame = self.frame_assumptions(ctx, 0);
         let init_cur = expr_at_step(ctx, enc, init_frame, CUR_STEP);
 
         // Assert cube at current step
@@ -820,23 +767,18 @@ impl BasePdr {
         cube: &TimedCube,
     ) {
         // Get frontier index
-        let front = cube.frame.get_step().unwrap();
-
-        // Add cube to registry
-        let id = self.cube_id;
-        self.cubes.insert(id, cube.cube.clone());
-        self.cube_id += 1;
+        let front = cube.frame;
 
         // Add new cube to all frames
         for idx in 1..=front {
-            self.frames[idx].push(id);
+            self.frames[idx].push(cube.cube.clone());
         }
     }
 }
 
 impl Pdr for BasePdr {
     fn frontier(&self) -> FrameId {
-        FrameId::Step(self.frames.len() - 1)
+        self.frames.len() - 1
     }
 
     fn get_bad_cube(
@@ -909,7 +851,7 @@ impl Pdr for BasePdr {
         // Try to solve all proof obligations
         while let Some(Reverse(ProofObj(obj, cex))) = worklist.pop() {
             // If initial frame reached, concrete counterexample trace found: fail
-            if obj.frame == FrameId::Step(0) {
+            if obj.frame == 0 {
                 return Ok(Some(Rc::unwrap_or_clone(cex)));
             }
 
@@ -927,7 +869,7 @@ impl Pdr for BasePdr {
                         ProofObj(
                             TimedCube {
                                 cube: wit,
-                                frame: obj.frame.decrement(),
+                                frame: obj.frame - 1,
                             },
                             cex_entry,
                         )
@@ -956,27 +898,27 @@ impl Pdr for BasePdr {
         enc: &impl TransitionSystemEncoding
     ) -> Result<bool> {
         // Get frame index
-        let front = self.frontier().get_step().unwrap();
+        let front = self.frontier();
 
         // Try to propagate blocked cubes in each frame forward
         for idx in 1..front {
             let mut num_left = self.frames[idx].len();
 
-            for id_idx in 0..self.frames[idx].len() {
-                // Get cube ID
-                let id = self.frames[idx][id_idx];
+            for cube_idx in 0..self.frames[idx].len() {
+                // Get cube
+                let cube = self.frames[idx][cube_idx].clone();
 
                 // Get timed cube for relative inductiveness query
                 let query_cube = TimedCube {
-                    cube: self.cubes[&id].clone(),
-                    frame: FrameId::Step(idx + 1),
+                    cube: cube.clone(),
+                    frame: idx + 1,
                 };
 
                 // Check that cube is still blocked in next frame
                 if self.rel_ind(ctx, smt_ctx, enc, &query_cube, &RelIndType::Standard)?
                     == CheckSatResponse::Unsat {
                     // Add blocked cube to next frame
-                    self.frames[idx + 1].push(id);
+                    self.frames[idx + 1].push(cube.clone());
                     num_left -= 1;
                 }
             }
@@ -1028,7 +970,7 @@ pub fn pdr(
     let mut state = BasePdr::init(ctx, sys);
 
     // PDR loop
-    while state.frontier().get_step().unwrap() < MAX_FRAMES {
+    while state.frontier() <= MAX_FRAMES {
         // Try to get bad cube
         let bad_cube = state.get_bad_cube(ctx, smt_ctx, sys, &enc)?;
 
