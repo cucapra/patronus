@@ -2,13 +2,14 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::expr::{Context, ExprRef};
-use crate::smt::parser::{SmtParserError, count_parens, parse_get_value_response};
+use crate::expr::{Context, ExprRef, SymbolValueStore};
+use crate::smt::parser::{SmtParserError, count_parens, parse_get_value_response, parse_get_unsat_assumptions_response, collect_symbols};
 use crate::smt::serialize::serialize_cmd;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter};
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
+use rustc_hash::FxHashMap;
 use thiserror::Error;
 
 /// A SMT Solver Error.
@@ -110,7 +111,7 @@ pub trait SolverContext: SolverMetaData {
     fn push(&mut self) -> Result<()>;
     fn pop(&mut self) -> Result<()>;
     fn get_value(&mut self, ctx: &mut Context, e: ExprRef) -> Result<ExprRef>;
-    fn get_unsat_assumptions(&mut self, ctx: &mut Context) -> Result<Vec<ExprRef>>;
+    fn get_unsat_assumptions(&mut self, ctx: &mut Context, props: &[ExprRef]) -> Result<Vec<ExprRef>>;
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -121,6 +122,7 @@ pub struct SmtLibSolver {
     supports_uf: bool,
     supports_check_assuming: bool,
     supports_const_array: bool,
+    supports_unsat_assumptions: bool,
 }
 
 impl SolverMetaData for SmtLibSolver {
@@ -393,21 +395,31 @@ impl SolverContext for SmtLibSolverCtx {
         Ok(expr)
     }
 
-    fn get_unsat_assumptions(&mut self, ctx: &mut Context) -> Result<Vec<ExprRef>> {
+    fn get_unsat_assumptions(&mut self, ctx: &mut Context, props: &[ExprRef]) -> Result<Vec<ExprRef>> {
         // Stage `(get-unsat-assumptions)` command
-        self.write_cmd(Some(ctx), &SmtCommand::GetUnsatAssumptions)?;
+        self.write_cmd(None, &SmtCommand::GetUnsatAssumptions)?;
+        self.stdin.flush()?;
+        self.read_response()?;
+        let response = self.response.trim();
 
-        todo!()
+        // Reconstruct mapping between symbols and SMT expressions
+        let mut st = FxHashMap::default();
+        for &p in props {
+            collect_symbols(ctx, p, &mut st);
+        }
+
+        Ok(parse_get_unsat_assumptions_response(ctx, &st, response.as_bytes())?)
     }
 }
 
 pub const BITWUZLA: SmtLibSolver = SmtLibSolver {
     name: "bitwuzla",
     args: &[],
-    options: &["incremental", "produce-models"],
+    options: &["incremental", "produce-models", "produce-unsat-assumptions"],
     supports_uf: false,
     supports_check_assuming: true,
     supports_const_array: true,
+    supports_unsat_assumptions: true,
 };
 
 pub const YICES2: SmtLibSolver = SmtLibSolver {
@@ -418,24 +430,27 @@ pub const YICES2: SmtLibSolver = SmtLibSolver {
     supports_check_assuming: false,
     // see https://github.com/SRI-CSL/yices2/issues/110
     supports_const_array: false,
+    supports_unsat_assumptions: false,
 };
 
 pub const Z3: SmtLibSolver = SmtLibSolver {
     name: "z3",
-    args: &["-in"],
+    args: &["-in", "produce-unsat-assumptions"],
     options: &[],
     supports_uf: true,
     supports_check_assuming: true,
     supports_const_array: true,
+    supports_unsat_assumptions: true,
 };
 
 pub const CVC5: SmtLibSolver = SmtLibSolver {
     name: "cvc5",
-    args: &["--incremental", "--produce-models"],
+    args: &["--incremental", "--produce-models", "produce-unsat-assumptions"],
     options: &[],
     supports_uf: true,
     supports_check_assuming: true,
     supports_const_array: true,
+    supports_unsat_assumptions: true,
 };
 
 #[cfg(test)]
@@ -470,6 +485,15 @@ mod tests {
         assert_eq!(res.unwrap(), CheckSatResponse::Sat);
         let value_of_a = solver.get_value(&mut ctx, a).unwrap();
         assert_eq!(value_of_a, ctx.bit_vec_val(3, 3));
+    }
+
+    #[test]
+    fn test_bitwuzla_unsat() {
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 3);
+        let e = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+
+        // TODO: Finish testing `(get-unsat-assumptions)`
     }
 
     #[test]
