@@ -65,6 +65,7 @@ pub enum SmtCommand {
     Push(u64),
     Pop(u64),
     GetValue(ExprRef),
+    GetUnsatAssumptions,
 }
 
 /// The result of a `(check-sat)` command.
@@ -109,6 +110,7 @@ pub trait SolverContext: SolverMetaData {
     fn push(&mut self) -> Result<()>;
     fn pop(&mut self) -> Result<()>;
     fn get_value(&mut self, ctx: &mut Context, e: ExprRef) -> Result<ExprRef>;
+    fn get_unsat_assumptions(&mut self, ctx: &mut Context) -> Result<Vec<ExprRef>>;
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -389,6 +391,13 @@ impl SolverContext for SmtLibSolverCtx {
         let response = self.response.trim();
         let expr = parse_get_value_response(ctx, response.as_bytes())?;
         Ok(expr)
+    }
+
+    fn get_unsat_assumptions(&mut self, ctx: &mut Context) -> Result<Vec<ExprRef>> {
+        // Stage `(get-unsat-assumptions)` command
+        self.write_cmd(Some(ctx), &SmtCommand::GetUnsatAssumptions)?;
+
+        todo!()
     }
 }
 
