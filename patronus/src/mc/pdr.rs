@@ -18,13 +18,10 @@ use std::rc::Rc;
 
 type Step = u64;
 
-/// Current step constant
 const CUR_STEP: Step = 1;
 
-/// Next step constant
 const NXT_STEP: Step = 2;
 
-/// Frame limit
 const MAX_FRAMES: usize = 1000;
 
 // -------------------------------------------------------------------------------------------------
@@ -34,18 +31,11 @@ const MAX_FRAMES: usize = 1000;
 /// A conjunction of literals
 #[derive(Debug, Default, Clone)]
 struct Cube {
-    /// Set of literals in cube
     literals: Vec<ExprRef>,
 }
 
 impl Cube {
     /// Convert this cube into an SMT expression
-    ///
-    /// # Arguments
-    /// * `ctx` - SMT expression context
-    ///
-    /// # Returns
-    /// SMT expression representing this logic formula
     fn to_expr(&self, ctx: &mut Context) -> ExprRef {
         // Conjunct all literals
         self.literals
@@ -55,12 +45,6 @@ impl Cube {
     }
 
     /// Negate this cube into an SMT expression
-    ///
-    /// # Arguments
-    /// * `ctx` - SMT expression context
-    ///
-    /// # Returns
-    /// SMT expression representing the negated logic formula
     fn negate(&self, ctx: &mut Context) -> ExprRef {
         // Negate and then disjunct literals
         self.literals
@@ -73,16 +57,12 @@ impl Cube {
     }
 }
 
-/// Possible frame identifiers
 type FrameId = usize;
 
 /// Cube and relevant frame identifier
 #[derive(Debug, Clone)]
 struct TimedCube {
-    /// Cube
     cube: Cube,
-
-    /// Some frame associated with cube
     frame: usize,
 }
 
@@ -127,7 +107,7 @@ struct CexEntry {
     next: Option<Rc<Self>>,
 }
 
-/// Proof obligation contains cube and counterexample trace start
+/// Proof obligation contains cube and counterexample trace head
 struct ProofObj(TimedCube, Rc<CexEntry>);
 
 /// Custom comparators
@@ -154,14 +134,8 @@ impl PartialOrd for ProofObj {
 
 /// Get the stepped version of an SMT expression
 ///
-/// # Arguments
-/// * `ctx` - SMT expression context
-/// * `enc` - Transition system encoding
-/// * `expr` - SMT expression to step
-/// * `step` - Step number (**Requires**: step to exist in solver)
-///
-/// # Returns
-/// Stepped version of original SMT expression
+/// # Preconditions
+/// * `expr` must exist in `enc` at `step`
 fn expr_at_step(
     ctx: &mut Context,
     enc: &impl TransitionSystemEncoding,
@@ -180,20 +154,11 @@ fn expr_at_step(
 /// Extract states values from solver at a certain time step
 ///
 /// # Preconditions
-/// Must have previous SAT query
+/// * Must have previous `SAT` query
+/// * `expr` must exist in `enc` at `step`
 ///
-/// # Arguments
-/// * `ctx` - SMT expression context
-/// * `smt_ctx` - SMT solver
-/// * `sys` - Transition system information
-/// * `enc` - Transition system encoding
-/// * `step` - Step to extract state values from (**Requires**: step to exist in solver)
-///
-/// # Returns s
-/// [`Vec`] of pairs with original stateymbol and value
-///
-/// # Errors
-/// SMT solver crashes (most likely due to precondition violations)
+/// # Returns
+/// [`Vec`] of pairs between original state symbol and value
 fn extract_state_values(
     ctx: &mut Context,
     smt_ctx: &mut impl SolverContext,
@@ -215,19 +180,10 @@ fn extract_state_values(
 /// Extract input values from solver at a certain time step
 ///
 /// # Preconditions
-/// Must have previous SAT query
-///
-/// # Arguments
-/// * `ctx` - SMT expression context
-/// * `smt_ctx` - SMT solver
-/// * `sys` - Transition system information
-/// * `enc` - Transition system encoding
+/// * Must have previous `SAT` query
 ///
 /// # Returns
 /// [`Vec`] of pairs with original input symbol and value
-///
-/// # Errors
-/// SMT solver crashes (most likely due to precondition violations)
 fn extract_input_values(
     ctx: &mut Context,
     smt_ctx: &mut impl SolverContext,
@@ -248,20 +204,8 @@ fn extract_input_values(
 /// Extract bitvector state assignment from solver as bit-level cubes
 ///
 /// # Preconditions
-/// Must have previous SAT query
-///
-/// # Arguments
-/// * `ctx` - SMT expression context
-/// * `smt_ctx` - SMT solver
-/// * `sys` - Transition system information
-/// * `enc` - Transition system encoding
-/// * `step` - Step to extract state values from (**Requires**: step to exist in solver)
-///
-/// # Returns
-/// Cube of bitwise equalities representing state values
-///
-/// # Errors
-/// SMT solver crashes (most likely due to precondition violations)
+/// * Must have previous `SAT` query
+/// * `expr` must exist in `enc` at `step`
 fn get_bit_level_cube(
     ctx: &mut Context,
     smt_ctx: &mut impl SolverContext,
@@ -304,18 +248,7 @@ fn get_bit_level_cube(
     Ok(Cube { literals })
 }
 
-/// Run `check-sat-assuming` query on solver and clean up afterward
-///
-/// # Arguments
-/// * `ctx` - SMT expression context
-/// * `smt_ctx` - SMT solver
-/// * `assumptions` - iterable set of assumptions for query
-///
-/// # Returns
-/// [`CheckSatResponse`] with query result
-///
-/// # Errors
-/// SMT solver crashes
+/// Run `check-sat-assuming` query on solver
 fn query(
     ctx: &Context,
     smt_ctx: &mut impl SolverContext,
@@ -330,17 +263,6 @@ fn query(
 }
 
 /// Construct witness from counterexample trace
-///
-/// # Preconditions
-/// Input counterexample trace must be valid
-///
-/// # Arguments
-/// * `ctx` - SMT expression context
-/// * `sys` - Transition system information
-/// * `cex_trace` - Counterexample trace
-///
-/// # Returns
-/// Concrete [`Witness`]
 fn construct_witness(ctx: &Context, sys: &TransitionSystem, cex_trace: &CexEntry) -> Witness {
     // Result witness
     let mut wit = Witness::default();
@@ -429,18 +351,11 @@ fn construct_witness(ctx: &Context, sys: &TransitionSystem, cex_trace: &CexEntry
 
 /// Functions maintained by all PDR implementations
 trait Pdr {
-    /// # Returns
-    /// frame identifier for frontier frame
+    /// Frame identifier for frontier frame
     fn frontier(&self) -> FrameId;
 
     /// Try to extract safety property violation at frontier frame
     /// (i.e. `SAT?[R_N /\ \neg P]`)
-    ///
-    /// # Arguments
-    /// * `ctx` - SMT expression context
-    /// * `smt_ctx` - SMT solver
-    /// * `sys` - Transition system information
-    /// * `enc` - Transition system encoding
     ///
     /// # Returns
     /// [`Some(Cube)`] with violation, else [`None`]
@@ -460,13 +375,6 @@ trait Pdr {
 
     /// Block cube in frame trace at certain frame
     ///
-    /// # Arguments
-    /// * `ctx` - SMT expression context
-    /// * `smt_ctx` - SMT solver
-    /// * `sys` - Transition system information
-    /// * `enc` - Transition system encoding
-    /// * `cube` - Proof obligation as a [`TimedCube`]
-    ///
     /// # Returns
     /// [`Some(cex)`] counterexample trace if cube could not be blocked, or [`None`] otherwise
     ///
@@ -482,10 +390,6 @@ trait Pdr {
     ) -> Result<Option<CexEntry>>;
 
     /// Try to propagate blocked cubes in each frame to the next frame
-    ///
-    /// # Arguments
-    /// * `smt_ctx` - SMT solver
-    /// * `enc` - Transition system encoding
     ///
     /// # Returns
     /// Whether fixpoint reached
@@ -511,11 +415,6 @@ impl BasePdr {
     /// # Precondition
     /// State variables in transition system need to be stepped
     /// at two adjacent steps
-    ///
-    /// # Arguments
-    /// * `ctx` - SMT expression context
-    /// * `sys` - Transition system information
-    /// * `enc` - Transition system encoding
     fn init(ctx: &mut Context, sys: &TransitionSystem) -> Self {
         let mut init_cube = Cube::default();
 
@@ -533,17 +432,9 @@ impl BasePdr {
         }
     }
 
-    /// Return list of clauses for non-init frames, or list of cubes for init frame
-    ///
-    /// # Arguments
-    /// * `ctx` - SMT expression context
-    /// * `frame` - Frame identifier to yield assumptions from
-    ///
     /// # Returns
-    /// SMT expression representing assumptions of frame
-    ///
-    /// # Panics
-    /// If [`FrameId::Infty`] is passed as the frame identifier
+    /// * Clause representing non-init frame
+    /// * Cube representing init frame
     fn frame_assumptions(&self, ctx: &mut Context, frame: FrameId) -> ExprRef {
         assert!(frame < self.frames.len());
 
@@ -561,16 +452,6 @@ impl BasePdr {
 
     /// Run relative inductiveness query
     /// (i.e. `SAT?[R_{i - 1} /\ \neg c /\ T c']`)
-    ///
-    /// # Arguments
-    /// * `ctx` - SMT expression context
-    /// * `smt_ctx` - SMT solver
-    /// * `enc` - Transition system encoding
-    /// * `cube` - [`TimedCube`] target
-    /// * `query_type` - [`RelIndType`] with desired query type
-    ///
-    /// # Returns
-    /// [`CheckSatResponse`] with query result
     fn rel_ind(
         &self,
         ctx: &mut Context,
@@ -604,13 +485,6 @@ impl BasePdr {
 
     /// Run [`BasePdr::rel_ind`], but yield bit-level witness cube on `SAT` results
     ///
-    /// # Arguments
-    /// * `ctx` - SMT expression context
-    /// * `smt_ctx` - SMT solver
-    /// * `sys` - Transition system information
-    /// * `enc` - Transition system encoding
-    /// * `cube` - [`TimedCube`] target
-    ///
     /// # Returns
     /// [`Some(cube)`] with `SAT` result, else [`None`]
     fn solve_rel(
@@ -631,14 +505,6 @@ impl BasePdr {
 
     /// Check whether a cube intersects with the initial states
     /// (i.e. `SAT?[R_0 /\ c]`)
-    ///
-    /// # Arguments
-    /// * `ctx` - SMT solver context
-    /// * `smt_ctx` - SMT solver
-    /// * `cube` - Cube to test
-    ///
-    /// # Returns
-    /// Whether `cube` intersects with the initial states
     ///
     /// # Errors
     /// Return [`Error:UnexpectedResponse`] for `Unknown` SMT queries
@@ -671,16 +537,7 @@ impl BasePdr {
     /// Generalize a blocked cube with literal dropping
     ///
     /// # Preconditions
-    /// Input cube must already be blocked at the frame
-    ///
-    /// # Arguments
-    /// * `ctx` - SMT solver context
-    /// * `smt_ctx` - SMT solver
-    /// * `enc` - Transition system encoding
-    /// * `cube` - [`TimedCube`] with cube to generalize and blocked frame identifier
-    ///
-    /// # Returns
-    /// Generalized cube
+    /// Input cube must already be blocked at the frame `cube.frame`
     fn generalize(
         &self,
         ctx: &mut Context,
@@ -732,15 +589,7 @@ impl BasePdr {
     /// Add blocked cubes to preceding frames
     ///
     /// # Preconditions
-    /// Input cube must be blocked at frame and previous frames
-    ///
-    /// # Arguments
-    /// * `ctx`: SMT expression context
-    /// * `enc`: Transition system encoding
-    /// * `cube` - Cube to add
-    ///
-    /// # Panics
-    /// For cubes associated with infinite frame
+    /// Input cube must be blocked at frame `cube.frame`
     fn add_blocked_cube(&mut self, cube: &TimedCube) {
         // Get frontier index
         let front = cube.frame;
@@ -907,21 +756,7 @@ impl Pdr for BasePdr {
     }
 }
 
-/// Runs PDR on a finite-state transition system with a safety property
-///
-/// # Arguments
-/// * `ctx` - SMT expression context
-/// * `smt_ctx` - SMT solver
-/// * `sys` - Transition system information
-///
-/// # Returns
-/// [`ModelCheckResult`] with safety property proof status
-///
-/// # Errors
-/// SMT solver crashes
-///
-/// # Panics
-/// SMT solver crashes
+/// Runs PDR algorithm on a finite-state transition system with a safety property
 pub fn pdr(
     ctx: &mut Context,
     smt_ctx: &mut impl SolverContext,
