@@ -4,15 +4,16 @@
 3 const 1 0
 4 state 1 reg0
 5 init 1 4 3
-6 not 1 4
+6 eq 1 4 3 $eq$Delay.sv:14$4 ; Delay.sv:14.20-14.32
 7 state 1 reg1
 8 init 1 7 3
-9 and 1 6 7
-10 not 1 9
-11 const 1 1
-12 not 1 10
-13 and 1 11 12
-14 bad 13 Delay.sv:14.9-14.53
-15 next 1 4 11
-16 next 1 7 4
+9 const 1 1
+10 eq 1 7 9 $eq$Delay.sv:14$5 ; Delay.sv:14.38-14.50
+11 and 1 6 10 $logic_and$Delay.sv:14$6 ; Delay.sv:14.19-14.51
+12 not 1 11 $logic_not$Delay.sv:14$7 ; Delay.sv:14.17-14.52
+13 not 1 12
+14 and 1 9 13
+15 bad 14 Delay.sv:14.9-14.53
+16 next 1 4 9 $procdff$10 ; Delay.sv:5.5-10.8
+17 next 1 7 4 $procdff$11 ; Delay.sv:5.5-10.8
 ; end of yosys output

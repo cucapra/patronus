@@ -6,25 +6,6 @@ use patronus::sim::{InitKind, Interpreter, Simulator};
 use patronus::smt::{BITWUZLA, Solver};
 use patronus::system::TransitionSystem;
 use std::path::Path;
-use std::sync::Once;
-
-// Test initialization
-static INIT: Once = Once::new();
-
-// Checks to see if Bitwuzla is installed on the host
-fn bitwuzla_exists() -> bool {
-    std::process::Command::new("bitwuzla")
-        .arg("--version")
-        .output()
-        .is_ok()
-}
-
-// Assert that all test dependencies are satisfied
-fn dep_check() {
-    INIT.call_once(|| {
-        assert!(bitwuzla_exists());
-    });
-}
 
 // SMT output directory
 const SMT_OUT: &str = "tests/patronus_out";
@@ -65,90 +46,6 @@ const COUNT_2: &str = r"
 9 sort bitvec 1
 10 eq 9 3 8
 11 bad 10
-";
-
-/// Two bit counter that start from 2 and is incremented every cycle, and asserts that counter
-/// register is never 0 (which is not true due to overflow)
-const OVERFLOW: &str = r"
-1 sort bitvec 1
-2 input 1 clk ; Overflow.sv:1.23-1.26
-3 sort bitvec 2
-4 const 3 10
-5 state 3 count
-6 init 3 5 4
-7 redor 1 5
-8 const 1 1
-9 not 1 7
-10 and 1 8 9
-11 bad 10 Overflow.sv:9.9-9.31
-12 uext 3 8 1
-13 add 3 5 12
-14 next 3 5 13
-";
-
-/// Four-bit example circuit from thesis
-const AMAN_GOEL_4: &str = r"
-1 sort bitvec 1
-2 input 1 clk
-3 sort bitvec 4
-4 const 3 0001
-5 state 3 u
-6 init 3 5 4
-7 state 3 v
-8 init 3 7 4
-9 add 3 5 7
-10 neq 1 9 4
-11 const 1 1
-12 not 1 10
-13 and 1 11 12
-14 bad 13
-15 add 3 7 4
-16 add 3 5 7
-17 ult 1 5 7
-18 ite 3 17 16 15
-19 next 3 5 18
-20 add 3 7 4
-21 next 3 7 20
-";
-
-/// Circuit where one register starts at 0, always goes to 1, and another
-/// register copies value: assert that second register is 1 when first one is 1
-const DELAY: &str = r"
-1 sort bitvec 1
-2 input 1 clk ; Delay.sv:1.20-1.23
-3 const 1 0
-4 state 1 reg0
-5 init 1 4 3
-6 not 1 4
-7 state 1 reg1
-8 init 1 7 3
-9 and 1 6 7
-10 not 1 9
-11 const 1 1
-12 not 1 10
-13 and 1 11 12
-14 bad 13 Delay.sv:14.9-14.53
-15 next 1 4 11
-16 next 1 7 4
-";
-
-/// Circuit that initializes registers to different values and swaps them each cycle
-/// Asserts that register values are always different
-const SWAP: &str = r"
-1 sort bitvec 1
-2 input 1 clk ; Swap.sv:1.19-1.22
-3 const 1 0
-4 state 1 a
-5 init 1 4 3
-6 const 1 1
-7 state 1 b
-8 init 1 7 6
-9 neq 1 4 7
-10 not 1 9
-11 and 1 6 10
-12 bad 11 Swap.sv:13.9-13.24
-13 next 1 4 7
-14 next 1 7 4
 ";
 
 /// Run PDR on a BTOR string and return the result
@@ -260,8 +157,6 @@ mod pdr_tests {
 
     #[test]
     fn test_trivial_fail() {
-        dep_check();
-
         let (ctx, sys, res) = run_pdr_str(
             TRIVIAL_FAIL,
             Some(format!("{SMT_OUT}/trivial_fail.smt").as_str()),
@@ -276,8 +171,6 @@ mod pdr_tests {
 
     #[test]
     fn test_trivial_input_fail() {
-        dep_check();
-
         let (ctx, sys, res) = run_pdr_str(
             TRIGGER_BAD,
             Some(format!("{SMT_OUT}/trivial_input_fail.smt").as_str()),
@@ -292,10 +185,8 @@ mod pdr_tests {
 
     #[test]
     fn test_overflow_fail() {
-        dep_check();
-
-        let (ctx, sys, res) = run_pdr_str(
-            OVERFLOW,
+        let (ctx, sys, res) = run_pdr_file(
+            "../inputs/verilog_tests/Overflow.btor",
             Some(format!("{SMT_OUT}/overflow_fail.smt").as_str()),
         );
 
@@ -308,8 +199,6 @@ mod pdr_tests {
 
     #[test]
     fn test_simple_fail() {
-        dep_check();
-
         let (ctx, sys, res) =
             run_pdr_str(COUNT_2, Some(format!("{SMT_OUT}/simple_fail.smt").as_str()));
 
@@ -322,26 +211,26 @@ mod pdr_tests {
 
     #[test]
     fn test_delay() {
-        dep_check();
-
-        let (_, _, res) = run_pdr_str(DELAY, Some(format!("{SMT_OUT}/delay.smt").as_str()));
+        let (_, _, res) = run_pdr_file(
+            "../inputs/verilog_tests/Delay.btor",
+            Some(format!("{SMT_OUT}/delay.smt").as_str()),
+        );
         assert!(matches!(res, ModelCheckResult::Success));
     }
 
     #[test]
     fn test_swap() {
-        dep_check();
-
-        let (_, _, res) = run_pdr_str(SWAP, Some(format!("{SMT_OUT}/swap.smt").as_str()));
+        let (_, _, res) = run_pdr_file(
+            "../inputs/verilog_tests/Swap.btor",
+            Some(format!("{SMT_OUT}/swap.smt").as_str()),
+        );
         assert!(matches!(res, ModelCheckResult::Success));
     }
 
     #[ignore = "Cubes are not subsumed in PDR, leading to solver explosion"]
     #[test]
     fn test_aman_goel_4bit() {
-        dep_check();
-
-        let (_, _, res) = run_pdr_str(AMAN_GOEL_4, None);
+        let (_, _, res) = run_pdr_file("../inputs/unittest/aman_goel_4bit.btor", None);
         assert!(matches!(res, ModelCheckResult::Success));
     }
 }
