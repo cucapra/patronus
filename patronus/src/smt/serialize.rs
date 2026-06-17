@@ -341,7 +341,7 @@ pub fn serialize_cmd(out: &mut impl Write, ctx: Option<&Context>, cmd: &SmtComma
             write!(out, "(get-value (")?;
             serialize_expr(out, ctx, *e)?;
             writeln!(out, "))")
-        },
+        }
         SmtCommand::GetUnsatAssumptions => writeln!(out, "(get-unsat-assumptions)"),
     }
 }

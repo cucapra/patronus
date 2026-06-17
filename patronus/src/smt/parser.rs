@@ -2,7 +2,9 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::expr::{ArrayType, Context, ExprRef, ForEachChild, SerializableIrNode, Type, TypeCheck, WidthInt};
+use crate::expr::{
+    ArrayType, Context, ExprRef, ForEachChild, SerializableIrNode, Type, TypeCheck, WidthInt,
+};
 use crate::smt::{Logic, SmtCommand};
 use regex::bytes::RegexSet;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -303,7 +305,7 @@ pub fn parse_get_value_response(ctx: &mut Context, input: &[u8]) -> Result<ExprR
 pub fn parse_get_unsat_assumptions_response(
     ctx: &mut Context,
     st: &SymbolTable,
-    input: &[u8]
+    input: &[u8],
 ) -> Result<Vec<ExprRef>> {
     // Initialize lexer on input characters
     let mut lexer = Lexer::new(input);
@@ -321,11 +323,11 @@ pub fn parse_get_unsat_assumptions_response(
             Some(Token::Close) => {
                 lexer.next_no_comment();
                 break;
-            },
+            }
             Some(_) => {
                 // re-lex/peek and then parse one literal
                 out.push(parse_expr_internal(ctx, &mut nested, &mut lexer)?);
-            },
+            }
             None => return Err(SmtParserError::MissingClose("eof".into())),
         }
     }

@@ -3,13 +3,16 @@
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
 use crate::expr::{Context, ExprRef};
-use crate::smt::parser::{SmtParserError, count_parens, parse_get_value_response, parse_get_unsat_assumptions_response, collect_symbols};
+use crate::smt::parser::{
+    SmtParserError, collect_symbols, count_parens, parse_get_unsat_assumptions_response,
+    parse_get_value_response,
+};
 use crate::smt::serialize::serialize_cmd;
+use rustc_hash::FxHashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter};
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
-use rustc_hash::FxHashMap;
 use thiserror::Error;
 
 /// A SMT Solver Error.
@@ -112,10 +115,13 @@ pub trait SolverContext: SolverMetaData {
     fn push(&mut self) -> Result<()>;
     fn pop(&mut self) -> Result<()>;
     fn get_value(&mut self, ctx: &mut Context, e: ExprRef) -> Result<ExprRef>;
+
+    /// # Preconditions
+    /// * Must have preceding `UNSAT` query, else behavior is undefined
     fn get_unsat_assumptions(
         &mut self,
         ctx: &mut Context,
-        props: impl IntoIterator<Item = ExprRef>
+        props: impl IntoIterator<Item = ExprRef>,
     ) -> Result<Vec<ExprRef>>;
 }
 
@@ -413,7 +419,7 @@ impl SolverContext for SmtLibSolverCtx {
     fn get_unsat_assumptions(
         &mut self,
         ctx: &mut Context,
-        props: impl IntoIterator<Item = ExprRef>
+        props: impl IntoIterator<Item = ExprRef>,
     ) -> Result<Vec<ExprRef>> {
         // Stage `(get-unsat-assumptions)` command
         self.write_cmd(None, &SmtCommand::GetUnsatAssumptions)?;
@@ -427,7 +433,11 @@ impl SolverContext for SmtLibSolverCtx {
             collect_symbols(ctx, p, &mut st);
         }
 
-        Ok(parse_get_unsat_assumptions_response(ctx, &st, response.as_bytes())?)
+        Ok(parse_get_unsat_assumptions_response(
+            ctx,
+            &st,
+            response.as_bytes(),
+        )?)
     }
 }
 
@@ -464,7 +474,11 @@ pub const Z3: SmtLibSolver = SmtLibSolver {
 
 pub const CVC5: SmtLibSolver = SmtLibSolver {
     name: "cvc5",
-    args: &["--incremental", "--produce-models", "produce-unsat-assumptions"],
+    args: &[
+        "--incremental",
+        "--produce-models",
+        "produce-unsat-assumptions",
+    ],
     options: &[],
     supports_uf: true,
     supports_check_assuming: true,
@@ -539,7 +553,9 @@ mod tests {
         let replay = Some(std::fs::File::create("replay.smt").unwrap());
         let mut solver = BITWUZLA.start(replay).unwrap();
         solver.declare_const(&ctx, a).unwrap();
-        let res = solver.check_sat_assuming(&ctx, [smt_false, eq3, eq4]).unwrap();
+        let res = solver
+            .check_sat_assuming(&ctx, [smt_false, eq3, eq4])
+            .unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
         let core = solver.get_unsat_assumptions(&mut ctx, [eq3, eq4]).unwrap();
@@ -565,13 +581,15 @@ mod tests {
         let res = solver.check_sat_assuming(&ctx, [eq3, eq4, b_is_1]).unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
-        let core = solver.get_unsat_assumptions(&mut ctx, [eq3, eq4, b_is_1]).unwrap();
+        let core = solver
+            .get_unsat_assumptions(&mut ctx, [eq3, eq4, b_is_1])
+            .unwrap();
         assert!(core.contains(&eq3) && core.contains(&eq4));
         assert!(!core.contains(&b_is_1)); // the unrelated assumption is not in the core
     }
 
     /// Simulate activation literal `UNSAT` assumptions by asserting
-    /// `x == 2`, `x >= 5`, and `x < 1` to yield `UNSAT` proof with only first two facts
+    /// `x == 2`, `x >= 5`, and `x <= 1` to yield `UNSAT` proof with only first two facts
     #[test]
     fn test_bitwuzla_unsat_assumptions_act_lits() {
         let mut ctx = Context::default();
@@ -596,9 +614,39 @@ mod tests {
         let res = solver.check_sat_assuming(&ctx, act_lits.clone()).unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
-        let core = solver.get_unsat_assumptions(&mut ctx, act_lits.clone()).unwrap();
+        let core = solver
+            .get_unsat_assumptions(&mut ctx, act_lits.clone())
+            .unwrap();
         assert_eq!(core.len(), 2);
         assert!(core.contains(&act_lits[0]) && core.contains(&act_lits[1]));
+    }
+
+    /// Create an `UNSAT` query with an empty `UNSAT` assumptions
+    /// Make sure that nothing crashes
+    #[test]
+    fn test_bitwuzla_unsat_assumptions_empty() {
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 3);
+        let b = ctx.bv_symbol("b", 3);
+
+        let eq3 = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+        let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
+        let b_is_1 = ctx.build(|c| c.equal(b, c.bit_vec_val(1, 3)));
+
+        let replay = Some(std::fs::File::create("replay.smt").unwrap());
+        let mut solver = BITWUZLA.start(replay).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+        solver.declare_const(&ctx, b).unwrap();
+
+        solver.assert(&ctx, eq3).unwrap();
+        solver.assert(&ctx, eq4).unwrap();
+        solver.assert(&ctx, b_is_1).unwrap();
+
+        let res = solver.check_sat_assuming(&ctx, [b_is_1]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx, [b_is_1]).unwrap();
+        assert!(core.is_empty());
     }
 
     #[test]
