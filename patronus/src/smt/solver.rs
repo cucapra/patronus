@@ -474,10 +474,7 @@ pub const Z3: SmtLibSolver = SmtLibSolver {
 
 pub const CVC5: SmtLibSolver = SmtLibSolver {
     name: "cvc5",
-    args: &[
-        "--incremental",
-        "--produce-models",
-    ],
+    args: &["--incremental", "--produce-models"],
     options: &["produce-unsat-assumptions"],
     supports_uf: true,
     supports_check_assuming: true,
