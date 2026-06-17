@@ -298,7 +298,7 @@ pub fn parse_get_value_response(ctx: &mut Context, input: &[u8]) -> Result<ExprR
 /// [`Vec`] of [`ExprRef`] corresponding to all SMT expression returned from
 /// `(get-unsat-assumptions)`
 ///
-/// # Error
+/// # Errors
 /// Invalid SMT query responses
 pub fn parse_get_unsat_assumptions_response(
     ctx: &mut Context,
@@ -308,14 +308,20 @@ pub fn parse_get_unsat_assumptions_response(
     // Initialize lexer on input characters
     let mut lexer = Lexer::new(input);
     let mut nested = NestedSymbolTable::new(st);
-    skip_open_parens(&mut lexer)?; // Skip outer '('
+
+    // Skip outer '('
+    skip_open_parens(&mut lexer)?;
 
     // Output variables
     let mut out = Vec::new();
 
     loop {
-        match lexer.next_no_comment() {
-            Some(Token::Close) => break,
+        let mut peek = lexer.clone();
+        match peek.next_no_comment() {
+            Some(Token::Close) => {
+                lexer.next_no_comment();
+                break;
+            },
             Some(_) => {
                 // re-lex/peek and then parse one literal
                 out.push(parse_expr_internal(ctx, &mut nested, &mut lexer)?);
@@ -915,6 +921,7 @@ lazy_static! {
 // Lexer
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#[derive(Clone)]
 struct Lexer<'a> {
     input: &'a [u8],
     state: LexState,

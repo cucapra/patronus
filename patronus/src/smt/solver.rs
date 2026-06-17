@@ -85,6 +85,7 @@ pub trait SolverMetaData {
     fn supports_uf(&self) -> bool;
     /// Indicates whether the solver supports the non-standard `(as const)` command.
     fn supports_const_array(&self) -> bool;
+    fn supports_get_unsat_assumptions(&self) -> bool;
 }
 
 /// Allows an SMT solver to start a Context.
@@ -145,6 +146,10 @@ impl SolverMetaData for SmtLibSolver {
     fn supports_const_array(&self) -> bool {
         self.supports_const_array
     }
+
+    fn supports_get_unsat_assumptions(&self) -> bool {
+        self.supports_unsat_assumptions
+    }
 }
 
 impl Solver for SmtLibSolver {
@@ -174,6 +179,7 @@ impl Solver for SmtLibSolver {
             supports_uf: self.supports_uf,
             supports_check_assuming: self.supports_check_assuming,
             supports_const_array: self.supports_const_array,
+            supports_get_unsat_assumptions: self.supports_unsat_assumptions,
         };
         for option in self.options.iter() {
             solver.write_cmd(
@@ -205,6 +211,7 @@ pub struct SmtLibSolverCtx {
     supports_uf: bool,
     supports_check_assuming: bool,
     supports_const_array: bool,
+    supports_get_unsat_assumptions: bool,
 }
 
 impl SmtLibSolverCtx {
@@ -317,6 +324,10 @@ impl SolverMetaData for SmtLibSolverCtx {
 
     fn supports_const_array(&self) -> bool {
         self.supports_const_array
+    }
+
+    fn supports_get_unsat_assumptions(&self) -> bool {
+        self.supports_get_unsat_assumptions
     }
 }
 
@@ -502,7 +513,8 @@ mod tests {
         let eq3 = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
         let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
 
-        let mut solver = BITWUZLA.start(None).unwrap();
+        let replay = Some(std::fs::File::create("replay.smt").unwrap());
+        let mut solver = BITWUZLA.start(replay).unwrap();
         solver.declare_const(&ctx, a).unwrap();
 
         // a == 3 AND a == 4 is contradictory
@@ -517,6 +529,25 @@ mod tests {
     }
 
     #[test]
+    fn test_bitwuzla_unsat_assumptions_false() {
+        let mut ctx = Context::default();
+        let smt_false = ctx.get_false();
+        let a = ctx.bv_symbol("a", 3);
+        let eq3 = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+        let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
+
+        let replay = Some(std::fs::File::create("replay.smt").unwrap());
+        let mut solver = BITWUZLA.start(replay).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+        let res = solver.check_sat_assuming(&ctx, [smt_false, eq3, eq4]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx, [eq3, eq4]).unwrap();
+        assert_eq!(core.len(), 1);
+        assert!(core.contains(&smt_false));
+    }
+
+    #[test]
     fn test_bitwuzla_unsat_assumptions_subset() {
         let mut ctx = Context::default();
         let a = ctx.bv_symbol("a", 3);
@@ -525,7 +556,8 @@ mod tests {
         let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
         let b_is_1 = ctx.build(|c| c.equal(b, c.bit_vec_val(1, 3))); // unrelated, satisfiable
 
-        let mut solver = BITWUZLA.start(None).unwrap();
+        let replay = Some(std::fs::File::create("replay.smt").unwrap());
+        let mut solver = BITWUZLA.start(replay).unwrap();
         solver.declare_const(&ctx, a).unwrap();
         solver.declare_const(&ctx, b).unwrap();
 
@@ -535,6 +567,35 @@ mod tests {
         let core = solver.get_unsat_assumptions(&mut ctx, [eq3, eq4, b_is_1]).unwrap();
         assert!(core.contains(&eq3) && core.contains(&eq4));
         assert!(!core.contains(&b_is_1)); // the unrelated assumption is not in the core
+    }
+
+    #[test]
+    fn test_bitwuzla_unsat_assumptions_act_lits() {
+        let mut ctx = Context::default();
+        let x = ctx.bv_symbol("x", 3);
+        let eq2 = ctx.build(|c| c.equal(x, c.bit_vec_val(2, 3)));
+        let ge3 = ctx.build(|c| c.greater_or_equal(x, c.bit_vec_val(5, 3)));
+        let le1 = ctx.build(|c| c.not(c.greater(x, c.bit_vec_val(1, 3))));
+
+        let replay = Some(std::fs::File::create("replay.smt").unwrap());
+        let mut solver = BITWUZLA.start(replay).unwrap();
+        solver.declare_const(&ctx, x).unwrap();
+
+        let mut act_lits = Vec::with_capacity(3);
+        for (idx, expr) in [eq2, ge3, le1].iter().enumerate() {
+            let lit = ctx.bv_symbol(format!("a_{idx}").as_str(), 1);
+            let imp = ctx.implies(lit, *expr);
+            act_lits.push(lit);
+            solver.declare_const(&ctx, lit).unwrap();
+            solver.assert(&ctx, imp).unwrap();
+        }
+
+        let res = solver.check_sat_assuming(&ctx, act_lits.clone()).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx, act_lits.clone()).unwrap();
+        assert_eq!(core.len(), 2);
+        assert!(core.contains(&act_lits[0]) && core.contains(&act_lits[1]));
     }
 
     #[test]
