@@ -7,10 +7,10 @@
 6 const 1 1
 7 state 1 b
 8 init 1 7 6
-9 neq 1 4 7
+9 neq 1 4 7 $ne$Swap.sv:13$4 ; Swap.sv:13.17-13.23
 10 not 1 9
 11 and 1 6 10
 12 bad 11 Swap.sv:13.9-13.24
-13 next 1 4 7
-14 next 1 7 4
+13 next 1 4 7 $procdff$7 ; Swap.sv:5.5-9.8
+14 next 1 7 4 $procdff$8 ; Swap.sv:5.5-9.8
 ; end of yosys output

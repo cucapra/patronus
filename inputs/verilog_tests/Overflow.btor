@@ -5,12 +5,13 @@
 4 const 3 10
 5 state 3 count
 6 init 3 5 4
-7 redor 1 5
-8 const 1 1
-9 not 1 7
-10 and 1 8 9
-11 bad 10 Overflow.sv:9.9-9.31
-12 uext 3 8 1
-13 add 3 5 12
-14 next 3 5 13
+7 const 3 00
+8 neq 1 5 7 $ne$Overflow.sv:9$5 ; Overflow.sv:9.17-9.30
+9 const 1 1
+10 not 1 8
+11 and 1 9 10
+12 bad 11 Overflow.sv:9.9-9.31
+13 const 3 01
+14 add 3 5 13 $add$Overflow.sv:5$2 ; Overflow.sv:5.18-5.30
+15 next 3 5 14 $procdff$7 ; Overflow.sv:4.5-6.8
 ; end of yosys output

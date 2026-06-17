@@ -12,9 +12,6 @@
 #
 # yosys flow, per file:
 #   read_verilog -sv -formal   parse SystemVerilog, keep assert/assume props
-#   prep -top <Top> -flatten    elaborate, flatten hierarchy, generic synth
-#   chformal -lower             lower $check cells into $assert so the BTOR
-#                               backend emits them as `bad` states
 #   write_btor                  emit BTOR2
 set -euo pipefail
 
@@ -28,11 +25,15 @@ compile_one() {
     local out="${base}.btor"
 
     echo ">>> $sv -> $out (top: $top)"
+
     yosys -q -p "
         read_verilog -sv -formal ${sv};
-        prep -top ${top} -flatten;
-        chformal -lower;
-        write_btor ${out}
+        hierarchy -top ${top};
+        proc -noopt;
+        async2sync;
+        flatten;
+        dffunmap;
+        write_btor -x ${out}
     "
 }
 
