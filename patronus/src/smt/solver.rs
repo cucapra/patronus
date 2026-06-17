@@ -506,6 +506,7 @@ mod tests {
         assert_eq!(value_of_a, ctx.bit_vec_val(3, 3));
     }
 
+    /// Check that asserting `a == 3` and `a == 4` requires both facts to prove `UNSAT`
     #[test]
     fn test_bitwuzla_unsat_assumptions_basic() {
         let mut ctx = Context::default();
@@ -517,17 +518,16 @@ mod tests {
         let mut solver = BITWUZLA.start(replay).unwrap();
         solver.declare_const(&ctx, a).unwrap();
 
-        // a == 3 AND a == 4 is contradictory
         let res = solver.check_sat_assuming(&ctx, [eq3, eq4]).unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
         let core = solver.get_unsat_assumptions(&mut ctx, [eq3, eq4]).unwrap();
-        // both assumptions are necessary for the contradiction
         assert_eq!(core.len(), 2);
         assert!(core.contains(&eq3));
         assert!(core.contains(&eq4));
     }
 
+    /// Check that asserting `false` initially is enough to prove `UNSAT`
     #[test]
     fn test_bitwuzla_unsat_assumptions_false() {
         let mut ctx = Context::default();
@@ -547,6 +547,7 @@ mod tests {
         assert!(core.contains(&smt_false));
     }
 
+    /// Check that extra fact `b == 1` is not needed to prove `UNSAT` for `a == 3 /\ a == 4`
     #[test]
     fn test_bitwuzla_unsat_assumptions_subset() {
         let mut ctx = Context::default();
@@ -569,6 +570,8 @@ mod tests {
         assert!(!core.contains(&b_is_1)); // the unrelated assumption is not in the core
     }
 
+    /// Simulate activation literal `UNSAT` assumptions by asserting
+    /// `x == 2`, `x >= 5`, and `x < 1` to yield `UNSAT` proof with only first two facts
     #[test]
     fn test_bitwuzla_unsat_assumptions_act_lits() {
         let mut ctx = Context::default();
