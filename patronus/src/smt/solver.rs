@@ -464,8 +464,8 @@ pub const YICES2: SmtLibSolver = SmtLibSolver {
 
 pub const Z3: SmtLibSolver = SmtLibSolver {
     name: "z3",
-    args: &["-in", "produce-unsat-assumptions"],
-    options: &[],
+    args: &["-in"],
+    options: &["produce-unsat-assumptions"],
     supports_uf: true,
     supports_check_assuming: true,
     supports_const_array: true,
@@ -477,9 +477,8 @@ pub const CVC5: SmtLibSolver = SmtLibSolver {
     args: &[
         "--incremental",
         "--produce-models",
-        "produce-unsat-assumptions",
     ],
-    options: &[],
+    options: &["produce-unsat-assumptions"],
     supports_uf: true,
     supports_check_assuming: true,
     supports_const_array: true,
