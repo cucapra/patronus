@@ -2,7 +2,7 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::expr::{Context, ExprRef, SymbolValueStore};
+use crate::expr::{Context, ExprRef};
 use crate::smt::parser::{SmtParserError, count_parens, parse_get_value_response, parse_get_unsat_assumptions_response, collect_symbols};
 use crate::smt::serialize::serialize_cmd;
 use std::fs::File;
@@ -111,7 +111,11 @@ pub trait SolverContext: SolverMetaData {
     fn push(&mut self) -> Result<()>;
     fn pop(&mut self) -> Result<()>;
     fn get_value(&mut self, ctx: &mut Context, e: ExprRef) -> Result<ExprRef>;
-    fn get_unsat_assumptions(&mut self, ctx: &mut Context, props: &[ExprRef]) -> Result<Vec<ExprRef>>;
+    fn get_unsat_assumptions(
+        &mut self,
+        ctx: &mut Context,
+        props: impl IntoIterator<Item = ExprRef>
+    ) -> Result<Vec<ExprRef>>;
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -395,7 +399,11 @@ impl SolverContext for SmtLibSolverCtx {
         Ok(expr)
     }
 
-    fn get_unsat_assumptions(&mut self, ctx: &mut Context, props: &[ExprRef]) -> Result<Vec<ExprRef>> {
+    fn get_unsat_assumptions(
+        &mut self,
+        ctx: &mut Context,
+        props: impl IntoIterator<Item = ExprRef>
+    ) -> Result<Vec<ExprRef>> {
         // Stage `(get-unsat-assumptions)` command
         self.write_cmd(None, &SmtCommand::GetUnsatAssumptions)?;
         self.stdin.flush()?;
@@ -404,7 +412,7 @@ impl SolverContext for SmtLibSolverCtx {
 
         // Reconstruct mapping between symbols and SMT expressions
         let mut st = FxHashMap::default();
-        for &p in props {
+        for p in props {
             collect_symbols(ctx, p, &mut st);
         }
 
@@ -488,12 +496,45 @@ mod tests {
     }
 
     #[test]
-    fn test_bitwuzla_unsat() {
+    fn test_bitwuzla_unsat_assumptions_basic() {
         let mut ctx = Context::default();
         let a = ctx.bv_symbol("a", 3);
-        let e = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+        let eq3 = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+        let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
 
-        // TODO: Finish testing `(get-unsat-assumptions)`
+        let mut solver = BITWUZLA.start(None).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+
+        // a == 3 AND a == 4 is contradictory
+        let res = solver.check_sat_assuming(&ctx, [eq3, eq4]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx, [eq3, eq4]).unwrap();
+        // both assumptions are necessary for the contradiction
+        assert_eq!(core.len(), 2);
+        assert!(core.contains(&eq3));
+        assert!(core.contains(&eq4));
+    }
+
+    #[test]
+    fn test_bitwuzla_unsat_assumptions_subset() {
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 3);
+        let b = ctx.bv_symbol("b", 3);
+        let eq3 = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+        let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
+        let b_is_1 = ctx.build(|c| c.equal(b, c.bit_vec_val(1, 3))); // unrelated, satisfiable
+
+        let mut solver = BITWUZLA.start(None).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+        solver.declare_const(&ctx, b).unwrap();
+
+        let res = solver.check_sat_assuming(&ctx, [eq3, eq4, b_is_1]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx, [eq3, eq4, b_is_1]).unwrap();
+        assert!(core.contains(&eq3) && core.contains(&eq4));
+        assert!(!core.contains(&b_is_1)); // the unrelated assumption is not in the core
     }
 
     #[test]

@@ -9,7 +9,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::fmt::{Debug, Formatter};
 use std::io::BufRead;
 use thiserror::Error;
-use crate::smt::parser::NAry::Pairwise;
 
 #[derive(Debug, Error)]
 pub enum SmtParserError {
@@ -78,7 +77,6 @@ type SymbolTable = FxHashMap<String, ExprRef>;
 pub fn collect_symbols(ctx: &Context, root: ExprRef, st: &mut SymbolTable) {
     let mut worklist = vec![root];
     let mut explored = FxHashSet::default();
-    let mut result = SymbolTable::default();
 
     while let Some(cur) = worklist.pop() {
         // If seen, skip
@@ -89,7 +87,7 @@ pub fn collect_symbols(ctx: &Context, root: ExprRef, st: &mut SymbolTable) {
         let expr = &ctx[cur];
         if expr.is_symbol() {
             // Symbol found: get name and map it to SMT expression
-            result.insert(ctx.get_symbol_name(cur).unwrap().to_string(), cur);
+            st.insert(ctx.get_symbol_name(cur).unwrap().to_string(), cur);
         }
 
         // Explore all child nodes
@@ -309,7 +307,7 @@ pub fn parse_get_unsat_assumptions_response(
 ) -> Result<Vec<ExprRef>> {
     // Initialize lexer on input characters
     let mut lexer = Lexer::new(input);
-    let mut nested = NestedSymbolTable::new(&st);
+    let mut nested = NestedSymbolTable::new(st);
     skip_open_parens(&mut lexer)?; // Skip outer '('
 
     // Output variables
