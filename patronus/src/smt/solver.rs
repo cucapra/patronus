@@ -183,6 +183,7 @@ impl Solver for SmtLibSolver {
             supports_const_array: self.supports_const_array,
             supports_get_unsat_assumptions: self.supports_unsat_assumptions,
             symbols: vec![SymbolTable::default()],
+            last_query_unsat: false,
         };
         for option in self.options.iter() {
             solver.write_cmd(
@@ -218,6 +219,8 @@ pub struct SmtLibSolverCtx {
     /// Internal symbol tables for each solver context
     /// **Representation invariant**: `symbols.len() > 0`
     symbols: Vec<SymbolTable>,
+    /// Flag for whether last query was `UNSAT`
+    last_query_unsat: bool,
 }
 
 impl SmtLibSolverCtx {
@@ -357,6 +360,8 @@ impl SolverContext for SmtLibSolverCtx {
         for option in self.solver_options.clone() {
             self.write_cmd(None, &SmtCommand::SetOption(option, "true".to_string()))?;
         }
+        self.symbols = vec![SymbolTable::default()];
+        self.last_query_unsat = false;
         Ok(())
     }
 
@@ -393,12 +398,16 @@ impl SolverContext for SmtLibSolverCtx {
     ) -> Result<CheckSatResponse> {
         let props: Vec<ExprRef> = props.into_iter().collect();
         self.write_cmd(Some(ctx), &SmtCommand::CheckSatAssuming(props))?;
-        self.read_sat_response()
+        let res = self.read_sat_response()?;
+        self.last_query_unsat = matches!(res, CheckSatResponse::Unsat);
+        Ok(res)
     }
 
     fn check_sat(&mut self) -> Result<CheckSatResponse> {
         self.write_cmd(None, &SmtCommand::CheckSat)?;
-        self.read_sat_response()
+        let res = self.read_sat_response()?;
+        self.last_query_unsat = matches!(res, CheckSatResponse::Unsat);
+        Ok(res)
     }
 
     fn push(&mut self) -> Result<()> {
@@ -431,6 +440,10 @@ impl SolverContext for SmtLibSolverCtx {
     }
 
     fn get_unsat_assumptions(&mut self, ctx: &mut Context) -> Result<Vec<ExprRef>> {
+        if !self.last_query_unsat {
+            return Err(Error::FromSolver(self.name.clone(), "Previous query not UNSAT".into()));
+        }
+
         // Stage `(get-unsat-assumptions)` command
         self.write_cmd(None, &SmtCommand::GetUnsatAssumptions)?;
         self.stdin.flush()?;
@@ -733,6 +746,31 @@ mod tests {
         assert_eq!(res, CheckSatResponse::Unsat);
 
         solver.pop().unwrap();
+    }
+
+    /// Check that `(get-unsat-assumptions)` fails after non-`UNSAT` query
+    #[test]
+    fn test_bitwuzla_unsat_assumptions_fail() {
+        let mut ctx = Context::default();
+        let x = ctx.bv_symbol("x", 3);
+        let eq2 = ctx.build(|c| c.equal(x, c.bit_vec_val(2, 3)));
+
+        let mut solver = BITWUZLA.start(None).unwrap();
+        solver.declare_const(&ctx, x).unwrap();
+
+        let res = solver.check_sat_assuming(&ctx, [eq2]).unwrap();
+        assert_eq!(res, CheckSatResponse::Sat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx);
+        assert!(core.is_err());
+
+        let eq3 = ctx.build(|c| c.equal(x, c.bit_vec_val(3, 3)));
+        let res = solver.check_sat_assuming(&ctx, [eq2, eq3]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
+        assert_eq!(core.len(), 2);
+        assert!(core.contains(&eq2) && core.contains(&eq3));
     }
 
     #[test]
