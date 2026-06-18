@@ -441,7 +441,10 @@ impl SolverContext for SmtLibSolverCtx {
 
     fn get_unsat_assumptions(&mut self, ctx: &mut Context) -> Result<Vec<ExprRef>> {
         if !self.last_query_unsat {
-            return Err(Error::FromSolver(self.name.clone(), "Previous query not UNSAT".into()));
+            return Err(Error::FromSolver(
+                self.name.clone(),
+                "Previous query not UNSAT".into(),
+            ));
         }
 
         // Stage `(get-unsat-assumptions)` command
