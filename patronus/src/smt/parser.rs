@@ -1099,6 +1099,25 @@ mod tests {
     }
 
     #[test]
+    fn test_get_unsat_assumptions_parser() {
+        let mut ctx = Context::default();
+        let x = ctx.bv_symbol("x", 3);
+        let a_1 = ctx.bv_symbol("a_1", 1);
+
+        let eq1 = ctx.build(|c| c.equal(x, c.bit_vec_val(1, 3)));
+
+        let mut st = SymbolTable::default();
+        st.insert("x".to_string(), x);
+        st.insert("a_1".to_string(), a_1);
+
+        let exprs =
+            parse_get_unsat_assumptions_response(&mut ctx, &st, "((= x #b001) a_1)".as_ref())
+                .unwrap();
+        assert_eq!(exprs.len(), 2);
+        assert!(exprs.contains(&eq1) && exprs.contains(&a_1));
+    }
+
+    #[test]
     fn test_parse_smt_array_const_and_store() {
         let mut ctx = Context::default();
         let symbols = FxHashMap::default();
