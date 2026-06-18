@@ -2,12 +2,10 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::expr::{
-    ArrayType, Context, ExprRef, ForEachChild, SerializableIrNode, Type, TypeCheck, WidthInt,
-};
+use crate::expr::{ArrayType, Context, ExprRef, SerializableIrNode, Type, TypeCheck, WidthInt};
 use crate::smt::{Logic, SmtCommand};
 use regex::bytes::RegexSet;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::fmt::{Debug, Formatter};
 use std::io::BufRead;
 use thiserror::Error;
@@ -75,27 +73,6 @@ impl From<std::num::ParseIntError> for SmtParserError {
 type Result<T> = std::result::Result<T, SmtParserError>;
 
 type SymbolTable = FxHashMap<String, ExprRef>;
-
-pub fn collect_symbols(ctx: &Context, root: ExprRef, st: &mut SymbolTable) {
-    let mut worklist = vec![root];
-    let mut explored = FxHashSet::default();
-
-    while let Some(cur) = worklist.pop() {
-        // If seen, skip
-        if !explored.insert(cur) {
-            continue;
-        }
-
-        let expr = &ctx[cur];
-        if expr.is_symbol() {
-            // Symbol found: get name and map it to SMT expression
-            st.insert(ctx.get_symbol_name(cur).unwrap().to_string(), cur);
-        }
-
-        // Explore all child nodes
-        expr.for_each_child(|&c| worklist.push(c));
-    }
-}
 
 pub fn parse_expr(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Result<ExprRef> {
     let mut lexer = Lexer::new(input);
@@ -290,18 +267,8 @@ pub fn parse_get_value_response(ctx: &mut Context, input: &[u8]) -> Result<ExprR
 }
 
 /// Extracts symbols from SMT solver response after `(get-unsat-assumptions)` call
-///
-/// # Arguments
-/// * `ctx` - SMT expression context
-/// * `st` - Map between symbol name and SMT expression
-/// * `input` - Characters to parse
-///
-/// # Returns
-/// [`Vec`] of [`ExprRef`] corresponding to all SMT expression returned from
-/// `(get-unsat-assumptions)`
-///
-/// # Errors
-/// Invalid SMT query responses
+/// Parses responses of the form `((expr_1) (expr_2) ... (expr_n)`, where each `expr_i`
+/// can be single literals (e.g. `l`) or compound SMT expressions (i.e. `= l #b1`)
 pub fn parse_get_unsat_assumptions_response(
     ctx: &mut Context,
     st: &SymbolTable,
