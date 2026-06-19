@@ -285,8 +285,7 @@ pub fn parse_get_unsat_assumptions_response(
     let mut out = Vec::new();
 
     loop {
-        let mut peek = lexer.clone();
-        match peek.next_no_comment() {
+        match lexer.peek_no_comment() {
             Some(Token::Close) => {
                 lexer.next_no_comment();
                 break;
@@ -890,7 +889,6 @@ lazy_static! {
 // Lexer
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Clone)]
 struct Lexer<'a> {
     input: &'a [u8],
     state: LexState,
@@ -948,6 +946,22 @@ impl<'a> Lexer<'a> {
     fn next_no_comment(&mut self) -> Option<Token<'a>> {
         self.by_ref()
             .find(|token| !matches!(token, Token::Comment(_)))
+    }
+
+    /// return the next token that is not a comment, **WITHOUT** consuming it
+    fn peek_no_comment(&mut self) -> Option<Token<'a>> {
+        // Save old state
+        let prev_state = self.state;
+        let prev_pos = self.pos;
+
+        // Get token
+        let token = self.next_no_comment();
+
+        // Restore state
+        self.state = prev_state;
+        self.pos = prev_pos;
+
+        token
     }
 }
 
@@ -1104,17 +1118,47 @@ mod tests {
         let x = ctx.bv_symbol("x", 3);
         let a_1 = ctx.bv_symbol("a_1", 1);
 
-        let eq1 = ctx.build(|c| c.equal(x, c.bit_vec_val(1, 3)));
+        let eq5 = ctx.build(|c| c.equal(x, c.bit_vec_val(5, 3)));
 
         let mut st = SymbolTable::default();
         st.insert("x".to_string(), x);
         st.insert("a_1".to_string(), a_1);
 
         let exprs =
-            parse_get_unsat_assumptions_response(&mut ctx, &st, "((= x #b001) a_1)".as_ref())
+            parse_get_unsat_assumptions_response(&mut ctx, &st, "((= x #b101) a_1)".as_ref())
                 .unwrap();
         assert_eq!(exprs.len(), 2);
-        assert!(exprs.contains(&eq1) && exprs.contains(&a_1));
+        assert!(exprs.contains(&eq5) && exprs.contains(&a_1));
+
+        let a_2 = ctx.bv_symbol("a_2", 1);
+        st.insert("a_2".to_string(), a_2);
+        let a_3 = ctx.bv_symbol("a_3", 1);
+        st.insert("a_3".to_string(), a_3);
+
+        let exprs =
+            parse_get_unsat_assumptions_response(&mut ctx, &st, "(a_1 a_2 a_3)".as_ref())
+                .unwrap();
+
+        assert_eq!(exprs.len(), 3);
+        assert!(exprs.contains(&a_1) && exprs.contains(&a_2) && exprs.contains(&a_3));
+
+        let nge3 = ctx.build(|c| c.not(c.greater_or_equal(x, c.bit_vec_val(3, 3))));
+
+        let exprs =
+            parse_get_unsat_assumptions_response(&mut ctx, &st, "((not (bvuge x #b011)) (= x #b101))".as_ref())
+                .unwrap();
+
+        assert_eq!(exprs.len(), 2);
+        assert!(exprs.contains(&nge3) && exprs.contains(&eq5));
+
+        let and3 = ctx.build(|c| c.and(c.and(a_1, a_2), nge3));
+
+        let exprs =
+            parse_get_unsat_assumptions_response(&mut ctx, &st, "((and a_1 a_2 (not (bvuge x #b011))))".as_ref())
+                .unwrap();
+
+        assert_eq!(exprs.len(), 1);
+        assert!(exprs.contains(&and3));
     }
 
     #[test]
