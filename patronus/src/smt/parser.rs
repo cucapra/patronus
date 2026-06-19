@@ -1136,26 +1136,31 @@ mod tests {
         st.insert("a_3".to_string(), a_3);
 
         let exprs =
-            parse_get_unsat_assumptions_response(&mut ctx, &st, "(a_1 a_2 a_3)".as_ref())
-                .unwrap();
+            parse_get_unsat_assumptions_response(&mut ctx, &st, "(a_1 a_2 a_3)".as_ref()).unwrap();
 
         assert_eq!(exprs.len(), 3);
         assert!(exprs.contains(&a_1) && exprs.contains(&a_2) && exprs.contains(&a_3));
 
         let nge3 = ctx.build(|c| c.not(c.greater_or_equal(x, c.bit_vec_val(3, 3))));
 
-        let exprs =
-            parse_get_unsat_assumptions_response(&mut ctx, &st, "((not (bvuge x #b011)) (= x #b101))".as_ref())
-                .unwrap();
+        let exprs = parse_get_unsat_assumptions_response(
+            &mut ctx,
+            &st,
+            "((not (bvuge x #b011)) (= x #b101))".as_ref(),
+        )
+        .unwrap();
 
         assert_eq!(exprs.len(), 2);
         assert!(exprs.contains(&nge3) && exprs.contains(&eq5));
 
         let and3 = ctx.build(|c| c.and(c.and(a_1, a_2), nge3));
 
-        let exprs =
-            parse_get_unsat_assumptions_response(&mut ctx, &st, "((and a_1 a_2 (not (bvuge x #b011))))".as_ref())
-                .unwrap();
+        let exprs = parse_get_unsat_assumptions_response(
+            &mut ctx,
+            &st,
+            "((and a_1 a_2 (not (bvuge x #b011))))".as_ref(),
+        )
+        .unwrap();
 
         assert_eq!(exprs.len(), 1);
         assert!(exprs.contains(&and3));
