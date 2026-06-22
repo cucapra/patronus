@@ -10,17 +10,18 @@ readme = "Readme.md"
 license = "BSD-3-Clause"
 rust-version = "1.88.0"
 # used by main patronus library and python bindings
-version = "0.36.0"
+version = "0.37.0"
 
 [workspace.dependencies]
-rustc-hash = "2.x"
-baa = { version = "0.17.1", features = ["rand1"] }
-egg = "0.9.5"
-regex = "1.11.1"
+rustc-hash = "2.*"
+baa = { version = "0.19.0", features = ["rand1"] }
+egg = "0.11.0"
+regex = "1.12.4"
 boolean_expression = "0.4.4"
-clap =  { version = "4.x", features = ["derive"] }
+clap =  { version = "4.*", features = ["derive"] }
 patronus = {path = "patronus"}
-thiserror = "2.0.6"
+thiserror = "2.0.18"
+rand = { version = "0.10", features = [] }
 
 # speed up execution of tests using insta
 [profile.dev.package]
