@@ -159,92 +159,132 @@ enum ExprOrType {
     T(Type),
 }
 
+/// Number of expressions/types to parse from lexer
+enum ItemNum {
+    /// Finite items
+    Num(usize),
+
+    /// All items
+    All,
+}
+
+/// Parse _at most_ `num_items` expressions/types from lexer
+fn parse_expr_or_type_list(
+    ctx: &mut Context,
+    st: &mut NestedSymbolTable,
+    lexer: &mut Lexer,
+    num_items: ItemNum,
+) -> Result<Vec<ExprOrType>> {
+    // Token stack
+    let mut stack = Vec::with_capacity(64);
+
+    // Resulting parsed expressions and types
+    let mut result = Vec::new();
+
+    for token in lexer {
+        match token {
+            Token::Open => {
+                if let Some(ParserItem::Let(parens)) = stack.last()
+                    && *parens < 2
+                {
+                    // If new open parenthesis is part of let binding
+                    *stack.last_mut().unwrap() = ParserItem::Let(parens + 1);
+                } else {
+                    stack.push(ParserItem::Open(false));
+                }
+            }
+            Token::Close => {
+                if matches!(stack.last(), Some(ParserItem::LetScopeOpenMissingClose)) {
+                    // Second close parenthesis for let binding: serves as "open parenthesis"
+                    // for later expressions
+                    *stack.last_mut().unwrap() = ParserItem::Open(true);
+                } else {
+                    // Reduce tokens from first non-let binding open parenthesis to here
+                    // into expression
+
+                    // Find location of open parenthesis
+                    if let Some(loc) = stack
+                        .iter()
+                        .rev()
+                        .position(|item| matches!(item, ParserItem::Open(_)))
+                    {
+                        let open_pos = stack.len() - loc - 1;
+
+                        let pattern = &stack[open_pos + 1..];
+                        let item = parse_pattern(ctx, st, pattern)?;
+
+                        // If a let scope is closed, pop from symbol table to maintain lexical scoping
+                        if matches!(stack[open_pos], ParserItem::Open(true)) {
+                            st.pop_let();
+                        }
+
+                        // Remove just condensed parser items and push new condensed item
+                        stack.truncate(open_pos);
+                        stack.push(item);
+                    } else {
+                        // Syntax error: unmatched close parenthesis
+                        return Err(SmtParserError::ClosingParenWithoutOpening);
+                    }
+                }
+            }
+            Token::Value(v) => {
+                if matches!(stack.last(), Some(ParserItem::Let(2))) {
+                    // If symbol follows a let binding, _DO NOT_ resolve in symbol table
+                    stack.push(early_parse_single_token(ctx, None, v)?);
+                } else {
+                    // Else, eagerly parse with current context
+                    stack.push(early_parse_single_token(ctx, Some(st), v)?);
+                }
+            }
+            Token::EscapedValue(ev) => {
+                stack.push(ParserItem::PExpr(lookup_sym(st, ev)?));
+            }
+            Token::StringLit(_) => {
+                return Err(SmtParserError::Unsupported(
+                    "string literal expressions".to_string(),
+                ));
+            } // Reject string literals for now
+            Token::Comment(_) => (), // Ignore comments
+        }
+
+        // Check is expression has been parsed
+        match stack.as_slice() {
+            [ParserItem::PExpr(e)] => {
+                // Expression has been parsed
+                result.push(ExprOrType::E(*e));
+                stack.pop();
+            }
+            [ParserItem::PType(t)] => {
+                // Type has been parsed
+                result.push(ExprOrType::T(*t));
+                stack.pop();
+            }
+            _ => (), // Keep parsing expression
+        }
+
+        // When parsing threshold reached, exit
+        if let ItemNum::Num(n) = num_items
+            && result.len() == n
+        {
+            break;
+        }
+    }
+
+    Ok(result)
+}
+
 fn parse_expr_or_type(
     ctx: &mut Context,
     st: &mut NestedSymbolTable,
     lexer: &mut Lexer,
 ) -> Result<ExprOrType> {
-    use ParserItem::*;
-    let mut stack: Vec<ParserItem> = Vec::with_capacity(64);
-    // keep track of how many closing parenthesis without an opening one are encountered
-    let mut orphan_closing_count = 0u64;
-    for token in lexer {
-        match token {
-            Token::Open => {
-                if orphan_closing_count > 0 {
-                    return Err(SmtParserError::ClosingParenWithoutOpening);
-                }
+    let mut expr_or_type = parse_expr_or_type_list(ctx, st, lexer, ItemNum::Num(1))?;
 
-                // Open parenthesis tokens get consumed into a Let
-                // - "let (" becomes `Let(1)`
-                // - "let ((" becomes `Let(2)`
-                if let Some(Let(parens)) = stack.last() {
-                    debug_assert!(
-                        *parens < 2,
-                        "We never expect parens to exceed two. But could that happen?"
-                    );
-                    *stack.last_mut().unwrap() = Let(parens + 1);
-                } else {
-                    stack.push(Open(false));
-                }
-            }
-            Token::Close => {
-                match stack.last() {
-                    // `let (( ... )` -> `let (( ... ))`
-                    Some(LetScopeOpenMissingClose) => *stack.last_mut().unwrap() = Open(true),
-                    _ => {
-                        // find the closest Open
-                        if let Some(p) = stack.iter().rev().position(|i| matches!(i, Open(_))) {
-                            let open_pos = stack.len() - 1 - p;
-                            let pattern = &stack[open_pos + 1..];
-                            let result = parse_pattern(ctx, st, pattern)?;
-                            // check to see if we are closing a let scope
-                            if let Open(true) = stack[open_pos] {
-                                st.pop_let();
-                            }
-                            stack.truncate(open_pos);
-                            stack.push(result);
-                        } else {
-                            // no matching open parenthesis
-                            orphan_closing_count += 1;
-                        }
-                    }
-                }
-            }
-            Token::Value(value) => {
-                if orphan_closing_count > 0 {
-                    return Err(SmtParserError::ClosingParenWithoutOpening);
-                }
-                // If this token follows a `let ((` we expect the name of a new symbols
-                // which we do _not_ want to substitute with an existing entry from the symbol table
-                if matches!(stack.last(), Some(Let(2))) {
-                    stack.push(early_parse_single_token(ctx, None, value)?);
-                } else {
-                    // we eagerly parse expressions and types that are represented by a single token
-                    stack.push(early_parse_single_token(ctx, Some(st), value)?);
-                }
-            }
-            Token::EscapedValue(value) => {
-                if orphan_closing_count > 0 {
-                    return Err(SmtParserError::ClosingParenWithoutOpening);
-                }
-                stack.push(PExpr(lookup_sym(st, value)?))
-            }
-            Token::StringLit(value) => {
-                let value = string_lit_to_string(value);
-                todo!("unexpected string literal in expression: {value}")
-            }
-            Token::Comment(_) => {} // ignore comments
-        }
-
-        // are we done?
-        match stack.as_slice() {
-            [PExpr(e)] => return Ok(ExprOrType::E(*e)),
-            [PType(t)] => return Ok(ExprOrType::T(*t)),
-            _ => {} // cotinue parsing
-        }
+    if expr_or_type.len() != 1 {
+        return Err(SmtParserError::ExpectedIdentifer("empty".to_string()));
     }
-    todo!("error message!: {stack:?}")
+
+    Ok(expr_or_type.remove(0))
 }
 
 /// Extracts the value expression from SMT solver responses of the form ((... value))
