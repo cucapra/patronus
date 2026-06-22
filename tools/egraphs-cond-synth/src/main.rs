@@ -19,7 +19,7 @@ use patronus::mc::get_smt_value;
 use patronus::smt::{CheckSatResponse, SolverContext};
 use patronus_egraphs::*;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -309,7 +309,7 @@ fn show_assignments(
     let mut ctx = Context::default();
     let mut smt_ctx = start_solver(false);
     for _ in 0..num_samples {
-        let a_idx = rnd.r#gen::<usize>() % examples.len();
+        let a_idx = usize::from_ne_bytes(rnd.random()) % examples.len();
         let a = &examples[a_idx];
 
         // generate smt expressions
