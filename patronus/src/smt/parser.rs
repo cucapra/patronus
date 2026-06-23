@@ -40,8 +40,6 @@ pub enum SmtParserError {
     ExpectedExpr(String),
     #[error("[smt] expected a type but got: {0}")]
     ExpectedType(String),
-    #[error("[smt] expected an expression or type but got: {0}")]
-    ExpectedExprOrType(String),
     #[error("[smt] expected a command but got: {0}")]
     ExpectedCommand(String),
     #[error("[smt] unknown pattern: {0}")]
@@ -168,7 +166,7 @@ impl TryFrom<ParserItem<'_>> for ExprOrType {
         match value {
             ParserItem::PExpr(e) => Ok(Self::E(e)),
             ParserItem::PType(e) => Ok(Self::T(e)),
-            _ => Err(SmtParserError::ExpectedExprOrType("unknown".to_string())),
+            _ => Err(SmtParserError::ExpectedIdentifer("unknown".to_string())),
         }
     }
 }
