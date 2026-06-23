@@ -12,7 +12,7 @@ use pyo3::prelude::*;
 use std::ops::DerefMut;
 use std::sync::{LazyLock, RwLock};
 
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Copy)]
 pub struct ExprRef(pub(crate) patronus::expr::ExprRef);
 

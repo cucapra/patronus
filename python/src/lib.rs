@@ -23,7 +23,7 @@ use patronus::expr::{SerializableIrNode, TypeCheck, WidthInt};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct Output(patronus::system::Output);
 
@@ -49,7 +49,7 @@ impl Output {
     }
 }
 
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct State(patronus::system::State);
 

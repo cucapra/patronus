@@ -152,7 +152,8 @@ pub struct WidthConstantFold;
 impl Analysis<Arith> for WidthConstantFold {
     type Data = Option<WidthInt>;
 
-    fn make(egraph: &egg::EGraph<Arith, Self>, expr: &Arith) -> Self::Data {
+    fn make(egraph: &mut egg::EGraph<Arith, Self>, expr: &Arith, id: Id) -> Self::Data {
+        // TODO: what is `id` supposed to be used for? Why is the egraph now mutable? (in the latest egg version)
         let x = |i: &Id| egraph[*i].data;
         match expr {
             &Arith::Width(w) => Some(w.0),

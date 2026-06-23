@@ -919,7 +919,8 @@ fn report_error(error: ParserError, file: &codespan_reporting::files::SimpleFile
         codespan_reporting::term::termcolor::ColorChoice::Auto,
     );
     let config = codespan_reporting::term::Config::default();
-    codespan_reporting::term::emit(&mut writer.lock(), &config, file, &diagnostic).unwrap();
+    codespan_reporting::term::emit_to_io_write(&mut writer.lock(), &config, file, &diagnostic)
+        .unwrap();
 }
 
 fn str_offset(needle: &str, haystack: &str) -> usize {
