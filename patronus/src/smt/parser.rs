@@ -189,7 +189,7 @@ fn parse_expr_or_type_list(
     ctx: &mut Context,
     st: &mut NestedSymbolTable,
     lexer: &mut Lexer,
-    parse_mode: ParseType
+    parse_mode: ParseType,
 ) -> Result<Vec<ExprOrType>> {
     // Token stack
     let mut stack = Vec::with_capacity(64);
@@ -229,8 +229,9 @@ fn parse_expr_or_type_list(
                         // Special case: open parenthesis is at index-0: end of list
                         if open_pos == 0
                             && stack[open_pos + 1..]
-                            .iter()
-                            .all(|item| matches!(item, ParserItem::PExpr(_))) {
+                                .iter()
+                                .all(|item| matches!(item, ParserItem::PExpr(_)))
+                        {
                             // Get all expressions in list
                             let exprs_or_types = stack
                                 .drain(open_pos + 1..)
@@ -289,13 +290,11 @@ fn parse_expr_or_type_list(
                 result.push(ExprOrType::T(*t));
                 stack.pop();
             }
-            _ => ()
+            _ => (),
         }
 
         // When parsing threshold reached, exit
-        if matches!(parse_mode, ParseType::Single)
-            && result.len() == 1
-        {
+        if matches!(parse_mode, ParseType::Single) && result.len() == 1 {
             break;
         }
     }
@@ -306,33 +305,31 @@ fn parse_expr_or_type_list(
 fn parse_expr_or_type(
     ctx: &mut Context,
     st: &mut NestedSymbolTable,
-    lexer: &mut Lexer
+    lexer: &mut Lexer,
 ) -> Result<ExprOrType> {
     let mut expr_or_type = parse_expr_or_type_list(ctx, st, lexer, ParseType::Single)?;
     Ok(expr_or_type.remove(0))
 }
 
 /// Parses a list of expressions (such as those from `(get-unsat-assumptions)` output
-fn parse_expr_list(
-    ctx: &mut Context,
-    st: &SymbolTable,
-    input: &[u8]
-) -> Result<Vec<ExprRef>> {
+fn parse_expr_list(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Result<Vec<ExprRef>> {
     let mut lexer = Lexer::new(input);
     let mut nst = NestedSymbolTable::new(st);
     let exprs = parse_expr_or_type_list(ctx, &mut nst, &mut lexer, ParseType::List)?;
 
     // Make sure all parsed items in list are expressions
     if exprs.iter().all(|e| matches!(e, ExprOrType::E(_))) {
-        Ok(exprs.into_iter().map(|e| {
-            match e {
+        Ok(exprs
+            .into_iter()
+            .map(|e| match e {
                 ExprOrType::E(e) => e,
-                ExprOrType::T(_) => unreachable!()
-            }
-        })
-        .collect())
+                ExprOrType::T(_) => unreachable!(),
+            })
+            .collect())
     } else {
-        Err(SmtParserError::ExpectedExpr("types in expression list".to_string()))
+        Err(SmtParserError::ExpectedExpr(
+            "types in expression list".to_string(),
+        ))
     }
 }
 
@@ -1181,7 +1178,11 @@ mod tests {
         parse_expr(ctx, &symbols, input.as_bytes())
     }
 
-    fn test_parse_expr_list(ctx: &mut Context, st: &SymbolTable, input: &str) -> Result<Vec<ExprRef>> {
+    fn test_parse_expr_list(
+        ctx: &mut Context,
+        st: &SymbolTable,
+        input: &str,
+    ) -> Result<Vec<ExprRef>> {
         parse_expr_list(ctx, st, input.as_bytes())
     }
 
@@ -1233,7 +1234,8 @@ mod tests {
         let nex = ctx.build(|c| c.not(c.equal(y, x)));
         st.insert("y".to_string(), y);
 
-        let smt_expr = test_parse_expr_list(&mut ctx, &st, "((not (= y x)) (= x #b101) (= x #b011))").unwrap();
+        let smt_expr =
+            test_parse_expr_list(&mut ctx, &st, "((not (= y x)) (= x #b101) (= x #b011))").unwrap();
         assert_eq!(smt_expr.len(), 3);
         assert!(smt_expr.contains(&nex) && smt_expr.contains(&eq5) && smt_expr.contains(&eq3));
     }
@@ -1288,14 +1290,23 @@ mod tests {
         let and_x_y = ctx.build(|c| c.equal(c.and(x, y), c.bit_vec_val(7, 3)));
         let ite_x_y = ctx.build(|c| c.ite(a, x, y));
 
-        let smt_expr = test_parse_expr_list(&mut ctx, &st, "((= (bvand x y) #b111) a (ite a x y))").unwrap();
+        let smt_expr =
+            test_parse_expr_list(&mut ctx, &st, "((= (bvand x y) #b111) a (ite a x y))").unwrap();
         assert_eq!(smt_expr.len(), 3);
-        assert!(smt_expr.contains(&and_x_y) && smt_expr.contains(&ite_x_y) && smt_expr.contains(&a));
+        assert!(
+            smt_expr.contains(&and_x_y) && smt_expr.contains(&ite_x_y) && smt_expr.contains(&a)
+        );
 
-        let ite_comp = ctx.build(|c| c.ite(c.greater(x, c.bit_vec_val(3, 3)), c.add(x, y), c.or(y, x)));
+        let ite_comp =
+            ctx.build(|c| c.ite(c.greater(x, c.bit_vec_val(3, 3)), c.add(x, y), c.or(y, x)));
         let eq_xy = ctx.build(|c| c.equal(x, y));
 
-        let smt_expr = test_parse_expr_list(&mut ctx, &st, "((ite (bvugt x #b011) (bvadd x y) (bvor y x)) (= x y))").unwrap();
+        let smt_expr = test_parse_expr_list(
+            &mut ctx,
+            &st,
+            "((ite (bvugt x #b011) (bvadd x y) (bvor y x)) (= x y))",
+        )
+        .unwrap();
         assert_eq!(smt_expr.len(), 2);
         assert!(smt_expr.contains(&eq_xy) && smt_expr.contains(&ite_comp));
     }
