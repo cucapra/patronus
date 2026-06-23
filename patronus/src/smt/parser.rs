@@ -175,7 +175,7 @@ impl TryFrom<ParserItem<'_>> for ExprOrType {
 
 /// Number of expressions/types to parse from lexer
 #[derive(Debug, Clone, Copy)]
-enum ParseType {
+enum ParseMode {
     /// Single item
     Single,
 
@@ -189,7 +189,7 @@ fn parse_expr_or_type_list(
     ctx: &mut Context,
     st: &mut NestedSymbolTable,
     lexer: &mut Lexer,
-    parse_mode: ParseType,
+    parse_mode: ParseMode,
 ) -> Result<Vec<ExprOrType>> {
     // Token stack
     let mut stack = Vec::with_capacity(64);
@@ -294,7 +294,7 @@ fn parse_expr_or_type_list(
         }
 
         // When parsing threshold reached, exit
-        if matches!(parse_mode, ParseType::Single) && result.len() == 1 {
+        if matches!(parse_mode, ParseMode::Single) && result.len() == 1 {
             break;
         }
     }
@@ -307,7 +307,7 @@ fn parse_expr_or_type(
     st: &mut NestedSymbolTable,
     lexer: &mut Lexer,
 ) -> Result<ExprOrType> {
-    let mut expr_or_type = parse_expr_or_type_list(ctx, st, lexer, ParseType::Single)?;
+    let mut expr_or_type = parse_expr_or_type_list(ctx, st, lexer, ParseMode::Single)?;
     Ok(expr_or_type.remove(0))
 }
 
@@ -315,7 +315,7 @@ fn parse_expr_or_type(
 fn parse_expr_list(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Result<Vec<ExprRef>> {
     let mut lexer = Lexer::new(input);
     let mut nst = NestedSymbolTable::new(st);
-    let exprs = parse_expr_or_type_list(ctx, &mut nst, &mut lexer, ParseType::List)?;
+    let exprs = parse_expr_or_type_list(ctx, &mut nst, &mut lexer, ParseMode::List)?;
 
     // Make sure all parsed items in list are expressions
     if exprs.iter().all(|e| matches!(e, ExprOrType::E(_))) {
