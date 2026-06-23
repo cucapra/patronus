@@ -164,60 +164,56 @@ fn parse_expr_or_type(
     st: &mut NestedSymbolTable,
     lexer: &mut Lexer,
 ) -> Result<ExprOrType> {
-    use ParserItem::*;
     let mut stack: Vec<ParserItem> = Vec::with_capacity(64);
-    // keep track of how many closing parenthesis without an opening one are encountered
-    let mut orphan_closing_count = 0u64;
     for token in lexer {
         match token {
             Token::Open => {
-                if orphan_closing_count > 0 {
-                    return Err(SmtParserError::ClosingParenWithoutOpening);
-                }
-
                 // Open parenthesis tokens get consumed into a Let
                 // - "let (" becomes `Let(1)`
                 // - "let ((" becomes `Let(2)`
-                if let Some(Let(parens)) = stack.last() {
-                    debug_assert!(
-                        *parens < 2,
-                        "We never expect parens to exceed two. But could that happen?"
-                    );
-                    *stack.last_mut().unwrap() = Let(parens + 1);
+                if let Some(ParserItem::Let(parens)) = stack.last()
+                    && *parens < 2
+                {
+                    *stack.last_mut().unwrap() = ParserItem::Let(parens + 1);
                 } else {
-                    stack.push(Open(false));
+                    stack.push(ParserItem::Open(false));
                 }
             }
             Token::Close => {
                 match stack.last() {
                     // `let (( ... )` -> `let (( ... ))`
-                    Some(LetScopeOpenMissingClose) => *stack.last_mut().unwrap() = Open(true),
+                    Some(ParserItem::LetScopeOpenMissingClose) => {
+                        *stack.last_mut().unwrap() = ParserItem::Open(true)
+                    }
                     _ => {
                         // find the closest Open
-                        if let Some(p) = stack.iter().rev().position(|i| matches!(i, Open(_))) {
+                        if let Some(p) = stack
+                            .iter()
+                            .rev()
+                            .position(|i| matches!(i, ParserItem::Open(_)))
+                        {
                             let open_pos = stack.len() - 1 - p;
                             let pattern = &stack[open_pos + 1..];
                             let result = parse_pattern(ctx, st, pattern)?;
+
                             // check to see if we are closing a let scope
-                            if let Open(true) = stack[open_pos] {
+                            if matches!(stack[open_pos], ParserItem::Open(true)) {
                                 st.pop_let();
                             }
+
                             stack.truncate(open_pos);
                             stack.push(result);
                         } else {
                             // no matching open parenthesis
-                            orphan_closing_count += 1;
+                            return Err(SmtParserError::ClosingParenWithoutOpening);
                         }
                     }
                 }
             }
             Token::Value(value) => {
-                if orphan_closing_count > 0 {
-                    return Err(SmtParserError::ClosingParenWithoutOpening);
-                }
                 // If this token follows a `let ((` we expect the name of a new symbols
                 // which we do _not_ want to substitute with an existing entry from the symbol table
-                if matches!(stack.last(), Some(Let(2))) {
+                if matches!(stack.last(), Some(ParserItem::Let(2))) {
                     stack.push(early_parse_single_token(ctx, None, value)?);
                 } else {
                     // we eagerly parse expressions and types that are represented by a single token
@@ -225,26 +221,57 @@ fn parse_expr_or_type(
                 }
             }
             Token::EscapedValue(value) => {
-                if orphan_closing_count > 0 {
-                    return Err(SmtParserError::ClosingParenWithoutOpening);
-                }
-                stack.push(PExpr(lookup_sym(st, value)?))
+                stack.push(ParserItem::PExpr(lookup_sym(st, value)?));
             }
-            Token::StringLit(value) => {
-                let value = string_lit_to_string(value);
-                todo!("unexpected string literal in expression: {value}")
+            Token::StringLit(_) => {
+                return Err(SmtParserError::Unsupported("string literal".to_string()));
             }
-            Token::Comment(_) => {} // ignore comments
+            Token::Comment(_) => (), // ignore comments
         }
 
         // are we done?
         match stack.as_slice() {
-            [PExpr(e)] => return Ok(ExprOrType::E(*e)),
-            [PType(t)] => return Ok(ExprOrType::T(*t)),
-            _ => {} // cotinue parsing
+            [ParserItem::PExpr(e)] => return Ok(ExprOrType::E(*e)),
+            [ParserItem::PType(t)] => return Ok(ExprOrType::T(*t)),
+            _ => {} // continue parsing
         }
     }
-    todo!("error message!: {stack:?}")
+
+    unreachable!()
+}
+
+fn parse_expr_list(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Result<Vec<ExprRef>> {
+    let mut lexer = Lexer::new(input);
+    let mut nst = NestedSymbolTable::new(st);
+
+    // Final parsed expressions
+    let mut exprs = Vec::new();
+
+    skip_open_parens(&mut lexer)?;
+
+    loop {
+        match lexer.peek_no_comment() {
+            Some(Token::Close) => {
+                // Found close parenthesis: must be at end of list
+                lexer.next_no_comment();
+
+                if lexer.peek_no_comment().is_none() {
+                    break;
+                }
+
+                return Err(SmtParserError::ExprSuffix(
+                    "expression(s) after expression list".to_string(),
+                ));
+            }
+            Some(_) => {
+                // Try to parse expression
+                exprs.push(parse_expr_internal(ctx, &mut nst, &mut lexer)?);
+            }
+            None => return Err(SmtParserError::MissingClose("eof".to_string())),
+        }
+    }
+
+    Ok(exprs)
 }
 
 /// Extracts the value expression from SMT solver responses of the form ((... value))
@@ -912,6 +939,21 @@ impl<'a> Lexer<'a> {
         self.by_ref()
             .find(|token| !matches!(token, Token::Comment(_)))
     }
+
+    /// returns the next token that is not a comment, _without_ consuming it
+    fn peek_no_comment(&mut self) -> Option<Token<'a>> {
+        // Save last state
+        let prev = (self.pos, self.state);
+
+        // Poll token
+        let tok = self.next_no_comment();
+
+        // Restore state
+        self.pos = prev.0;
+        self.state = prev.1;
+
+        tok
+    }
 }
 
 impl<'a> Iterator for Lexer<'a> {
@@ -1119,6 +1161,139 @@ mod tests {
         .unwrap();
         // if we did not call pop_let correctly, we would get or(false, false)
         assert_eq!(smt_expr.serialize_to_str(&ctx), "or(1'b0, 1'b1)");
+    }
+
+    fn test_parse_expr_list(
+        ctx: &mut Context,
+        st: &SymbolTable,
+        input: &str,
+    ) -> Result<Vec<ExprRef>> {
+        parse_expr_list(ctx, st, input.as_bytes())
+    }
+
+    #[test]
+    fn test_simple_parse_expr_list() {
+        let mut ctx = Context::default();
+        let mut st = SymbolTable::default();
+
+        let x = ctx.bv_symbol("x", 3);
+        let eq3 = ctx.build(|c| c.equal(x, c.bit_vec_val(3, 3)));
+        let eq5 = ctx.build(|c| c.equal(x, c.bit_vec_val(5, 3)));
+        st.insert("x".to_string(), x);
+
+        let smt_expr = test_parse_expr_list(&mut ctx, &st, "((= x #b011) (= x #b101))").unwrap();
+        assert_eq!(smt_expr.len(), 2);
+        assert!(smt_expr.contains(&eq3) && smt_expr.contains(&eq5));
+
+        let y = ctx.bv_symbol("y", 3);
+        let nex = ctx.build(|c| c.not(c.equal(y, x)));
+        st.insert("y".to_string(), y);
+
+        let smt_expr =
+            test_parse_expr_list(&mut ctx, &st, "((not (= y x)) (= x #b101) (= x #b011))").unwrap();
+        assert_eq!(smt_expr.len(), 3);
+        assert!(smt_expr.contains(&nex) && smt_expr.contains(&eq5) && smt_expr.contains(&eq3));
+    }
+
+    #[test]
+    fn test_parse_expr_list_type() {
+        let mut ctx = Context::default();
+        let mut st = SymbolTable::default();
+
+        let x = ctx.bv_symbol("x", 3);
+        let _x_refl = ctx.build(|c| c.equal(x, x));
+        st.insert("x".to_string(), x);
+
+        let err = test_parse_expr_list(&mut ctx, &st, "((= x x) (_ BitVec 3))");
+        assert!(err.is_err());
+
+        let err = test_parse_expr_list(&mut ctx, &st, "((= x x) (_ BitVec 3))");
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_parse_expr_list_unbalanced() {
+        let mut ctx = Context::default();
+        let mut st = SymbolTable::default();
+
+        let x = ctx.bv_symbol("x", 3);
+        st.insert("x".to_string(), x);
+
+        let err = test_parse_expr_list(&mut ctx, &st, "(((= x #b101))");
+        assert!(err.is_err());
+
+        let err = test_parse_expr_list(&mut ctx, &st, "((= x x)))");
+        assert!(err.is_err());
+
+        let err = test_parse_expr_list(&mut ctx, &st, "((= x x) () (= x #b100))");
+        assert!(err.is_err());
+
+        let err = test_parse_expr_list(&mut ctx, &st, "((= x x) ) (= x #b100))");
+        assert!(err.is_err());
+
+        let err = test_parse_expr_list(&mut ctx, &st, "(= x x) (= x #b100)");
+        assert!(err.is_err());
+
+        let err = test_parse_expr_list(&mut ctx, &st, "( () (= x x) (= x #b100))");
+        assert!(err.is_err());
+
+        let err = test_parse_expr_list(&mut ctx, &st, "() (= x x) (= x #b100))");
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_literals_parse_expr_list() {
+        let mut ctx = Context::default();
+        let mut st = SymbolTable::default();
+
+        let a = ctx.bv_symbol("a", 3);
+        let b = ctx.bv_symbol("b", 3);
+        let c = ctx.bv_symbol("c", 3);
+
+        st.insert("a".to_string(), a);
+        st.insert("b".to_string(), b);
+        st.insert("c".to_string(), c);
+
+        let smt_expr = test_parse_expr_list(&mut ctx, &st, "(a b c)").unwrap();
+        assert_eq!(smt_expr.len(), 3);
+        assert!(smt_expr.contains(&a) && smt_expr.contains(&b) && smt_expr.contains(&c));
+    }
+
+    #[test]
+    fn test_complex_parse_expr_list() {
+        let mut ctx = Context::default();
+        let mut st = SymbolTable::default();
+
+        let a = ctx.bv_symbol("a", 1);
+        let x = ctx.bv_symbol("x", 3);
+        let y = ctx.bv_symbol("y", 3);
+
+        st.insert("a".to_string(), a);
+        st.insert("x".to_string(), x);
+        st.insert("y".to_string(), y);
+
+        let and_x_y = ctx.build(|c| c.equal(c.and(x, y), c.bit_vec_val(7, 3)));
+        let ite_x_y = ctx.build(|c| c.ite(a, x, y));
+
+        let smt_expr =
+            test_parse_expr_list(&mut ctx, &st, "((= (bvand x y) #b111) a (ite a x y))").unwrap();
+        assert_eq!(smt_expr.len(), 3);
+        assert!(
+            smt_expr.contains(&and_x_y) && smt_expr.contains(&ite_x_y) && smt_expr.contains(&a)
+        );
+
+        let ite_comp =
+            ctx.build(|c| c.ite(c.greater(x, c.bit_vec_val(3, 3)), c.add(x, y), c.or(y, x)));
+        let eq_xy = ctx.build(|c| c.equal(x, y));
+
+        let smt_expr = test_parse_expr_list(
+            &mut ctx,
+            &st,
+            "((ite (bvugt x #b011) (bvadd x y) (bvor y x)) (= x y))",
+        )
+        .unwrap();
+        assert_eq!(smt_expr.len(), 2);
+        assert!(smt_expr.contains(&eq_xy) && smt_expr.contains(&ite_comp));
     }
 
     #[test]
