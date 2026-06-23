@@ -164,56 +164,60 @@ fn parse_expr_or_type(
     st: &mut NestedSymbolTable,
     lexer: &mut Lexer,
 ) -> Result<ExprOrType> {
+    use ParserItem::*;
     let mut stack: Vec<ParserItem> = Vec::with_capacity(64);
+    // keep track of how many closing parenthesis without an opening one are encountered
+    let mut orphan_closing_count = 0u64;
     for token in lexer {
         match token {
             Token::Open => {
+                if orphan_closing_count > 0 {
+                    return Err(SmtParserError::ClosingParenWithoutOpening);
+                }
+
                 // Open parenthesis tokens get consumed into a Let
                 // - "let (" becomes `Let(1)`
                 // - "let ((" becomes `Let(2)`
-                if let Some(ParserItem::Let(parens)) = stack.last()
-                    && *parens < 2
-                {
-                    *stack.last_mut().unwrap() = ParserItem::Let(parens + 1);
+                if let Some(Let(parens)) = stack.last() {
+                    debug_assert!(
+                        *parens < 2,
+                        "We never expect parens to exceed two. But could that happen?"
+                    );
+                    *stack.last_mut().unwrap() = Let(parens + 1);
                 } else {
-                    stack.push(ParserItem::Open(false));
+                    stack.push(Open(false));
                 }
             }
             Token::Close => {
                 match stack.last() {
                     // `let (( ... )` -> `let (( ... ))`
-                    Some(ParserItem::LetScopeOpenMissingClose) => {
-                        *stack.last_mut().unwrap() = ParserItem::Open(true)
-                    }
+                    Some(LetScopeOpenMissingClose) => *stack.last_mut().unwrap() = Open(true),
                     _ => {
                         // find the closest Open
-                        if let Some(p) = stack
-                            .iter()
-                            .rev()
-                            .position(|i| matches!(i, ParserItem::Open(_)))
-                        {
+                        if let Some(p) = stack.iter().rev().position(|i| matches!(i, Open(_))) {
                             let open_pos = stack.len() - 1 - p;
                             let pattern = &stack[open_pos + 1..];
                             let result = parse_pattern(ctx, st, pattern)?;
-
                             // check to see if we are closing a let scope
-                            if matches!(stack[open_pos], ParserItem::Open(true)) {
+                            if let Open(true) = stack[open_pos] {
                                 st.pop_let();
                             }
-
                             stack.truncate(open_pos);
                             stack.push(result);
                         } else {
                             // no matching open parenthesis
-                            return Err(SmtParserError::ClosingParenWithoutOpening);
+                            orphan_closing_count += 1;
                         }
                     }
                 }
             }
             Token::Value(value) => {
+                if orphan_closing_count > 0 {
+                    return Err(SmtParserError::ClosingParenWithoutOpening);
+                }
                 // If this token follows a `let ((` we expect the name of a new symbols
                 // which we do _not_ want to substitute with an existing entry from the symbol table
-                if matches!(stack.last(), Some(ParserItem::Let(2))) {
+                if matches!(stack.last(), Some(Let(2))) {
                     stack.push(early_parse_single_token(ctx, None, value)?);
                 } else {
                     // we eagerly parse expressions and types that are represented by a single token
@@ -221,23 +225,26 @@ fn parse_expr_or_type(
                 }
             }
             Token::EscapedValue(value) => {
-                stack.push(ParserItem::PExpr(lookup_sym(st, value)?));
+                if orphan_closing_count > 0 {
+                    return Err(SmtParserError::ClosingParenWithoutOpening);
+                }
+                stack.push(PExpr(lookup_sym(st, value)?))
             }
-            Token::StringLit(_) => {
-                return Err(SmtParserError::Unsupported("string literal".to_string()));
+            Token::StringLit(value) => {
+                let value = string_lit_to_string(value);
+                todo!("unexpected string literal in expression: {value}")
             }
-            Token::Comment(_) => (), // ignore comments
+            Token::Comment(_) => {} // ignore comments
         }
 
         // are we done?
         match stack.as_slice() {
-            [ParserItem::PExpr(e)] => return Ok(ExprOrType::E(*e)),
-            [ParserItem::PType(t)] => return Ok(ExprOrType::T(*t)),
-            _ => {} // continue parsing
+            [PExpr(e)] => return Ok(ExprOrType::E(*e)),
+            [PType(t)] => return Ok(ExprOrType::T(*t)),
+            _ => {} // cotinue parsing
         }
     }
-
-    unreachable!()
+    todo!("error message!: {stack:?}")
 }
 
 fn parse_expr_list(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Result<Vec<ExprRef>> {
