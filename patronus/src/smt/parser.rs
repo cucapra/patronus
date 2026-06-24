@@ -260,22 +260,18 @@ fn parse_expr_list(
 
     skip_open_parens(lexer)?;
 
-    loop {
-        match lexer.peek_no_comment() {
-            Some(Token::Close) => {
-                // Found close parenthesis: must be at end of list
-                lexer.next_no_comment();
-                break;
-            }
-            Some(_) => {
-                // Try to parse expression
-                exprs.push(parse_expr_internal(ctx, st, lexer)?);
-            }
-            None => return Err(SmtParserError::MissingClose("eof".to_string())),
+    while let Some(token) = lexer.peek_no_comment() {
+        if matches!(token, Token::Close) {
+            // Must be at end of list: return parsed expressions
+            lexer.next_no_comment();
+            return Ok(exprs);
         }
+
+        // Try to parse expression
+        exprs.push(parse_expr_internal(ctx, st, lexer)?);
     }
 
-    Ok(exprs)
+    Err(SmtParserError::MissingClose("eof".to_string()))
 }
 
 /// Extracts the value expression from SMT solver responses of the form ((... value))
