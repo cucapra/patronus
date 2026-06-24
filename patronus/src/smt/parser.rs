@@ -293,6 +293,20 @@ pub fn parse_get_value_response(ctx: &mut Context, input: &[u8]) -> Result<ExprR
     Ok(expr)
 }
 
+/// Extracts symbols from SMT solver response after `(get-unsat-assumptions)` call
+/// Parses responses of the form `((expr_1) (expr_2) ... (expr_n))`, where each `expr_i`
+/// can be single literals (e.g. `l`) or compound SMT expressions (i.e. `= l #b1`)
+pub fn parse_get_unsat_assumptions_response(
+    ctx: &mut Context,
+    st: &SymbolTable,
+    input: &[u8],
+) -> Result<Vec<ExprRef>> {
+    let mut lexer = Lexer::new(input);
+    let mut nested = NestedSymbolTable::new(st);
+
+    parse_expr_list(ctx, &mut nested, &mut lexer)
+}
+
 fn skip_open_parens(lexer: &mut Lexer) -> Result<()> {
     let token = lexer.next_no_comment();
     if token == Some(Token::Open) {
