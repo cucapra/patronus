@@ -247,12 +247,15 @@ fn parse_expr_or_type(
     todo!("error message!: {stack:?}")
 }
 
+/// Parses SMT expression list (e.g. `((= x #b011) a (bvuge y #b101))`)
+/// and returns [`Vec<ExprRef>`] of SMT expressions in list, or an error if there are mismatched
+/// parentheses or extraneous expressions outside the expression list
 fn parse_expr_list(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Result<Vec<ExprRef>> {
     let mut lexer = Lexer::new(input);
     let mut nst = NestedSymbolTable::new(st);
 
     // Final parsed expressions
-    let mut exprs = Vec::new();
+    let mut exprs = vec![];
 
     skip_open_parens(&mut lexer)?;
 
