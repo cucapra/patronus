@@ -3,8 +3,11 @@
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
 use crate::expr::{Context, ExprRef};
-use crate::smt::parser::{SmtParserError, count_parens, parse_get_value_response};
+use crate::smt::parser::{
+    SmtParserError, count_parens, parse_get_unsat_assumptions_response, parse_get_value_response,
+};
 use crate::smt::serialize::serialize_cmd;
+use rustc_hash::FxHashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter};
 use std::io::{Read, Write};
@@ -29,6 +32,7 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+type SymbolTable = FxHashMap<String, ExprRef>;
 
 /// An SMT Logic.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -65,6 +69,7 @@ pub enum SmtCommand {
     Push(u64),
     Pop(u64),
     GetValue(ExprRef),
+    GetUnsatAssumptions,
 }
 
 /// The result of a `(check-sat)` command.
@@ -83,6 +88,7 @@ pub trait SolverMetaData {
     fn supports_uf(&self) -> bool;
     /// Indicates whether the solver supports the non-standard `(as const)` command.
     fn supports_const_array(&self) -> bool;
+    fn supports_get_unsat_assumptions(&self) -> bool;
 }
 
 /// Allows an SMT solver to start a Context.
@@ -109,6 +115,10 @@ pub trait SolverContext: SolverMetaData {
     fn push(&mut self) -> Result<()>;
     fn pop(&mut self) -> Result<()>;
     fn get_value(&mut self, ctx: &mut Context, e: ExprRef) -> Result<ExprRef>;
+
+    /// # Preconditions
+    /// * Must have preceding `UNSAT` query, else behavior is undefined
+    fn get_unsat_assumptions(&mut self, ctx: &mut Context) -> Result<Vec<ExprRef>>;
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -119,6 +129,7 @@ pub struct SmtLibSolver {
     supports_uf: bool,
     supports_check_assuming: bool,
     supports_const_array: bool,
+    supports_unsat_assumptions: bool,
 }
 
 impl SolverMetaData for SmtLibSolver {
@@ -136,6 +147,10 @@ impl SolverMetaData for SmtLibSolver {
 
     fn supports_const_array(&self) -> bool {
         self.supports_const_array
+    }
+
+    fn supports_get_unsat_assumptions(&self) -> bool {
+        self.supports_unsat_assumptions
     }
 }
 
@@ -166,6 +181,9 @@ impl Solver for SmtLibSolver {
             supports_uf: self.supports_uf,
             supports_check_assuming: self.supports_check_assuming,
             supports_const_array: self.supports_const_array,
+            supports_get_unsat_assumptions: self.supports_unsat_assumptions,
+            symbols: vec![SymbolTable::default()],
+            last_query_unsat: false,
         };
         for option in self.options.iter() {
             solver.write_cmd(
@@ -197,6 +215,12 @@ pub struct SmtLibSolverCtx {
     supports_uf: bool,
     supports_check_assuming: bool,
     supports_const_array: bool,
+    supports_get_unsat_assumptions: bool,
+    /// Internal symbol tables for each solver context
+    /// **Representation invariant**: `symbols.len() > 0`
+    symbols: Vec<SymbolTable>,
+    /// Flag for whether last query was `UNSAT`
+    last_query_unsat: bool,
 }
 
 impl SmtLibSolverCtx {
@@ -310,6 +334,10 @@ impl SolverMetaData for SmtLibSolverCtx {
     fn supports_const_array(&self) -> bool {
         self.supports_const_array
     }
+
+    fn supports_get_unsat_assumptions(&self) -> bool {
+        self.supports_get_unsat_assumptions
+    }
 }
 
 impl SolverContext for SmtLibSolverCtx {
@@ -332,6 +360,8 @@ impl SolverContext for SmtLibSolverCtx {
         for option in self.solver_options.clone() {
             self.write_cmd(None, &SmtCommand::SetOption(option, "true".to_string()))?;
         }
+        self.symbols = vec![SymbolTable::default()];
+        self.last_query_unsat = false;
         Ok(())
     }
 
@@ -344,10 +374,20 @@ impl SolverContext for SmtLibSolverCtx {
     }
 
     fn declare_const(&mut self, ctx: &Context, symbol: ExprRef) -> Result<()> {
+        // Add new constant into current context's symbol table
+        self.symbols
+            .last_mut()
+            .unwrap()
+            .insert(ctx.get_symbol_name(symbol).unwrap().to_string(), symbol);
         self.write_cmd(Some(ctx), &SmtCommand::DeclareConst(symbol))
     }
 
     fn define_const(&mut self, ctx: &Context, symbol: ExprRef, expr: ExprRef) -> Result<()> {
+        // Add new constant into current context's symbol table
+        self.symbols
+            .last_mut()
+            .unwrap()
+            .insert(ctx.get_symbol_name(symbol).unwrap().to_string(), symbol);
         self.write_cmd(Some(ctx), &SmtCommand::DefineConst(symbol, expr))
     }
 
@@ -358,16 +398,22 @@ impl SolverContext for SmtLibSolverCtx {
     ) -> Result<CheckSatResponse> {
         let props: Vec<ExprRef> = props.into_iter().collect();
         self.write_cmd(Some(ctx), &SmtCommand::CheckSatAssuming(props))?;
-        self.read_sat_response()
+        let res = self.read_sat_response()?;
+        self.last_query_unsat = matches!(res, CheckSatResponse::Unsat);
+        Ok(res)
     }
 
     fn check_sat(&mut self) -> Result<CheckSatResponse> {
         self.write_cmd(None, &SmtCommand::CheckSat)?;
-        self.read_sat_response()
+        let res = self.read_sat_response()?;
+        self.last_query_unsat = matches!(res, CheckSatResponse::Unsat);
+        Ok(res)
     }
 
     fn push(&mut self) -> Result<()> {
         self.write_cmd(None, &SmtCommand::Push(1))?;
+        // Add new symbol table for context
+        self.symbols.push(SymbolTable::default());
         self.stack_depth += 1;
         Ok(())
     }
@@ -375,6 +421,8 @@ impl SolverContext for SmtLibSolverCtx {
     fn pop(&mut self) -> Result<()> {
         if self.stack_depth > 0 {
             self.write_cmd(None, &SmtCommand::Pop(1))?;
+            // Remove symbol table from old context
+            self.symbols.pop();
             self.stack_depth -= 1;
             Ok(())
         } else {
@@ -390,15 +438,42 @@ impl SolverContext for SmtLibSolverCtx {
         let expr = parse_get_value_response(ctx, response.as_bytes())?;
         Ok(expr)
     }
+
+    fn get_unsat_assumptions(&mut self, ctx: &mut Context) -> Result<Vec<ExprRef>> {
+        if !self.last_query_unsat {
+            return Err(Error::FromSolver(
+                self.name.clone(),
+                "Previous query not UNSAT".into(),
+            ));
+        }
+
+        // Stage `(get-unsat-assumptions)` command
+        self.write_cmd(None, &SmtCommand::GetUnsatAssumptions)?;
+        self.stdin.flush()?;
+        self.read_response()?;
+        let response = self.response.trim();
+
+        let mut st = SymbolTable::default();
+        for st_ctx in &self.symbols {
+            st.extend(st_ctx.iter().map(|(k, &v)| (k.clone(), v)));
+        }
+
+        Ok(parse_get_unsat_assumptions_response(
+            ctx,
+            &st,
+            response.as_bytes(),
+        )?)
+    }
 }
 
 pub const BITWUZLA: SmtLibSolver = SmtLibSolver {
     name: "bitwuzla",
     args: &[],
-    options: &["incremental", "produce-models"],
+    options: &["incremental", "produce-models", "produce-unsat-assumptions"],
     supports_uf: false,
     supports_check_assuming: true,
     supports_const_array: true,
+    supports_unsat_assumptions: true,
 };
 
 pub const YICES2: SmtLibSolver = SmtLibSolver {
@@ -409,24 +484,27 @@ pub const YICES2: SmtLibSolver = SmtLibSolver {
     supports_check_assuming: false,
     // see https://github.com/SRI-CSL/yices2/issues/110
     supports_const_array: false,
+    supports_unsat_assumptions: false,
 };
 
 pub const Z3: SmtLibSolver = SmtLibSolver {
     name: "z3",
     args: &["-in"],
-    options: &[],
+    options: &["produce-unsat-assumptions"],
     supports_uf: true,
     supports_check_assuming: true,
     supports_const_array: true,
+    supports_unsat_assumptions: true,
 };
 
 pub const CVC5: SmtLibSolver = SmtLibSolver {
     name: "cvc5",
     args: &["--incremental", "--produce-models"],
-    options: &[],
+    options: &["produce-unsat-assumptions"],
     supports_uf: true,
     supports_check_assuming: true,
     supports_const_array: true,
+    supports_unsat_assumptions: true,
 };
 
 #[cfg(test)]
@@ -436,8 +514,7 @@ mod tests {
     #[test]
     fn test_bitwuzla_error() {
         let mut ctx = Context::default();
-        let replay = Some(std::fs::File::create("replay.smt").unwrap());
-        let mut solver = BITWUZLA.start(replay).unwrap();
+        let mut solver = BITWUZLA.start(None).unwrap();
         let a = ctx.bv_symbol("a", 3);
         let e = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
         solver.assert(&ctx, e).unwrap();
@@ -454,8 +531,7 @@ mod tests {
         let mut ctx = Context::default();
         let a = ctx.bv_symbol("a", 3);
         let e = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
-        let replay = Some(std::fs::File::create("replay.smt").unwrap());
-        let mut solver = BITWUZLA.start(replay).unwrap();
+        let mut solver = BITWUZLA.start(None).unwrap();
         solver.declare_const(&ctx, a).unwrap();
         let res = solver.check_sat_assuming(&ctx, [e]);
         assert_eq!(res.unwrap(), CheckSatResponse::Sat);
@@ -463,12 +539,248 @@ mod tests {
         assert_eq!(value_of_a, ctx.bit_vec_val(3, 3));
     }
 
+    /// Check that asserting `a == 3` and `a == 4` requires both facts to prove `UNSAT`
+    #[test]
+    fn test_bitwuzla_unsat_assumptions_basic() {
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 3);
+        let eq3 = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+        let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
+
+        let mut solver = BITWUZLA.start(None).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+
+        let res = solver.check_sat_assuming(&ctx, [eq3, eq4]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
+        assert_eq!(core.len(), 2);
+        assert!(core.contains(&eq3));
+        assert!(core.contains(&eq4));
+    }
+
+    /// Check that asserting `false` initially is enough to prove `UNSAT`
+    #[test]
+    fn test_bitwuzla_unsat_assumptions_false() {
+        let mut ctx = Context::default();
+        let smt_false = ctx.get_false();
+        let a = ctx.bv_symbol("a", 3);
+        let ge3 = ctx.build(|c| c.greater_or_equal(a, c.bit_vec_val(3, 3)));
+        let ge5 = ctx.build(|c| c.greater_or_equal(a, c.bit_vec_val(5, 3)));
+
+        let mut solver = BITWUZLA.start(None).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+        let res = solver
+            .check_sat_assuming(&ctx, [smt_false, ge3, ge5])
+            .unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
+        assert_eq!(core.len(), 1);
+        assert!(core.contains(&smt_false));
+    }
+
+    /// Check that extra fact `b == 1` is not needed to prove `UNSAT` for `a == 3 /\ a == 4`
+    #[test]
+    fn test_bitwuzla_unsat_assumptions_subset() {
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 3);
+        let b = ctx.bv_symbol("b", 3);
+        let eq3 = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+        let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
+        let b_is_1 = ctx.build(|c| c.equal(b, c.bit_vec_val(1, 3))); // unrelated, satisfiable
+
+        let mut solver = BITWUZLA.start(None).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+        solver.declare_const(&ctx, b).unwrap();
+
+        let res = solver.check_sat_assuming(&ctx, [eq3, eq4, b_is_1]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
+        assert_eq!(core.len(), 2);
+        assert!(core.contains(&eq3) && core.contains(&eq4));
+    }
+
+    /// Simulate activation literal `UNSAT` assumptions by asserting
+    /// `x == 2`, `x >= 5`, and `x >= 1` to yield `UNSAT` proof with only first two facts
+    #[test]
+    fn test_bitwuzla_unsat_assumptions_act_lits() {
+        let mut ctx = Context::default();
+        let x = ctx.bv_symbol("x", 3);
+        let eq2 = ctx.build(|c| c.equal(x, c.bit_vec_val(2, 3)));
+        let ge5 = ctx.build(|c| c.greater_or_equal(x, c.bit_vec_val(5, 3)));
+        let ge1 = ctx.build(|c| c.greater_or_equal(x, c.bit_vec_val(1, 3)));
+
+        let mut solver = BITWUZLA.start(None).unwrap();
+        solver.declare_const(&ctx, x).unwrap();
+
+        let mut act_lits = Vec::with_capacity(3);
+        for (idx, expr) in [eq2, ge1, ge5].iter().enumerate() {
+            let lit = ctx.bv_symbol(format!("a_{idx}").as_str(), 1);
+            let imp = ctx.implies(lit, *expr);
+            act_lits.push(lit);
+            solver.declare_const(&ctx, lit).unwrap();
+            solver.assert(&ctx, imp).unwrap();
+        }
+
+        let res = solver.check_sat_assuming(&ctx, act_lits.clone()).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
+        assert_eq!(core.len(), 2);
+        assert!(core.contains(&act_lits[0]) && core.contains(&act_lits[2]));
+    }
+
+    /// Create an `UNSAT` query with an empty `UNSAT` assumptions
+    #[test]
+    fn test_bitwuzla_unsat_assumptions_empty() {
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 3);
+        let b = ctx.bv_symbol("b", 3);
+
+        let eq3 = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+        let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
+        let b_is_1 = ctx.build(|c| c.equal(b, c.bit_vec_val(1, 3)));
+
+        let mut solver = BITWUZLA.start(None).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+        solver.declare_const(&ctx, b).unwrap();
+
+        solver.assert(&ctx, eq3).unwrap();
+        solver.assert(&ctx, eq4).unwrap();
+        solver.assert(&ctx, b_is_1).unwrap();
+
+        let res = solver.check_sat_assuming(&ctx, [b_is_1]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
+        assert!(core.is_empty());
+    }
+
+    /// Simulate pushing and popping context in the solver
+    /// Check that variables in parent contexts persist in child contexts,
+    /// while variables in popped contexts cannot be accessed anymore
+    #[test]
+    fn test_bitwuzla_push_pop() {
+        let mut ctx = Context::default();
+        let x = ctx.bv_symbol("x", 3);
+        let eq2 = ctx.build(|c| c.equal(x, c.bit_vec_val(2, 3)));
+        let ge5 = ctx.build(|c| c.greater_or_equal(x, c.bit_vec_val(5, 3)));
+        let ge1 = ctx.build(|c| c.greater_or_equal(x, c.bit_vec_val(1, 3)));
+
+        let mut solver = BITWUZLA.start(None).unwrap();
+
+        solver.declare_const(&ctx, x).unwrap();
+        let res = solver.check_sat_assuming(&ctx, [eq2, ge5, ge1]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
+        assert_eq!(core.len(), 2);
+        assert!(core.contains(&eq2) && core.contains(&ge5));
+
+        solver.push().unwrap();
+
+        let y = ctx.bv_symbol("y", 3);
+        let y_is_1 = ctx.build(|c| c.equal(y, c.bit_vec_val(1, 3)));
+
+        solver.declare_const(&ctx, y).unwrap();
+        let res = solver
+            .check_sat_assuming(&ctx, [y_is_1, eq2, ge5, ge1])
+            .unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
+        assert_eq!(core.len(), 2);
+        assert!(core.contains(&eq2) && core.contains(&ge5));
+
+        solver.push().unwrap();
+
+        let y_is_2 = ctx.build(|c| c.equal(y, c.bit_vec_val(2, 3)));
+        let res = solver.check_sat_assuming(&ctx, [y_is_1, y_is_2]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
+        assert_eq!(core.len(), 2);
+        assert!(core.contains(&y_is_1) && core.contains(&y_is_2));
+
+        solver.pop().unwrap();
+
+        solver.push().unwrap();
+
+        let z = ctx.bv_symbol("z", 3);
+        let z_is_1 = ctx.build(|c| c.equal(z, c.bit_vec_val(1, 3)));
+        let z_is_2 = ctx.build(|c| c.equal(z, c.bit_vec_val(2, 3)));
+
+        solver.declare_const(&ctx, z).unwrap();
+
+        let res = solver
+            .check_sat_assuming(&ctx, [z_is_1, z_is_2, y_is_1])
+            .unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
+        assert_eq!(core.len(), 2);
+        assert!(core.contains(&z_is_1) && core.contains(&z_is_2));
+
+        solver.pop().unwrap();
+        solver.pop().unwrap();
+
+        let err = solver.check_sat_assuming(&ctx, [y_is_1, y_is_2]);
+        assert!(err.is_err());
+    }
+
+    /// Check that assertions persist in child contexts
+    #[test]
+    fn test_bitwuzla_assert_over_push_pop() {
+        let mut ctx = Context::default();
+        let x = ctx.bv_symbol("x", 3);
+        let eq2 = ctx.build(|c| c.equal(x, c.bit_vec_val(2, 3)));
+
+        let mut solver = BITWUZLA.start(None).unwrap();
+        solver.declare_const(&ctx, x).unwrap();
+        solver.assert(&ctx, eq2).unwrap();
+
+        solver.push().unwrap();
+
+        let eq3 = ctx.build(|c| c.equal(x, c.bit_vec_val(3, 3)));
+        solver.assert(&ctx, eq3).unwrap();
+        let res = solver.check_sat().unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        solver.pop().unwrap();
+    }
+
+    /// Check that `(get-unsat-assumptions)` fails after non-`UNSAT` query
+    #[test]
+    fn test_bitwuzla_unsat_assumptions_fail() {
+        let mut ctx = Context::default();
+        let x = ctx.bv_symbol("x", 3);
+        let eq2 = ctx.build(|c| c.equal(x, c.bit_vec_val(2, 3)));
+
+        let mut solver = BITWUZLA.start(None).unwrap();
+        solver.declare_const(&ctx, x).unwrap();
+
+        let res = solver.check_sat_assuming(&ctx, [eq2]).unwrap();
+        assert_eq!(res, CheckSatResponse::Sat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx);
+        assert!(core.is_err());
+
+        let eq3 = ctx.build(|c| c.equal(x, c.bit_vec_val(3, 3)));
+        let res = solver.check_sat_assuming(&ctx, [eq2, eq3]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
+        assert_eq!(core.len(), 2);
+        assert!(core.contains(&eq2) && core.contains(&eq3));
+    }
+
     #[test]
     fn test_bitwuzla_restart() {
         let mut ctx = Context::default();
         let a = ctx.bv_symbol("a", 3);
-        let replay = Some(std::fs::File::create("replay.smt").unwrap());
-        let mut solver = BITWUZLA.start(replay).unwrap();
+        let mut solver = BITWUZLA.start(None).unwrap();
         let three = ctx.bit_vec_val(3, 3);
         let four = ctx.bit_vec_val(3, 3);
         solver.define_const(&ctx, a, three).unwrap();

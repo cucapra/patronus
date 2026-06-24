@@ -247,6 +247,33 @@ fn parse_expr_or_type(
     todo!("error message!: {stack:?}")
 }
 
+/// Parses SMT expression list (e.g. `((= x #b011) a (bvuge y #b101))`)
+/// and returns [`Vec<ExprRef>`] of SMT expressions in list, or an error if there are mismatched
+/// parentheses or extraneous expressions outside the expression list
+fn parse_expr_list(
+    ctx: &mut Context,
+    st: &mut NestedSymbolTable,
+    lexer: &mut Lexer,
+) -> Result<Vec<ExprRef>> {
+    // Final parsed expressions
+    let mut exprs = vec![];
+
+    skip_open_parens(lexer)?;
+
+    while let Some(token) = lexer.peek_no_comment() {
+        if matches!(token, Token::Close) {
+            // Must be at end of list: return parsed expressions
+            lexer.next_no_comment();
+            return Ok(exprs);
+        }
+
+        // Try to parse expression
+        exprs.push(parse_expr_internal(ctx, st, lexer)?);
+    }
+
+    Err(SmtParserError::MissingClose("eof".to_string()))
+}
+
 /// Extracts the value expression from SMT solver responses of the form ((... value))
 /// We expect value to be self contained and thus no symbol table should be necessary.
 pub fn parse_get_value_response(ctx: &mut Context, input: &[u8]) -> Result<ExprRef> {
@@ -264,6 +291,20 @@ pub fn parse_get_value_response(ctx: &mut Context, input: &[u8]) -> Result<ExprR
     skip_close_parens(&mut lexer)?;
     skip_close_parens(&mut lexer)?;
     Ok(expr)
+}
+
+/// Extracts symbols from SMT solver response after `(get-unsat-assumptions)` call
+/// Parses responses of the form `((expr_1) (expr_2) ... (expr_n))`, where each `expr_i`
+/// can be single literals (e.g. `l`) or compound SMT expressions (i.e. `= l #b1`)
+pub fn parse_get_unsat_assumptions_response(
+    ctx: &mut Context,
+    st: &SymbolTable,
+    input: &[u8],
+) -> Result<Vec<ExprRef>> {
+    let mut lexer = Lexer::new(input);
+    let mut nested = NestedSymbolTable::new(st);
+
+    parse_expr_list(ctx, &mut nested, &mut lexer)
 }
 
 fn skip_open_parens(lexer: &mut Lexer) -> Result<()> {
@@ -912,6 +953,21 @@ impl<'a> Lexer<'a> {
         self.by_ref()
             .find(|token| !matches!(token, Token::Comment(_)))
     }
+
+    /// returns the next token that is not a comment, _without_ consuming it
+    fn peek_no_comment(&mut self) -> Option<Token<'a>> {
+        // Save last state
+        let prev = (self.pos, self.state);
+
+        // Poll token
+        let tok = self.next_no_comment();
+
+        // Restore state
+        self.pos = prev.0;
+        self.state = prev.1;
+
+        tok
+    }
 }
 
 impl<'a> Iterator for Lexer<'a> {
@@ -1119,6 +1175,133 @@ mod tests {
         .unwrap();
         // if we did not call pop_let correctly, we would get or(false, false)
         assert_eq!(smt_expr.serialize_to_str(&ctx), "or(1'b0, 1'b1)");
+    }
+
+    fn test_parse_expr_list(
+        ctx: &mut Context,
+        st: &SymbolTable,
+        input: &str,
+    ) -> Result<Vec<ExprRef>> {
+        let mut lexer = Lexer::new(input.as_bytes());
+        let mut nst = NestedSymbolTable::new(st);
+
+        parse_expr_list(ctx, &mut nst, &mut lexer)
+    }
+
+    #[test]
+    fn test_simple_parse_expr_list() {
+        let mut ctx = Context::default();
+        let mut st = SymbolTable::default();
+
+        let x = ctx.bv_symbol("x", 3);
+        let eq3 = ctx.build(|c| c.equal(x, c.bit_vec_val(3, 3)));
+        let eq5 = ctx.build(|c| c.equal(x, c.bit_vec_val(5, 3)));
+        st.insert("x".to_string(), x);
+
+        let smt_expr = test_parse_expr_list(&mut ctx, &st, "((= x #b011) (= x #b101))").unwrap();
+        assert_eq!(smt_expr.len(), 2);
+        assert!(smt_expr.contains(&eq3) && smt_expr.contains(&eq5));
+
+        let y = ctx.bv_symbol("y", 3);
+        let nex = ctx.build(|c| c.not(c.equal(y, x)));
+        st.insert("y".to_string(), y);
+
+        let smt_expr =
+            test_parse_expr_list(&mut ctx, &st, "((not (= y x)) (= x #b101) (= x #b011))").unwrap();
+        assert_eq!(smt_expr.len(), 3);
+        assert!(smt_expr.contains(&nex) && smt_expr.contains(&eq5) && smt_expr.contains(&eq3));
+    }
+
+    #[test]
+    fn test_parse_expr_list_type() {
+        let mut ctx = Context::default();
+        let mut st = SymbolTable::default();
+
+        let x = ctx.bv_symbol("x", 3);
+        let _x_refl = ctx.build(|c| c.equal(x, x));
+        st.insert("x".to_string(), x);
+
+        let err = test_parse_expr_list(&mut ctx, &st, "((= x x) (_ BitVec 3))");
+        assert!(err.is_err());
+
+        let err = test_parse_expr_list(&mut ctx, &st, "((= x x) (_ BitVec 3))");
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_parse_expr_list_unbalanced() {
+        let mut ctx = Context::default();
+        let mut st = SymbolTable::default();
+
+        let x = ctx.bv_symbol("x", 3);
+        st.insert("x".to_string(), x);
+
+        let err = test_parse_expr_list(&mut ctx, &st, "(((= x #b101))");
+        assert!(err.is_err());
+
+        let err = test_parse_expr_list(&mut ctx, &st, "((= x x) () (= x #b100))");
+        assert!(err.is_err());
+
+        let err = test_parse_expr_list(&mut ctx, &st, "(= x x) (= x #b100)");
+        assert!(err.is_err());
+
+        let err = test_parse_expr_list(&mut ctx, &st, "( () (= x x) (= x #b100))");
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_literals_parse_expr_list() {
+        let mut ctx = Context::default();
+        let mut st = SymbolTable::default();
+
+        let a = ctx.bv_symbol("a", 3);
+        let b = ctx.bv_symbol("b", 3);
+        let c = ctx.bv_symbol("c", 3);
+
+        st.insert("a".to_string(), a);
+        st.insert("b".to_string(), b);
+        st.insert("c".to_string(), c);
+
+        let smt_expr = test_parse_expr_list(&mut ctx, &st, "(a b c)").unwrap();
+        assert_eq!(smt_expr.len(), 3);
+        assert!(smt_expr.contains(&a) && smt_expr.contains(&b) && smt_expr.contains(&c));
+    }
+
+    #[test]
+    fn test_complex_parse_expr_list() {
+        let mut ctx = Context::default();
+        let mut st = SymbolTable::default();
+
+        let a = ctx.bv_symbol("a", 1);
+        let x = ctx.bv_symbol("x", 3);
+        let y = ctx.bv_symbol("y", 3);
+
+        st.insert("a".to_string(), a);
+        st.insert("x".to_string(), x);
+        st.insert("y".to_string(), y);
+
+        let and_x_y = ctx.build(|c| c.equal(c.and(x, y), c.bit_vec_val(7, 3)));
+        let ite_x_y = ctx.build(|c| c.ite(a, x, y));
+
+        let smt_expr =
+            test_parse_expr_list(&mut ctx, &st, "((= (bvand x y) #b111) a (ite a x y))").unwrap();
+        assert_eq!(smt_expr.len(), 3);
+        assert!(
+            smt_expr.contains(&and_x_y) && smt_expr.contains(&ite_x_y) && smt_expr.contains(&a)
+        );
+
+        let ite_comp =
+            ctx.build(|c| c.ite(c.greater(x, c.bit_vec_val(3, 3)), c.add(x, y), c.or(y, x)));
+        let eq_xy = ctx.build(|c| c.equal(x, y));
+
+        let smt_expr = test_parse_expr_list(
+            &mut ctx,
+            &st,
+            "((ite (bvugt x #b011) (bvadd x y) (bvor y x)) (= x y))",
+        )
+        .unwrap();
+        assert_eq!(smt_expr.len(), 2);
+        assert!(smt_expr.contains(&eq_xy) && smt_expr.contains(&ite_comp));
     }
 
     #[test]
