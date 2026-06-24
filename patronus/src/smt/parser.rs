@@ -250,32 +250,26 @@ fn parse_expr_or_type(
 /// Parses SMT expression list (e.g. `((= x #b011) a (bvuge y #b101))`)
 /// and returns [`Vec<ExprRef>`] of SMT expressions in list, or an error if there are mismatched
 /// parentheses or extraneous expressions outside the expression list
-fn parse_expr_list(ctx: &mut Context, st: &SymbolTable, input: &[u8]) -> Result<Vec<ExprRef>> {
-    let mut lexer = Lexer::new(input);
-    let mut nst = NestedSymbolTable::new(st);
-
+fn parse_expr_list(
+    ctx: &mut Context,
+    st: &mut NestedSymbolTable,
+    lexer: &mut Lexer,
+) -> Result<Vec<ExprRef>> {
     // Final parsed expressions
     let mut exprs = vec![];
 
-    skip_open_parens(&mut lexer)?;
+    skip_open_parens(lexer)?;
 
     loop {
         match lexer.peek_no_comment() {
             Some(Token::Close) => {
                 // Found close parenthesis: must be at end of list
                 lexer.next_no_comment();
-
-                if lexer.peek_no_comment().is_none() {
-                    break;
-                }
-
-                return Err(SmtParserError::ExprSuffix(
-                    "expression(s) after expression list".to_string(),
-                ));
+                break;
             }
             Some(_) => {
                 // Try to parse expression
-                exprs.push(parse_expr_internal(ctx, &mut nst, &mut lexer)?);
+                exprs.push(parse_expr_internal(ctx, st, lexer)?);
             }
             None => return Err(SmtParserError::MissingClose("eof".to_string())),
         }
@@ -1178,7 +1172,10 @@ mod tests {
         st: &SymbolTable,
         input: &str,
     ) -> Result<Vec<ExprRef>> {
-        parse_expr_list(ctx, st, input.as_bytes())
+        let mut lexer = Lexer::new(input.as_bytes());
+        let mut nst = NestedSymbolTable::new(st);
+
+        parse_expr_list(ctx, &mut nst, &mut lexer)
     }
 
     #[test]
@@ -1232,22 +1229,13 @@ mod tests {
         let err = test_parse_expr_list(&mut ctx, &st, "(((= x #b101))");
         assert!(err.is_err());
 
-        let err = test_parse_expr_list(&mut ctx, &st, "((= x x)))");
-        assert!(err.is_err());
-
         let err = test_parse_expr_list(&mut ctx, &st, "((= x x) () (= x #b100))");
-        assert!(err.is_err());
-
-        let err = test_parse_expr_list(&mut ctx, &st, "((= x x) ) (= x #b100))");
         assert!(err.is_err());
 
         let err = test_parse_expr_list(&mut ctx, &st, "(= x x) (= x #b100)");
         assert!(err.is_err());
 
         let err = test_parse_expr_list(&mut ctx, &st, "( () (= x x) (= x #b100))");
-        assert!(err.is_err());
-
-        let err = test_parse_expr_list(&mut ctx, &st, "() (= x x) (= x #b100))");
         assert!(err.is_err());
     }
 
