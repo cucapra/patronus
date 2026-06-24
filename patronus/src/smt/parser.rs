@@ -293,6 +293,20 @@ pub fn parse_get_value_response(ctx: &mut Context, input: &[u8]) -> Result<ExprR
     Ok(expr)
 }
 
+/// Extracts symbols from SMT solver response after `(get-unsat-assumptions)` call
+/// Parses responses of the form `((expr_1) (expr_2) ... (expr_n)`, where each `expr_i`
+/// can be single literals (e.g. `l`) or compound SMT expressions (i.e. `= l #b1`)
+pub fn parse_get_unsat_assumptions_response(
+    ctx: &mut Context,
+    st: &SymbolTable,
+    input: &[u8],
+) -> Result<Vec<ExprRef>> {
+    let mut lexer = Lexer::new(input);
+    let mut nested = NestedSymbolTable::new(st);
+
+    parse_expr_list(ctx, &mut nested, &mut lexer)
+}
+
 fn skip_open_parens(lexer: &mut Lexer) -> Result<()> {
     let token = lexer.next_no_comment();
     if token == Some(Token::Open) {
@@ -1288,6 +1302,75 @@ mod tests {
         .unwrap();
         assert_eq!(smt_expr.len(), 2);
         assert!(smt_expr.contains(&eq_xy) && smt_expr.contains(&ite_comp));
+    }
+
+    #[test]
+    fn test_get_unsat_assumptions_parser() {
+        let mut ctx = Context::default();
+        let x = ctx.bv_symbol("x", 3);
+        let a_1 = ctx.bv_symbol("a_1", 1);
+
+        let eq5 = ctx.build(|c| c.equal(x, c.bit_vec_val(5, 3)));
+
+        let mut st = SymbolTable::default();
+        st.insert("x".to_string(), x);
+        st.insert("a_1".to_string(), a_1);
+
+        let exprs =
+            parse_get_unsat_assumptions_response(&mut ctx, &st, "((= x #b101) a_1)".as_ref())
+                .unwrap();
+        assert_eq!(exprs.len(), 2);
+        assert!(exprs.contains(&eq5) && exprs.contains(&a_1));
+
+        let a_2 = ctx.bv_symbol("a_2", 1);
+        st.insert("a_2".to_string(), a_2);
+        let a_3 = ctx.bv_symbol("a_3", 1);
+        st.insert("a_3".to_string(), a_3);
+
+        let exprs =
+            parse_get_unsat_assumptions_response(&mut ctx, &st, "(a_1 a_2 a_3)".as_ref()).unwrap();
+
+        assert_eq!(exprs.len(), 3);
+        assert!(exprs.contains(&a_1) && exprs.contains(&a_2) && exprs.contains(&a_3));
+    }
+
+    #[test]
+    fn test_complex_get_unsat_assumptions_parser() {
+        let mut ctx = Context::default();
+        let mut st = SymbolTable::default();
+
+        let x = ctx.bv_symbol("x", 3);
+        let a_1 = ctx.bv_symbol("a_1", 1);
+        let a_2 = ctx.bv_symbol("a_2", 1);
+
+        st.insert("x".to_string(), x);
+        st.insert("a_1".to_string(), a_1);
+        st.insert("a_2".to_string(), a_2);
+
+        let eq5 = ctx.build(|c| c.equal(x, c.bit_vec_val(5, 3)));
+        let nge3 = ctx.build(|c| c.not(c.greater_or_equal(x, c.bit_vec_val(3, 3))));
+
+        let exprs = parse_get_unsat_assumptions_response(
+            &mut ctx,
+            &st,
+            "((not (bvuge x #b011)) (= x #b101))".as_ref(),
+        )
+        .unwrap();
+
+        assert_eq!(exprs.len(), 2);
+        assert!(exprs.contains(&nge3) && exprs.contains(&eq5));
+
+        let and3 = ctx.build(|c| c.and(c.and(a_1, a_2), nge3));
+
+        let exprs = parse_get_unsat_assumptions_response(
+            &mut ctx,
+            &st,
+            "((and a_1 a_2 (not (bvuge x #b011))))".as_ref(),
+        )
+        .unwrap();
+
+        assert_eq!(exprs.len(), 1);
+        assert!(exprs.contains(&and3));
     }
 
     #[test]
