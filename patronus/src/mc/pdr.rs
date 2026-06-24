@@ -102,13 +102,23 @@ impl PartialOrd for TimedCube {
 }
 
 /// Relative Inductiveness Query types
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum RelIndType {
     /// Standard query (`SAT?[R_{i - 1} /\ T /\ c' ]`
     Standard,
 
     /// Extended query (`SAT?[R_{i - 1} /\ \neg c /\ T /\ c']`)
     Extended,
+}
+
+/// Types of models that can be extracted from the solver
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum ProduceModelOption {
+    /// Do not extract model from solver
+    NoModel,
+
+    /// Extract model as bit-level cube
+    BitLevelCube,
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -207,18 +217,38 @@ fn get_bit_level_cube(
     Ok(Cube { literals })
 }
 
-/// Run `check-sat-assuming` query on solver
+/// Run `check-sat-assuming` query on solver, possibly extracting a model on `SAT` queries
+///
+/// # Returns
+/// A pair containing the query result, and a possible solver model on `SAT` queries (constructed
+/// based on provided `model_opt` option)
 fn query(
-    ctx: &Context,
+    ctx: &mut Context,
     smt_ctx: &mut impl SolverContext,
+    sys: &TransitionSystem,
+    enc: &impl TransitionSystemEncoding,
     assumptions: impl IntoIterator<Item = ExprRef>,
-) -> Result<CheckSatResponse> {
+    model_opt: ProduceModelOption
+) -> Result<(CheckSatResponse, Option<Cube>)> {
     // Run SMT query and remove SMT frame
-    let smt_res = check_assuming(ctx, smt_ctx, assumptions);
+    let smt_res = check_assuming(ctx, smt_ctx, assumptions)?;
+
+    // Extract appropriate model if `SAT`
+    let model = if smt_res == CheckSatResponse::Sat {
+        match model_opt {
+            ProduceModelOption::NoModel => None,
+            ProduceModelOption::BitLevelCube => {
+                Some(get_bit_level_cube(ctx, smt_ctx, sys, enc, FROM_STEP)?)
+            }
+        }
+    } else {
+        None
+    };
+
     check_assuming_end(smt_ctx)?;
 
     // Return result
-    smt_res
+    Ok((smt_res, model))
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -280,10 +310,12 @@ impl BasePdr {
         &self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
+        sys: &TransitionSystem,
         enc: &impl TransitionSystemEncoding,
         cube: &TimedCube,
-        query_type: &RelIndType,
-    ) -> Result<CheckSatResponse> {
+        query_type: RelIndType,
+        model_opt: ProduceModelOption,
+    ) -> Result<(CheckSatResponse, Option<Cube>)> {
         // Query assumptions
         let mut assumptions = Vec::new();
 
@@ -297,14 +329,14 @@ impl BasePdr {
         assumptions.push(cube_nxt);
 
         // Current step negation cube
-        if *query_type == RelIndType::Extended {
+        if query_type == RelIndType::Extended {
             let neg_cube_expr = cube.cube.negate(ctx);
             let neg_cube_cur = expr_at_step(ctx, enc, neg_cube_expr, FROM_STEP);
             assumptions.push(neg_cube_cur);
         }
 
         // Run SMT query
-        query(ctx, smt_ctx, assumptions)
+        query(ctx, smt_ctx, sys, enc, assumptions, model_opt)
     }
 
     /// Add blocked cubes to preceding frames
@@ -361,20 +393,27 @@ impl BasePdr {
         let front_cur = expr_at_step(ctx, enc, front_assumption, FROM_STEP);
 
         // Run query SAT?[R_N /\ \neg P]
-        match query(ctx, smt_ctx, vec![front_cur, bad_expr])? {
-            CheckSatResponse::Sat => {
+        match query(
+            ctx,
+            smt_ctx,
+            sys,
+            enc,
+            vec![front_cur, bad_expr],
+            ProduceModelOption::BitLevelCube,
+        )? {
+            (CheckSatResponse::Sat, Some(cube)) => {
                 // Safety property violation found: return witness cube
-                let bad_cube = get_bit_level_cube(ctx, smt_ctx, sys, enc, FROM_STEP)?;
-                Ok(Some(bad_cube))
+                Ok(Some(cube))
             }
-            CheckSatResponse::Unsat => Ok(None), // No safety property violation found
-            CheckSatResponse::Unknown => Err(
+            (CheckSatResponse::Unsat, _) => Ok(None), // No safety property violation found
+            (CheckSatResponse::Unknown, _) => Err(
                 // Unknown query result: return error for soundness
                 Error::UnexpectedResponse(
                     "`get_bad_cube` in `BasePdr`".into(),
                     "unknown query".into(),
                 ),
             ),
+            _ => unreachable!(),
         }
     }
 
@@ -409,19 +448,24 @@ impl BasePdr {
             }
 
             // Try to get counterexample relative to last frame
-            let res = match self.rel_ind(ctx, smt_ctx, enc, cube, &RelIndType::Extended)? {
-                CheckSatResponse::Sat => {
-                    // Extract counterexample-to-induction
-                    let cex = get_bit_level_cube(ctx, smt_ctx, sys, enc, FROM_STEP)?;
-                    Some(cex)
-                }
-                CheckSatResponse::Unsat => None,
-                CheckSatResponse::Unknown => {
+            let res = match self.rel_ind(
+                ctx,
+                smt_ctx,
+                sys,
+                enc,
+                cube,
+                RelIndType::Extended,
+                ProduceModelOption::BitLevelCube,
+            )? {
+                (CheckSatResponse::Sat, Some(cube)) => Some(cube), // Extract counterexample-to-induction
+                (CheckSatResponse::Unsat, _) => None,
+                (CheckSatResponse::Unknown, _) => {
                     return Err(Error::UnexpectedResponse(
                         "`block_cube` in `BasePdr`".into(),
                         "unknown query".into(),
                     ));
                 }
+                _ => unreachable!(),
             };
 
             if let Some(wit) = res {
@@ -449,6 +493,7 @@ impl BasePdr {
         &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
+        sys: &TransitionSystem,
         enc: &impl TransitionSystemEncoding,
     ) -> Result<bool> {
         // Get frame index
@@ -469,7 +514,17 @@ impl BasePdr {
                 };
 
                 // Check that cube is still blocked in next frame
-                if self.rel_ind(ctx, smt_ctx, enc, &query_cube, &RelIndType::Standard)?
+                if self
+                    .rel_ind(
+                        ctx,
+                        smt_ctx,
+                        sys,
+                        enc,
+                        &query_cube,
+                        RelIndType::Standard,
+                        ProduceModelOption::NoModel,
+                    )?
+                    .0
                     == CheckSatResponse::Unsat
                 {
                     // Add blocked cube to next frame
@@ -544,7 +599,7 @@ pub fn pdr(
             state.add_frame();
 
             // Check if inductive invariant found
-            if state.propagate_blocked_cubes(ctx, smt_ctx, &enc)? {
+            if state.propagate_blocked_cubes(ctx, smt_ctx, sys, &enc)? {
                 return Ok(ModelCheckResult::Success);
             }
         }
