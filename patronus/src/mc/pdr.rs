@@ -228,7 +228,7 @@ fn query(
     sys: &TransitionSystem,
     enc: &impl TransitionSystemEncoding,
     assumptions: impl IntoIterator<Item = ExprRef>,
-    model_opt: ProduceModelOption
+    model_opt: ProduceModelOption,
 ) -> Result<(CheckSatResponse, Option<Cube>)> {
     // Run SMT query and remove SMT frame
     let smt_res = check_assuming(ctx, smt_ctx, assumptions)?;

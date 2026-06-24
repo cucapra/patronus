@@ -160,11 +160,7 @@ fn validate_witness(ctx: &Context, sys: &TransitionSystem, wit: &Witness) {
 // one-liners while the logic lives in exactly one place.
 
 fn case_trivial_fail(solver: &SmtLibSolver, tag: &str) {
-    let (ctx, sys, res) = run_pdr_str(
-        solver,
-        TRIVIAL_FAIL,
-        None,
-    );
+    let (ctx, sys, res) = run_pdr_str(solver, TRIVIAL_FAIL, None);
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -174,11 +170,7 @@ fn case_trivial_fail(solver: &SmtLibSolver, tag: &str) {
 }
 
 fn case_trivial_input_fail(solver: &SmtLibSolver, tag: &str) {
-    let (ctx, sys, res) = run_pdr_str(
-        solver,
-        TRIGGER_BAD,
-        None,
-    );
+    let (ctx, sys, res) = run_pdr_str(solver, TRIGGER_BAD, None);
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -188,11 +180,7 @@ fn case_trivial_input_fail(solver: &SmtLibSolver, tag: &str) {
 }
 
 fn case_overflow_fail(solver: &SmtLibSolver, tag: &str) {
-    let (ctx, sys, res) = run_pdr_file(
-        solver,
-        "../inputs/verilog_tests/Overflow.btor",
-        None,
-    );
+    let (ctx, sys, res) = run_pdr_file(solver, "../inputs/verilog_tests/Overflow.btor", None);
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -202,11 +190,7 @@ fn case_overflow_fail(solver: &SmtLibSolver, tag: &str) {
 }
 
 fn case_simple_fail(solver: &SmtLibSolver, tag: &str) {
-    let (ctx, sys, res) = run_pdr_str(
-        solver,
-        COUNT_2,
-        None,
-    );
+    let (ctx, sys, res) = run_pdr_str(solver, COUNT_2, None);
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -216,20 +200,12 @@ fn case_simple_fail(solver: &SmtLibSolver, tag: &str) {
 }
 
 fn case_delay(solver: &SmtLibSolver, tag: &str) {
-    let (_, _, res) = run_pdr_file(
-        solver,
-        "../inputs/verilog_tests/Delay.btor",
-        None,
-    );
+    let (_, _, res) = run_pdr_file(solver, "../inputs/verilog_tests/Delay.btor", None);
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
 fn case_swap(solver: &SmtLibSolver, tag: &str) {
-    let (_, _, res) = run_pdr_file(
-        solver,
-        "../inputs/verilog_tests/Swap.btor",
-        None,
-    );
+    let (_, _, res) = run_pdr_file(solver, "../inputs/verilog_tests/Swap.btor", None);
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
