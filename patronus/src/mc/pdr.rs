@@ -11,14 +11,13 @@ use crate::mc::{
 use crate::smt::*;
 use crate::system::TransitionSystem;
 use baa::{BitVecOps, Value};
-use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 type Step = u64;
 
-const CUR_STEP: Step = 1;
+const FROM_STEP: Step = 1;
 
-const NXT_STEP: Step = 2;
+const TO_STEP: Step = 2;
 
 const MAX_FRAMES: usize = 1000;
 
@@ -27,12 +26,17 @@ const MAX_FRAMES: usize = 1000;
 // -------------------------------------------------------------------------------------------------
 
 /// A conjunction of literals
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 struct Cube {
     literals: Vec<ExprRef>,
 }
 
 impl Cube {
+    /// Create an empty cube (i.e. `true`)
+    const fn tru() -> Self {
+        Self { literals: vec![] }
+    }
+
     /// Convert this cube into an SMT expression
     fn to_expr(&self, ctx: &mut Context) -> ExprRef {
         // Conjunct all literals
@@ -64,23 +68,31 @@ struct TimedCube {
     frame: usize,
 }
 
-// Custom comparators for `TimedCube` based on frame identifier
-//
+// Equality comparators for `TimedCube`
 // **NOTE**: comparators compare against the frame identifier, **NOT** the cube
 //
-// Therefore, a `TimedCube` is equal to another `TimedCube` iff the frame identifiers are the same
+// Therefore, a `TimedCube` is equal to another `TimedCube` iff the frame identifiers are the same.
 //
 // This simplifies the proof obligation queue ordering by avoiding a non-functional syntactic check
-// on the cubes
+// on the cubes.
 impl Eq for TimedCube {}
 impl PartialEq for TimedCube {
     fn eq(&self, other: &Self) -> bool {
         self.frame.eq(&other.frame)
     }
 }
+
+// Ordering comparators for `TimedCube`
+// **NOTE**: comparators compare against the frame identifier, **NOT** the cube
+//
+// A `TimedCube` with a _lower_ frame identifier is "greater" than another `TimedCube` with a
+// _higher_ frame identifier.
+//
+// This simplifies the proof obligation queue ordering by avoiding the use of `Reverse` to enforce
+// the min-queue ordering by frame identifiers for proof obligations.
 impl Ord for TimedCube {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.frame.cmp(&other.frame)
+        other.frame.cmp(&self.frame)
     }
 }
 impl PartialOrd for TimedCube {
@@ -228,7 +240,7 @@ impl BasePdr {
     /// State variables in transition system need to be stepped
     /// at two adjacent steps
     fn init(ctx: &mut Context, sys: &TransitionSystem) -> Self {
-        let mut init_cube = Cube::default();
+        let mut init_cube = Cube::tru();
 
         // Get all initial states from the system and create equalities between symbol
         // and initial values
@@ -277,42 +289,22 @@ impl BasePdr {
 
         // Get frame assumption
         let frame_assumption = self.frame_assumptions(ctx, cube.frame - 1);
-        assumptions.push(expr_at_step(ctx, enc, frame_assumption, CUR_STEP));
+        assumptions.push(expr_at_step(ctx, enc, frame_assumption, FROM_STEP));
 
         // Next step cube
         let cube_expr = cube.cube.to_expr(ctx);
-        let cube_nxt = expr_at_step(ctx, enc, cube_expr, NXT_STEP);
+        let cube_nxt = expr_at_step(ctx, enc, cube_expr, TO_STEP);
         assumptions.push(cube_nxt);
 
         // Current step negation cube
         if *query_type == RelIndType::Extended {
             let neg_cube_expr = cube.cube.negate(ctx);
-            let neg_cube_cur = expr_at_step(ctx, enc, neg_cube_expr, CUR_STEP);
+            let neg_cube_cur = expr_at_step(ctx, enc, neg_cube_expr, FROM_STEP);
             assumptions.push(neg_cube_cur);
         }
 
         // Run SMT query
         query(ctx, smt_ctx, assumptions)
-    }
-
-    /// Run [`BasePdr::rel_ind`], but yield bit-level witness cube on `SAT` results
-    ///
-    /// # Returns
-    /// [`Some(cube)`] with `SAT` result, else [`None`]
-    fn solve_rel(
-        &self,
-        ctx: &mut Context,
-        smt_ctx: &mut impl SolverContext,
-        sys: &TransitionSystem,
-        enc: &impl TransitionSystemEncoding,
-        cube: &TimedCube,
-    ) -> Result<Option<Cube>> {
-        if self.rel_ind(ctx, smt_ctx, enc, cube, &RelIndType::Extended)? == CheckSatResponse::Sat {
-            let wit = get_bit_level_cube(ctx, smt_ctx, sys, enc, CUR_STEP)?;
-            Ok(Some(wit))
-        } else {
-            Ok(None)
-        }
     }
 
     /// Add blocked cubes to preceding frames
@@ -356,7 +348,7 @@ impl BasePdr {
         let bad_lits: Vec<ExprRef> = sys
             .bad_states
             .iter()
-            .map(|&b| expr_at_step(ctx, enc, b, CUR_STEP))
+            .map(|&b| expr_at_step(ctx, enc, b, FROM_STEP))
             .collect();
 
         // Disjunct all bad state literals
@@ -366,21 +358,21 @@ impl BasePdr {
 
         // Get frame assumptions for frontier frame
         let front_assumption = self.frame_assumptions(ctx, front);
-        let front_cur = expr_at_step(ctx, enc, front_assumption, CUR_STEP);
+        let front_cur = expr_at_step(ctx, enc, front_assumption, FROM_STEP);
 
         // Run query SAT?[R_N /\ \neg P]
         match query(ctx, smt_ctx, vec![front_cur, bad_expr])? {
             CheckSatResponse::Sat => {
                 // Safety property violation found: return witness cube
-                let bad_cube = get_bit_level_cube(ctx, smt_ctx, sys, enc, CUR_STEP)?;
+                let bad_cube = get_bit_level_cube(ctx, smt_ctx, sys, enc, FROM_STEP)?;
                 Ok(Some(bad_cube))
             }
             CheckSatResponse::Unsat => Ok(None), // No safety property violation found
             CheckSatResponse::Unknown => Err(
                 // Unknown query result: return error for soundness
                 Error::UnexpectedResponse(
-                    String::from("`get_bad_cube` in `BasePdr`"),
-                    String::from("unknown query"),
+                    "`get_bad_cube` in `BasePdr`".into(),
+                    "unknown query".into(),
                 ),
             ),
         }
@@ -406,26 +398,39 @@ impl BasePdr {
         enc: &impl TransitionSystemEncoding,
         cube: &TimedCube,
     ) -> Result<bool> {
-        // Min-queue of proof obligations
-        let mut worklist = BinaryHeap::new();
-
-        // Enqueue initial proof obligation
-        worklist.push(Reverse(cube.clone()));
+        // Min-queue of proof obligations: start with initial proof obligation
+        let mut worklist = BinaryHeap::from([cube.clone()]);
 
         // Try to solve all proof obligations
-        while let Some(Reverse(obj)) = worklist.pop() {
+        while let Some(obj) = worklist.pop() {
             // If initial frame reached, concrete counterexample trace found: fail
             if obj.frame == 0 {
                 return Ok(false);
             }
 
-            if let Some(wit) = self.solve_rel(ctx, smt_ctx, sys, enc, &obj)? {
+            // Try to get counterexample relative to last frame
+            let res = match self.rel_ind(ctx, smt_ctx, enc, cube, &RelIndType::Extended)? {
+                CheckSatResponse::Sat => {
+                    // Extract counterexample-to-induction
+                    let cex = get_bit_level_cube(ctx, smt_ctx, sys, enc, FROM_STEP)?;
+                    Some(cex)
+                }
+                CheckSatResponse::Unsat => None,
+                CheckSatResponse::Unknown => {
+                    return Err(Error::UnexpectedResponse(
+                        "`block_cube` in `BasePdr`".into(),
+                        "unknown query".into(),
+                    ));
+                }
+            };
+
+            if let Some(wit) = res {
                 // Counterexample found: try to block predecessor and current obligation
-                worklist.push(Reverse(TimedCube {
+                worklist.push(TimedCube {
                     cube: wit,
                     frame: obj.frame - 1,
-                }));
-                worklist.push(Reverse(obj));
+                });
+                worklist.push(obj);
             } else {
                 // Refine frame trace with cube
                 self.add_blocked_cube(&obj);
@@ -499,7 +504,7 @@ pub fn pdr(
     assert!(sys.constraints.is_empty());
 
     // Initialize two-step variables in solver
-    enc.init_at(ctx, smt_ctx, CUR_STEP)?;
+    enc.init_at(ctx, smt_ctx, FROM_STEP)?;
     enc.unroll(ctx, smt_ctx)?;
 
     // Initialize PDR
@@ -529,7 +534,7 @@ pub fn pdr(
                 let ModelCheckResult::Fail(wit) =
                     bmc(ctx, smt_ctx, sys, false, false, MAX_FRAMES as u64)?
                 else {
-                    panic!("Should be unreachable")
+                    unreachable!()
                 };
 
                 return Ok(ModelCheckResult::Fail(wit));
