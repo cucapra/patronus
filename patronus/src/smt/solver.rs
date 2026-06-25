@@ -616,8 +616,9 @@ mod tests {
             .unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
+        // `false` alone forces UNSAT and is therefore required. Cores are not
+        // required to be minimal, so the redundant `ge3`/`ge5` may also appear.
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
-        assert_eq!(core.len(), 1);
         assert!(core.contains(&smt_false));
     }
 
@@ -642,8 +643,9 @@ mod tests {
         let res = solver.check_sat_assuming(&ctx, [eq3, eq4, b_is_1]).unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
+        // {eq3, eq4} is itself UNSAT, so any sufficient core must contain both.
+        // Cores need not be minimal, so the unrelated `b_is_1` may also appear.
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
-        assert_eq!(core.len(), 2);
         assert!(core.contains(&eq3) && core.contains(&eq4));
     }
 
@@ -676,8 +678,9 @@ mod tests {
         let res = solver.check_sat_assuming(&ctx, act_lits.clone()).unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
+        // act_lits[0] (x==2) and act_lits[2] (x>=5) are jointly UNSAT and thus
+        // required. Cores need not be minimal, so the redundant act_lits[1] may appear.
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
-        assert_eq!(core.len(), 2);
         assert!(core.contains(&act_lits[0]) && core.contains(&act_lits[2]));
     }
 
@@ -732,8 +735,9 @@ mod tests {
         let res = solver.check_sat_assuming(&ctx, [eq2, ge5, ge1]).unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
+        // {eq2, ge5} is itself UNSAT, so a sufficient core must contain both.
+        // Cores need not be minimal, so redundant assumptions may also appear.
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
-        assert_eq!(core.len(), 2);
         assert!(core.contains(&eq2) && core.contains(&ge5));
 
         solver.push().unwrap();
@@ -747,8 +751,9 @@ mod tests {
             .unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
+        // {eq2, ge5} is itself UNSAT, so a sufficient core must contain both.
+        // Cores need not be minimal, so redundant assumptions may also appear.
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
-        assert_eq!(core.len(), 2);
         assert!(core.contains(&eq2) && core.contains(&ge5));
 
         solver.push().unwrap();
@@ -776,8 +781,9 @@ mod tests {
             .unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
+        // {z_is_1, z_is_2} is itself UNSAT, so a sufficient core must contain both.
+        // Cores need not be minimal, so the unrelated `y_is_1` may also appear.
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
-        assert_eq!(core.len(), 2);
         assert!(core.contains(&z_is_1) && core.contains(&z_is_2));
 
         solver.pop().unwrap();
