@@ -534,16 +534,11 @@ pub fn solver_from_env() -> SmtLibSolver {
 mod tests {
     use super::*;
 
-    // These tests run against whichever solver `solver_from_env()` selects (via
-    // the `PATRONUS_TEST_SOLVER` environment variable, defaulting to Bitwuzla).
-    // Tests that exercise an optional capability early-return when the selected
-    // solver does not advertise support for it, so the suite stays green across
-    // every solver configured in CI.
-
     #[test]
     fn test_error() {
         let mut ctx = Context::default();
         let mut solver = solver_from_env().start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         let a = ctx.bv_symbol("a", 3);
         let e = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
         solver.assert(&ctx, e).unwrap();
@@ -565,6 +560,7 @@ mod tests {
         let a = ctx.bv_symbol("a", 3);
         let e = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
         let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, a).unwrap();
         let res = solver.check_sat_assuming(&ctx, [e]);
         assert_eq!(res.unwrap(), CheckSatResponse::Sat);
@@ -585,6 +581,7 @@ mod tests {
         let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
 
         let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, a).unwrap();
 
         let res = solver.check_sat_assuming(&ctx, [eq3, eq4]).unwrap();
@@ -610,6 +607,7 @@ mod tests {
         let ge5 = ctx.build(|c| c.greater_or_equal(a, c.bit_vec_val(5, 3)));
 
         let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, a).unwrap();
         let res = solver
             .check_sat_assuming(&ctx, [smt_false, ge3, ge5])
@@ -637,6 +635,7 @@ mod tests {
         let b_is_1 = ctx.build(|c| c.equal(b, c.bit_vec_val(1, 3))); // unrelated, satisfiable
 
         let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, a).unwrap();
         solver.declare_const(&ctx, b).unwrap();
 
@@ -664,6 +663,7 @@ mod tests {
         let ge1 = ctx.build(|c| c.greater_or_equal(x, c.bit_vec_val(1, 3)));
 
         let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, x).unwrap();
 
         let mut act_lits = Vec::with_capacity(3);
@@ -700,6 +700,7 @@ mod tests {
         let b_is_1 = ctx.build(|c| c.equal(b, c.bit_vec_val(1, 3)));
 
         let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, a).unwrap();
         solver.declare_const(&ctx, b).unwrap();
 
@@ -730,6 +731,7 @@ mod tests {
         let ge1 = ctx.build(|c| c.greater_or_equal(x, c.bit_vec_val(1, 3)));
 
         let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
 
         solver.declare_const(&ctx, x).unwrap();
         let res = solver.check_sat_assuming(&ctx, [eq2, ge5, ge1]).unwrap();
@@ -801,7 +803,6 @@ mod tests {
         let eq2 = ctx.build(|c| c.equal(x, c.bit_vec_val(2, 3)));
 
         let mut solver = solver_from_env().start(None).unwrap();
-        // some solvers (e.g. yices2) require a logic before bit-vector sorts are known
         solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, x).unwrap();
         solver.assert(&ctx, eq2).unwrap();
@@ -828,6 +829,7 @@ mod tests {
         let eq2 = ctx.build(|c| c.equal(x, c.bit_vec_val(2, 3)));
 
         let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, x).unwrap();
 
         let res = solver.check_sat_assuming(&ctx, [eq2]).unwrap();
@@ -850,8 +852,6 @@ mod tests {
         let mut ctx = Context::default();
         let a = ctx.bv_symbol("a", 3);
         let mut solver = solver_from_env().start(None).unwrap();
-        // some solvers (e.g. yices2) require a logic before bit-vector sorts are known
-        solver.set_logic(Logic::QfBv).unwrap();
         let three = ctx.bit_vec_val(3, 3);
         let four = ctx.bit_vec_val(3, 3);
         solver.define_const(&ctx, a, three).unwrap();

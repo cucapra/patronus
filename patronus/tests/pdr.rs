@@ -153,10 +153,6 @@ fn validate_witness(ctx: &Context, sys: &TransitionSystem, wit: &Witness) {
     }
 }
 
-// Shared, parameterized test bodies. Each takes the `solver` to run against.
-// These are plain functions (not `#[test]`s) so the `#[test]` wrappers below
-// stay one-liners while the logic lives in exactly one place.
-
 fn case_trivial_fail(solver: &SmtLibSolver) {
     let (ctx, sys, res) = run_pdr_str(solver, TRIVIAL_FAIL, None);
 
@@ -211,13 +207,6 @@ fn case_aman_goel_4bit(solver: &SmtLibSolver) {
     let (_, _, res) = run_pdr_file(solver, "../inputs/unittest/aman_goel_4bit.btor", None);
     assert!(matches!(res, ModelCheckResult::Success));
 }
-
-// Thin `#[test]` wrappers. These are real source (not macro- or proc-macro-
-// generated), so IDEs like RustRover show clickable run/debug gutter icons for
-// each one. They all run against whichever solver `solver_from_env()` selects
-// (via the `PATRONUS_TEST_SOLVER` environment variable, defaulting to Bitwuzla),
-// so CI can exercise the whole suite against every configured solver by setting
-// a single environment variable per matrix entry.
 
 #[cfg(test)]
 mod pdr {
