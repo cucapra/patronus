@@ -30,6 +30,10 @@ jobs:
       uses: ./.github/workflows/setup-bitwuzla
       with:
         version: ${{ env.BITWUZLA_VERSION }}
+    - name: Set Up Yices
+      uses: ./.github/workflows/setup-yices
+      with:
+        version: ${{ env.YICES_VERSION }}
     - name: Build
       run: cargo build --verbose
     - name: Run tests
@@ -56,7 +60,6 @@ jobs:
         uses: ./.github/workflows/setup-z3
         with:
           version: ${{ env.Z3_VERSION }}
-          glibc_version: ${{ env.GLIBC_VERSION }}
       - name: Set Up CVC5
         if: ${{ matrix.solver == 'cvc5' }}
         uses: ./.github/workflows/setup-cvc5
