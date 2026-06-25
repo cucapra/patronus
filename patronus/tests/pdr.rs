@@ -3,7 +3,7 @@ use patronus::btor2;
 use patronus::expr::Context;
 use patronus::mc::{InitValue, ModelCheckResult, Witness, pdr};
 use patronus::sim::{InitKind, Interpreter, Simulator};
-use patronus::smt::{BITWUZLA, SmtLibSolver, Solver, YICES2};
+use patronus::smt::{SmtLibSolver, Solver, solver_from_env};
 use patronus::system::TransitionSystem;
 use std::path::Path;
 
@@ -153,13 +153,11 @@ fn validate_witness(ctx: &Context, sys: &TransitionSystem, wit: &Witness) {
     }
 }
 
-// Shared, parameterized test bodies. Each takes the `solver` to run against and
-// a `tag` used to prefix the output `.smt` filename, so concurrent runs against
-// different solvers don't clobber each other's replay files. These are plain
-// functions (not `#[test]`s) so the per-solver `#[test]` wrappers below stay
-// one-liners while the logic lives in exactly one place.
+// Shared, parameterized test bodies. Each takes the `solver` to run against.
+// These are plain functions (not `#[test]`s) so the `#[test]` wrappers below
+// stay one-liners while the logic lives in exactly one place.
 
-fn case_trivial_fail(solver: &SmtLibSolver, tag: &str) {
+fn case_trivial_fail(solver: &SmtLibSolver) {
     let (ctx, sys, res) = run_pdr_str(solver, TRIVIAL_FAIL, None);
 
     if let ModelCheckResult::Fail(wit) = res {
@@ -169,7 +167,7 @@ fn case_trivial_fail(solver: &SmtLibSolver, tag: &str) {
     }
 }
 
-fn case_trivial_input_fail(solver: &SmtLibSolver, tag: &str) {
+fn case_trivial_input_fail(solver: &SmtLibSolver) {
     let (ctx, sys, res) = run_pdr_str(solver, TRIGGER_BAD, None);
 
     if let ModelCheckResult::Fail(wit) = res {
@@ -179,7 +177,7 @@ fn case_trivial_input_fail(solver: &SmtLibSolver, tag: &str) {
     }
 }
 
-fn case_overflow_fail(solver: &SmtLibSolver, tag: &str) {
+fn case_overflow_fail(solver: &SmtLibSolver) {
     let (ctx, sys, res) = run_pdr_file(solver, "../inputs/verilog_tests/Overflow.btor", None);
 
     if let ModelCheckResult::Fail(wit) = res {
@@ -189,7 +187,7 @@ fn case_overflow_fail(solver: &SmtLibSolver, tag: &str) {
     }
 }
 
-fn case_simple_fail(solver: &SmtLibSolver, tag: &str) {
+fn case_simple_fail(solver: &SmtLibSolver) {
     let (ctx, sys, res) = run_pdr_str(solver, COUNT_2, None);
 
     if let ModelCheckResult::Fail(wit) = res {
@@ -199,104 +197,65 @@ fn case_simple_fail(solver: &SmtLibSolver, tag: &str) {
     }
 }
 
-fn case_delay(solver: &SmtLibSolver, tag: &str) {
+fn case_delay(solver: &SmtLibSolver) {
     let (_, _, res) = run_pdr_file(solver, "../inputs/verilog_tests/Delay.btor", None);
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
-fn case_swap(solver: &SmtLibSolver, tag: &str) {
+fn case_swap(solver: &SmtLibSolver) {
     let (_, _, res) = run_pdr_file(solver, "../inputs/verilog_tests/Swap.btor", None);
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
-fn case_aman_goel_4bit(solver: &SmtLibSolver, _tag: &str) {
+fn case_aman_goel_4bit(solver: &SmtLibSolver) {
     let (_, _, res) = run_pdr_file(solver, "../inputs/unittest/aman_goel_4bit.btor", None);
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
-// Thin per-solver `#[test]` wrappers. These are real source (not macro- or
-// proc-macro-generated), so IDEs like RustRover show clickable run/debug gutter
-// icons for each one. To run the suite against another backend, copy a module
-// and swap the solver constant + tag, e.g. `mod z3 { ... case_*(&Z3, "z3") }`.
+// Thin `#[test]` wrappers. These are real source (not macro- or proc-macro-
+// generated), so IDEs like RustRover show clickable run/debug gutter icons for
+// each one. They all run against whichever solver `solver_from_env()` selects
+// (via the `PATRONUS_TEST_SOLVER` environment variable, defaulting to Bitwuzla),
+// so CI can exercise the whole suite against every configured solver by setting
+// a single environment variable per matrix entry.
 
 #[cfg(test)]
-mod bitwuzla {
+mod pdr {
     use super::*;
 
     #[test]
     fn test_trivial_fail() {
-        case_trivial_fail(&BITWUZLA, "bitwuzla");
+        case_trivial_fail(&solver_from_env());
     }
 
     #[test]
     fn test_trivial_input_fail() {
-        case_trivial_input_fail(&BITWUZLA, "bitwuzla");
+        case_trivial_input_fail(&solver_from_env());
     }
 
     #[test]
     fn test_overflow_fail() {
-        case_overflow_fail(&BITWUZLA, "bitwuzla");
+        case_overflow_fail(&solver_from_env());
     }
 
     #[test]
     fn test_simple_fail() {
-        case_simple_fail(&BITWUZLA, "bitwuzla");
+        case_simple_fail(&solver_from_env());
     }
 
     #[test]
     fn test_delay() {
-        case_delay(&BITWUZLA, "bitwuzla");
+        case_delay(&solver_from_env());
     }
 
     #[test]
     fn test_swap() {
-        case_swap(&BITWUZLA, "bitwuzla");
+        case_swap(&solver_from_env());
     }
 
     #[ignore = "Cubes are not subsumed in PDR, leading to solver explosion"]
     #[test]
     fn test_aman_goel_4bit() {
-        case_aman_goel_4bit(&BITWUZLA, "bitwuzla");
-    }
-}
-
-#[cfg(test)]
-mod yices2 {
-    use super::*;
-
-    #[test]
-    fn test_trivial_fail() {
-        case_trivial_fail(&YICES2, "yices2");
-    }
-
-    #[test]
-    fn test_trivial_input_fail() {
-        case_trivial_input_fail(&YICES2, "yices2");
-    }
-
-    #[test]
-    fn test_overflow_fail() {
-        case_overflow_fail(&YICES2, "yices2");
-    }
-
-    #[test]
-    fn test_simple_fail() {
-        case_simple_fail(&YICES2, "yices2");
-    }
-
-    #[test]
-    fn test_delay() {
-        case_delay(&YICES2, "yices2");
-    }
-
-    #[test]
-    fn test_swap() {
-        case_swap(&YICES2, "yices2");
-    }
-
-    #[ignore = "Cubes are not subsumed in PDR, leading to solver explosion"]
-    #[test]
-    fn test_aman_goel_4bit() {
-        case_aman_goel_4bit(&YICES2, "yices2");
+        case_aman_goel_4bit(&solver_from_env());
     }
 }
