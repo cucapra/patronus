@@ -243,6 +243,9 @@ fn query(
 ///
 /// **Representation Invariant**: `frames.len() > 0`
 struct BasePdr {
+    /// Initial frame
+    init_frame: Cube,
+
     /// Frame trace containing frames with blocked cubes
     frames: Vec<Vec<Cube>>,
 }
@@ -266,25 +269,41 @@ impl BasePdr {
         }
 
         Self {
-            frames: vec![vec![init_cube]],
+            init_frame: init_cube,
+            frames: vec![vec![]], // Keep index consistency by adding dummy frame in place of init
         }
     }
 
     /// # Returns
-    /// * Clause representing non-init frame
-    /// * Cube representing init frame
-    fn frame_assumptions(&self, ctx: &mut Context, frame: FrameId) -> ExprRef {
-        assert!(frame < self.frames.len());
+    /// Cube expression representing initial states covered by initial frame
+    fn init_frame_assumptions(&self, ctx: &mut Context) -> ExprRef {
+        self.init_frame.clone().to_expr(ctx)
+    }
 
+    /// # Preconditions
+    /// `frame` > 0 /\ `frame` < `self.frames.len()`
+    ///
+    /// # Returns
+    /// Clause representing non-init frame
+    fn non_init_frame_assumptions(&self, ctx: &mut Context, frame: FrameId) -> ExprRef {
+        assert!(frame > 0 && frame < self.frames.len());
+
+        // Else, just get conjunction of negated cubes (clauses)
+        self.frames[frame].iter().fold(ctx.get_true(), |acc, cube| {
+            let clause = cube.negate(ctx);
+            ctx.and(acc, clause)
+        })
+    }
+
+    /// # Returns
+    /// SMT expression representing over-approximation of states reachable in `frame` steps
+    /// (i.e. state space of `frame`-th frame)
+    fn frame_assumptions(&self, ctx: &mut Context, frame: FrameId) -> ExprRef {
         if frame == 0 {
-            // Special case: init frame is just conjunction
-            self.frames[0][0].to_expr(ctx)
+            // Special case: init frame
+            self.init_frame_assumptions(ctx)
         } else {
-            // Else, just get conjunction of negated cubes (clauses)
-            self.frames[frame].iter().fold(ctx.get_true(), |acc, cube| {
-                let clause = cube.negate(ctx);
-                ctx.and(acc, clause)
-            })
+            self.non_init_frame_assumptions(ctx, frame)
         }
     }
 
