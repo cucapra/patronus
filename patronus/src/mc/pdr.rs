@@ -111,16 +111,6 @@ enum RelIndType {
     Extended,
 }
 
-/// Types of models that can be extracted from the solver
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum ProduceModelOption {
-    /// Do not extract model from solver
-    NoModel,
-
-    /// Extract model as bit-level cube
-    BitLevelCube,
-}
-
 // -------------------------------------------------------------------------------------------------
 // PDR helper functions
 // -------------------------------------------------------------------------------------------------
@@ -220,27 +210,21 @@ fn get_bit_level_cube(
 /// Run `check-sat-assuming` query on solver, possibly extracting a model on `SAT` queries
 ///
 /// # Returns
-/// A pair containing the query result, and a possible solver model on `SAT` queries (constructed
-/// based on provided `model_opt` option)
+/// A pair containing the query result, and a solver model from `SAT` queries
 fn query(
     ctx: &mut Context,
     smt_ctx: &mut impl SolverContext,
     sys: &TransitionSystem,
     enc: &impl TransitionSystemEncoding,
-    assumptions: impl IntoIterator<Item = ExprRef>,
-    model_opt: ProduceModelOption,
+    assumptions: impl IntoIterator<Item = ExprRef>
 ) -> Result<(CheckSatResponse, Option<Cube>)> {
     // Run SMT query and remove SMT frame
     let smt_res = check_assuming(ctx, smt_ctx, assumptions)?;
 
     // Extract appropriate model if `SAT`
     let model = if smt_res == CheckSatResponse::Sat {
-        match model_opt {
-            ProduceModelOption::NoModel => None,
-            ProduceModelOption::BitLevelCube => {
-                Some(get_bit_level_cube(ctx, smt_ctx, sys, enc, FROM_STEP)?)
-            }
-        }
+        let cex = get_bit_level_cube(ctx, smt_ctx, sys, enc, FROM_STEP)?;
+        Some(cex)
     } else {
         None
     };
@@ -313,8 +297,7 @@ impl BasePdr {
         sys: &TransitionSystem,
         enc: &impl TransitionSystemEncoding,
         cube: &TimedCube,
-        query_type: RelIndType,
-        model_opt: ProduceModelOption,
+        query_type: RelIndType
     ) -> Result<(CheckSatResponse, Option<Cube>)> {
         // Query assumptions
         let mut assumptions = Vec::new();
@@ -336,7 +319,7 @@ impl BasePdr {
         }
 
         // Run SMT query
-        query(ctx, smt_ctx, sys, enc, assumptions, model_opt)
+        query(ctx, smt_ctx, sys, enc, assumptions)
     }
 
     /// Add blocked cubes to preceding frames
@@ -399,7 +382,6 @@ impl BasePdr {
             sys,
             enc,
             vec![front_cur, bad_expr],
-            ProduceModelOption::BitLevelCube,
         )? {
             (CheckSatResponse::Sat, Some(cube)) => {
                 // Safety property violation found: return witness cube
@@ -455,7 +437,6 @@ impl BasePdr {
                 enc,
                 cube,
                 RelIndType::Extended,
-                ProduceModelOption::BitLevelCube,
             )? {
                 (CheckSatResponse::Sat, Some(cube)) => Some(cube), // Extract counterexample-to-induction
                 (CheckSatResponse::Unsat, _) => None,
@@ -522,7 +503,6 @@ impl BasePdr {
                         enc,
                         &query_cube,
                         RelIndType::Standard,
-                        ProduceModelOption::NoModel,
                     )?
                     .0
                     == CheckSatResponse::Unsat
