@@ -216,7 +216,7 @@ fn query(
     smt_ctx: &mut impl SolverContext,
     sys: &TransitionSystem,
     enc: &impl TransitionSystemEncoding,
-    assumptions: impl IntoIterator<Item = ExprRef>
+    assumptions: impl IntoIterator<Item = ExprRef>,
 ) -> Result<(CheckSatResponse, Option<Cube>)> {
     // Run SMT query and remove SMT frame
     let smt_res = check_assuming(ctx, smt_ctx, assumptions)?;
@@ -297,7 +297,7 @@ impl BasePdr {
         sys: &TransitionSystem,
         enc: &impl TransitionSystemEncoding,
         cube: &TimedCube,
-        query_type: RelIndType
+        query_type: RelIndType,
     ) -> Result<(CheckSatResponse, Option<Cube>)> {
         // Query assumptions
         let mut assumptions = Vec::new();
@@ -376,13 +376,7 @@ impl BasePdr {
         let front_cur = expr_at_step(ctx, enc, front_assumption, FROM_STEP);
 
         // Run query SAT?[R_N /\ \neg P]
-        match query(
-            ctx,
-            smt_ctx,
-            sys,
-            enc,
-            vec![front_cur, bad_expr],
-        )? {
+        match query(ctx, smt_ctx, sys, enc, vec![front_cur, bad_expr])? {
             (CheckSatResponse::Sat, Some(cube)) => {
                 // Safety property violation found: return witness cube
                 Ok(Some(cube))
@@ -430,14 +424,7 @@ impl BasePdr {
             }
 
             // Try to get counterexample relative to last frame
-            let res = match self.rel_ind(
-                ctx,
-                smt_ctx,
-                sys,
-                enc,
-                cube,
-                RelIndType::Extended,
-            )? {
+            let res = match self.rel_ind(ctx, smt_ctx, sys, enc, cube, RelIndType::Extended)? {
                 (CheckSatResponse::Sat, Some(cube)) => Some(cube), // Extract counterexample-to-induction
                 (CheckSatResponse::Unsat, _) => None,
                 (CheckSatResponse::Unknown, _) => {
@@ -496,14 +483,7 @@ impl BasePdr {
 
                 // Check that cube is still blocked in next frame
                 if self
-                    .rel_ind(
-                        ctx,
-                        smt_ctx,
-                        sys,
-                        enc,
-                        &query_cube,
-                        RelIndType::Standard,
-                    )?
+                    .rel_ind(ctx, smt_ctx, sys, enc, &query_cube, RelIndType::Standard)?
                     .0
                     == CheckSatResponse::Unsat
                 {
