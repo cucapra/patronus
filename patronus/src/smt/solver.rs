@@ -852,6 +852,7 @@ mod tests {
         let mut ctx = Context::default();
         let a = ctx.bv_symbol("a", 3);
         let mut solver = solver_from_env().start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         let three = ctx.bit_vec_val(3, 3);
         let four = ctx.bit_vec_val(3, 3);
         solver.define_const(&ctx, a, three).unwrap();
