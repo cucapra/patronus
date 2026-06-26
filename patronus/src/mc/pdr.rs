@@ -239,6 +239,15 @@ fn query(
 // Core PDR
 // -------------------------------------------------------------------------------------------------
 
+/// Frame in PDR
+struct Frame {
+    /// Frame activation literal
+    act: ExprRef,
+
+    /// Blocked cubes in frame
+    cubes: Vec<Cube>,
+}
+
 /// Frame trace maintained by vanilla PDR
 ///
 /// **Representation Invariant**: `frames.len() > 0`
@@ -247,7 +256,10 @@ struct BasePdr {
     init_frame: ExprRef,
 
     /// Frame trace containing frames with blocked cubes
-    frames: Vec<Vec<Cube>>,
+    frames: Vec<Frame>,
+
+    /// Next activation literal identifier
+    next_act_id: u64,
 }
 
 impl BasePdr {
@@ -274,7 +286,7 @@ impl BasePdr {
         }
 
         // Initial frame activation literal
-        let init_act = ctx.bv_symbol("act_0", 1);
+        let init_act = ctx.bv_symbol("__pdr_init_act", 1);
 
         // Create act_0 => init_cube, where init_cube is stepped to the before step
         let init_expr = init_cube.to_expr(ctx);
@@ -287,39 +299,59 @@ impl BasePdr {
 
         Ok(Self {
             init_frame: init_act,
-            frames: vec![vec![]], // Keep index consistency by adding dummy frame in place of init
+            frames: vec![Frame {
+                act: ctx.get_true(),
+                cubes: vec![],
+            }], // Keep index consistency by adding dummy frame in place of init
+            next_act_id: 0,
         })
     }
 
     /// # Returns
-    /// SMT expression representing over-approximation of states reachable in `frame` steps
-    /// (i.e. state space of `frame`-th frame), stepped at pre-transition step
-    fn frame_assumptions(
-        &self,
+    /// New activation literal
+    fn create_act_lit(
+        &mut self,
         ctx: &mut Context,
-        enc: &impl TransitionSystemEncoding,
-        frame: FrameId,
-    ) -> ExprRef {
-        if frame == 0 {
+        smt_ctx: &mut impl SolverContext,
+    ) -> Result<ExprRef> {
+        let act = ctx.bv_symbol(format!("__pdr_act_{}", self.next_act_id).as_str(), 1);
+        self.next_act_id += 1;
+
+        smt_ctx.declare_const(ctx, act)?;
+
+        Ok(act)
+    }
+
+    /// # Returns
+    /// SMT expression asserting over-approximation of states reachable in `frame` steps
+    /// (i.e. state space of `frame`-th frame), stepped at pre-transition step
+    fn frame_assumptions(&self, ctx: &mut Context, frame_id: FrameId) -> ExprRef {
+        if frame_id == 0 {
             // Special case: init frame is just activation literal for initial states
             self.init_frame
         } else {
-            assert!(frame < self.frames.len());
+            assert!(frame_id < self.frames.len());
 
-            // Else, just get conjunction of negated cubes (clauses)
-            let expr = self.frames[frame].iter().fold(ctx.get_true(), |acc, cube| {
-                let clause = cube.negate(ctx);
-                ctx.and(acc, clause)
-            });
-
-            expr_at_step(ctx, enc, expr, FROM_STEP)
+            // Get conjunction with all other frame activation literals negated
+            self.frames
+                .iter()
+                .enumerate()
+                .skip(1) // Prevent dummy frame from poisoning assumptions
+                .fold(ctx.get_true(), |acc, (idx, frame)| {
+                    if idx == frame_id {
+                        ctx.and(acc, frame.act)
+                    } else {
+                        let neg_act = ctx.not(frame.act);
+                        ctx.and(acc, neg_act)
+                    }
+                })
         }
     }
 
     /// Run relative inductiveness query
     /// (i.e. `SAT?[R_{i - 1} /\ \neg c /\ T c']`)
     fn rel_ind(
-        &self,
+        &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
@@ -331,13 +363,20 @@ impl BasePdr {
         let mut assumptions = Vec::new();
 
         // Get frame assumption
-        let frame_assumption = self.frame_assumptions(ctx, enc, cube.frame - 1);
+        let frame_assumption = self.frame_assumptions(ctx, cube.frame - 1);
         assumptions.push(frame_assumption);
 
-        // Next step cube
-        let cube_expr = cube.cube.to_expr(ctx);
-        let cube_nxt = expr_at_step(ctx, enc, cube_expr, TO_STEP);
-        assumptions.push(cube_nxt);
+        for &lit in &cube.cube.literals {
+            // Step literal
+            let lit_cur = expr_at_step(ctx, enc, lit, TO_STEP);
+
+            // Create activation literal for cube literal and associate with cube literal
+            let act = self.create_act_lit(ctx, smt_ctx)?;
+            let imp = ctx.implies(act, lit_cur);
+            smt_ctx.assert(ctx, imp)?;
+
+            assumptions.push(act);
+        }
 
         // Current step negation cube
         if query_type == RelIndType::Extended {
@@ -354,14 +393,29 @@ impl BasePdr {
     ///
     /// # Preconditions
     /// Input cube must be blocked at frame `cube.frame`
-    fn add_blocked_cube(&mut self, cube: &TimedCube) {
+    fn add_blocked_cube(
+        &mut self,
+        ctx: &mut Context,
+        smt_ctx: &mut impl SolverContext,
+        enc: &impl TransitionSystemEncoding,
+        cube: &TimedCube,
+    ) -> Result<()> {
         // Get frontier index
         let front = cube.frame;
 
+        // Convert blocked cube to stepped expression
+        let cube_expr = cube.cube.negate(ctx);
+        let cube_cur = expr_at_step(ctx, enc, cube_expr, FROM_STEP);
+
         // Add new cube to all frames
         for idx in 1..=front {
-            self.frames[idx].push(cube.cube.clone());
+            let imp = ctx.implies(self.frames[idx].act, cube_cur);
+            smt_ctx.assert(ctx, imp)?;
+
+            self.frames[idx].cubes.push(cube.cube.clone());
         }
+
+        Ok(())
     }
 
     /// Frame identifier for frontier frame
@@ -400,7 +454,7 @@ impl BasePdr {
             .fold(ctx.get_false(), |acc, &b| ctx.or(acc, b));
 
         // Get frame assumptions for frontier frame
-        let front_assumption = self.frame_assumptions(ctx, enc, front);
+        let front_assumption = self.frame_assumptions(ctx, front);
 
         // Run query SAT?[R_N /\ \neg P]
         match query(ctx, smt_ctx, sys, enc, vec![front_assumption, bad_expr])? {
@@ -421,8 +475,14 @@ impl BasePdr {
     }
 
     /// Adds empty frame to frame trace
-    fn add_frame(&mut self) {
-        self.frames.push(Vec::new());
+    fn add_frame(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()> {
+        // Create new activation literal for frame
+        let act = self.create_act_lit(ctx, smt_ctx)?;
+
+        // Add new frame
+        self.frames.push(Frame { act, cubes: vec![] });
+
+        Ok(())
     }
 
     /// Block cube in frame trace at certain frame
@@ -472,7 +532,7 @@ impl BasePdr {
                 worklist.push(obj);
             } else {
                 // Refine frame trace with cube
-                self.add_blocked_cube(&obj);
+                self.add_blocked_cube(ctx, smt_ctx, enc, &obj)?;
             }
         }
 
@@ -496,11 +556,11 @@ impl BasePdr {
 
         // Try to propagate blocked cubes in each frame forward
         for idx in 1..front {
-            let mut num_left = self.frames[idx].len();
+            let mut num_left = self.frames[idx].cubes.len();
 
-            for cube_idx in 0..self.frames[idx].len() {
+            for cube_idx in 0..self.frames[idx].cubes.len() {
                 // Get cube
-                let cube = self.frames[idx][cube_idx].clone();
+                let cube = self.frames[idx].cubes[cube_idx].clone();
 
                 // Get timed cube for relative inductiveness query
                 let query_cube = TimedCube {
@@ -514,8 +574,16 @@ impl BasePdr {
                     .0
                     == CheckSatResponse::Unsat
                 {
+                    // Convert candidate cube to stepped expression
+                    let cube_expr = cube.negate(ctx);
+                    let cube_cur = expr_at_step(ctx, enc, cube_expr, FROM_STEP);
+
+                    // Associate cube with next frame in solver
+                    let imp = ctx.implies(self.frames[idx + 1].act, cube_cur);
+                    smt_ctx.assert(ctx, imp)?;
+
                     // Add blocked cube to next frame
-                    self.frames[idx + 1].push(cube.clone());
+                    self.frames[idx + 1].cubes.push(cube.clone());
                     num_left -= 1;
                 }
             }
@@ -583,7 +651,7 @@ pub fn pdr(
             }
         } else {
             // Add new frame
-            state.add_frame();
+            state.add_frame(ctx, smt_ctx)?;
 
             // Check if inductive invariant found
             if state.propagate_blocked_cubes(ctx, smt_ctx, sys, &enc)? {
