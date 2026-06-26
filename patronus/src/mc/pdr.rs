@@ -366,14 +366,10 @@ impl BasePdr {
         let frame_assumption = self.frame_assumptions(ctx, cube.frame - 1);
         assumptions.push(frame_assumption);
 
-        // Add next state cube as literal assumptions (helpful for UNSAT core generalization)
-        assumptions.extend(
-            cube.cube
-                .literals
-                .iter()
-                .map(|&e| expr_at_step(ctx, enc, e, TO_STEP))
-                .collect::<Vec<_>>(),
-        );
+        // Next step cube
+        let cube_expr = cube.cube.to_expr(ctx);
+        let cube_next = expr_at_step(ctx, enc, cube_expr, TO_STEP);
+        assumptions.push(cube_next);
 
         // Current step negation cube
         if query_type == RelIndType::Extended {
