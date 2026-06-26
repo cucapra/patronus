@@ -117,11 +117,7 @@ fn main() {
             check_bad_states_individually,
             k_max,
         ),
-        ModelCheckEngine::Pdr => pdr(
-            &mut ctx,
-            &mut smt_ctx,
-            &sys,
-        ),
+        ModelCheckEngine::Pdr => pdr(&mut ctx, &mut smt_ctx, &sys),
     }
     .unwrap();
     match res {
