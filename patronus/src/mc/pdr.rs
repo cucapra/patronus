@@ -366,17 +366,14 @@ impl BasePdr {
         let frame_assumption = self.frame_assumptions(ctx, cube.frame - 1);
         assumptions.push(frame_assumption);
 
-        for &lit in &cube.cube.literals {
-            // Step literal
-            let lit_cur = expr_at_step(ctx, enc, lit, TO_STEP);
-
-            // Create activation literal for cube literal and associate with cube literal
-            let act = self.create_act_lit(ctx, smt_ctx)?;
-            let imp = ctx.implies(act, lit_cur);
-            smt_ctx.assert(ctx, imp)?;
-
-            assumptions.push(act);
-        }
+        // Add next state cube as literal assumptions (helpful for UNSAT core generalization)
+        assumptions.extend(
+            cube.cube
+                .literals
+                .iter()
+                .map(|&e| expr_at_step(ctx, enc, e, TO_STEP))
+                .collect::<Vec<_>>(),
+        );
 
         // Current step negation cube
         if query_type == RelIndType::Extended {
