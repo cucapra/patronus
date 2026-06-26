@@ -21,23 +21,42 @@ jobs:
       matrix:
         toolchain:
           - stable
+        solver:
+          - bitwuzla
+          - yices2
+          - cvc5
+          - z3
 
     steps:
-    - name: Update Rust to ${{ matrix.toolchain }}
-      run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
     - uses: actions/checkout@v5
-    - name: Set Up Bitwuzla
-      uses: ./.github/workflows/setup-bitwuzla
+    - name: Set Up Z3
+      if: ${{ matrix.solver == 'z3' }}
+      uses: ./.github/workflows/setup-z3
       with:
-        version: ${{ env.BITWUZLA_VERSION }}
+        version: ${{ env.Z3_VERSION }}
+    - name: Set Up CVC5
+      if: ${{ matrix.solver == 'cvc5' }}
+      uses: ./.github/workflows/setup-cvc5
+      with:
+        version: ${{ env.CVC5_VERSION }}
     - name: Set Up Yices
+      if: ${{ matrix.solver == 'yices2' }}
       uses: ./.github/workflows/setup-yices
       with:
         version: ${{ env.YICES_VERSION }}
+    - name: Set Up Bitwuzla
+      if: ${{ matrix.solver == 'bitwuzla' }}
+      uses: ./.github/workflows/setup-bitwuzla
+      with:
+        version: ${{ env.BITWUZLA_VERSION }}
+    - name: Update Rust to ${{ matrix.toolchain }}
+      run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
     - name: Build
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+      env:
+        PATRONUS_TEST_SOLVER: ${{ matrix.solver }}
 
   bmc:
     name: Test BMC Tool

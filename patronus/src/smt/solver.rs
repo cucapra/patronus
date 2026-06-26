@@ -507,14 +507,38 @@ pub const CVC5: SmtLibSolver = SmtLibSolver {
     supports_unsat_assumptions: true,
 };
 
+/// Name of the environment variable used by the test suite to select which SMT
+/// solver to run against. See [`solver_from_env`].
+pub const TEST_SOLVER_ENV: &str = "PATRONUS_TEST_SOLVER";
+
+/// Returns the SMT solver selected by the `PATRONUS_TEST_SOLVER` environment
+/// variable, defaulting to [`BITWUZLA`] when the variable is unset or empty.
+///
+/// Recognized values are `bitwuzla`, `yices2`, `cvc5` and `z3`. This lets the
+/// test suite run against every solver configured in CI by setting a single
+/// environment variable per matrix entry. Panics on an unrecognized value so a
+/// typo in the CI configuration fails loudly instead of silently falling back.
+pub fn solver_from_env() -> SmtLibSolver {
+    match std::env::var(TEST_SOLVER_ENV).ok().as_deref() {
+        None | Some("" | "bitwuzla") => BITWUZLA,
+        Some("yices2") => YICES2,
+        Some("cvc5") => CVC5,
+        Some("z3") => Z3,
+        Some(other) => panic!(
+            "unrecognized {TEST_SOLVER_ENV}={other:?}; expected one of: bitwuzla, yices2, cvc5, z3"
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_bitwuzla_error() {
+    fn test_error() {
         let mut ctx = Context::default();
-        let mut solver = BITWUZLA.start(None).unwrap();
+        let mut solver = solver_from_env().start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         let a = ctx.bv_symbol("a", 3);
         let e = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
         solver.assert(&ctx, e).unwrap();
@@ -527,11 +551,16 @@ mod tests {
     }
 
     #[test]
-    fn test_bitwuzla() {
+    fn test_check_sat_assuming() {
+        let backend = solver_from_env();
+        if !backend.supports_check_assuming() {
+            return;
+        }
         let mut ctx = Context::default();
         let a = ctx.bv_symbol("a", 3);
         let e = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
-        let mut solver = BITWUZLA.start(None).unwrap();
+        let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, a).unwrap();
         let res = solver.check_sat_assuming(&ctx, [e]);
         assert_eq!(res.unwrap(), CheckSatResponse::Sat);
@@ -541,13 +570,18 @@ mod tests {
 
     /// Check that asserting `a == 3` and `a == 4` requires both facts to prove `UNSAT`
     #[test]
-    fn test_bitwuzla_unsat_assumptions_basic() {
+    fn test_unsat_assumptions_basic() {
+        let backend = solver_from_env();
+        if !backend.supports_get_unsat_assumptions() {
+            return;
+        }
         let mut ctx = Context::default();
         let a = ctx.bv_symbol("a", 3);
         let eq3 = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
         let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
 
-        let mut solver = BITWUZLA.start(None).unwrap();
+        let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, a).unwrap();
 
         let res = solver.check_sat_assuming(&ctx, [eq3, eq4]).unwrap();
@@ -561,28 +595,38 @@ mod tests {
 
     /// Check that asserting `false` initially is enough to prove `UNSAT`
     #[test]
-    fn test_bitwuzla_unsat_assumptions_false() {
+    fn test_unsat_assumptions_false() {
+        let backend = solver_from_env();
+        if !backend.supports_get_unsat_assumptions() {
+            return;
+        }
         let mut ctx = Context::default();
         let smt_false = ctx.get_false();
         let a = ctx.bv_symbol("a", 3);
         let ge3 = ctx.build(|c| c.greater_or_equal(a, c.bit_vec_val(3, 3)));
         let ge5 = ctx.build(|c| c.greater_or_equal(a, c.bit_vec_val(5, 3)));
 
-        let mut solver = BITWUZLA.start(None).unwrap();
+        let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, a).unwrap();
         let res = solver
             .check_sat_assuming(&ctx, [smt_false, ge3, ge5])
             .unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
+        // `false` alone forces UNSAT and is therefore required. Cores are not
+        // required to be minimal, so the redundant `ge3`/`ge5` may also appear.
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
-        assert_eq!(core.len(), 1);
         assert!(core.contains(&smt_false));
     }
 
     /// Check that extra fact `b == 1` is not needed to prove `UNSAT` for `a == 3 /\ a == 4`
     #[test]
-    fn test_bitwuzla_unsat_assumptions_subset() {
+    fn test_unsat_assumptions_subset() {
+        let backend = solver_from_env();
+        if !backend.supports_get_unsat_assumptions() {
+            return;
+        }
         let mut ctx = Context::default();
         let a = ctx.bv_symbol("a", 3);
         let b = ctx.bv_symbol("b", 3);
@@ -590,29 +634,36 @@ mod tests {
         let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
         let b_is_1 = ctx.build(|c| c.equal(b, c.bit_vec_val(1, 3))); // unrelated, satisfiable
 
-        let mut solver = BITWUZLA.start(None).unwrap();
+        let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, a).unwrap();
         solver.declare_const(&ctx, b).unwrap();
 
         let res = solver.check_sat_assuming(&ctx, [eq3, eq4, b_is_1]).unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
+        // {eq3, eq4} is itself UNSAT, so any sufficient core must contain both.
+        // Cores need not be minimal, so the unrelated `b_is_1` may also appear.
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
-        assert_eq!(core.len(), 2);
         assert!(core.contains(&eq3) && core.contains(&eq4));
     }
 
     /// Simulate activation literal `UNSAT` assumptions by asserting
     /// `x == 2`, `x >= 5`, and `x >= 1` to yield `UNSAT` proof with only first two facts
     #[test]
-    fn test_bitwuzla_unsat_assumptions_act_lits() {
+    fn test_unsat_assumptions_act_lits() {
+        let backend = solver_from_env();
+        if !backend.supports_get_unsat_assumptions() {
+            return;
+        }
         let mut ctx = Context::default();
         let x = ctx.bv_symbol("x", 3);
         let eq2 = ctx.build(|c| c.equal(x, c.bit_vec_val(2, 3)));
         let ge5 = ctx.build(|c| c.greater_or_equal(x, c.bit_vec_val(5, 3)));
         let ge1 = ctx.build(|c| c.greater_or_equal(x, c.bit_vec_val(1, 3)));
 
-        let mut solver = BITWUZLA.start(None).unwrap();
+        let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, x).unwrap();
 
         let mut act_lits = Vec::with_capacity(3);
@@ -627,14 +678,19 @@ mod tests {
         let res = solver.check_sat_assuming(&ctx, act_lits.clone()).unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
+        // act_lits[0] (x==2) and act_lits[2] (x>=5) are jointly UNSAT and thus
+        // required. Cores need not be minimal, so the redundant act_lits[1] may appear.
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
-        assert_eq!(core.len(), 2);
         assert!(core.contains(&act_lits[0]) && core.contains(&act_lits[2]));
     }
 
     /// Create an `UNSAT` query with an empty `UNSAT` assumptions
     #[test]
-    fn test_bitwuzla_unsat_assumptions_empty() {
+    fn test_unsat_assumptions_empty() {
+        let backend = solver_from_env();
+        if !backend.supports_get_unsat_assumptions() {
+            return;
+        }
         let mut ctx = Context::default();
         let a = ctx.bv_symbol("a", 3);
         let b = ctx.bv_symbol("b", 3);
@@ -643,7 +699,8 @@ mod tests {
         let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
         let b_is_1 = ctx.build(|c| c.equal(b, c.bit_vec_val(1, 3)));
 
-        let mut solver = BITWUZLA.start(None).unwrap();
+        let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, a).unwrap();
         solver.declare_const(&ctx, b).unwrap();
 
@@ -662,21 +719,27 @@ mod tests {
     /// Check that variables in parent contexts persist in child contexts,
     /// while variables in popped contexts cannot be accessed anymore
     #[test]
-    fn test_bitwuzla_push_pop() {
+    fn test_push_pop() {
+        let backend = solver_from_env();
+        if !backend.supports_get_unsat_assumptions() {
+            return;
+        }
         let mut ctx = Context::default();
         let x = ctx.bv_symbol("x", 3);
         let eq2 = ctx.build(|c| c.equal(x, c.bit_vec_val(2, 3)));
         let ge5 = ctx.build(|c| c.greater_or_equal(x, c.bit_vec_val(5, 3)));
         let ge1 = ctx.build(|c| c.greater_or_equal(x, c.bit_vec_val(1, 3)));
 
-        let mut solver = BITWUZLA.start(None).unwrap();
+        let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
 
         solver.declare_const(&ctx, x).unwrap();
         let res = solver.check_sat_assuming(&ctx, [eq2, ge5, ge1]).unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
+        // {eq2, ge5} is itself UNSAT, so a sufficient core must contain both.
+        // Cores need not be minimal, so redundant assumptions may also appear.
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
-        assert_eq!(core.len(), 2);
         assert!(core.contains(&eq2) && core.contains(&ge5));
 
         solver.push().unwrap();
@@ -690,8 +753,9 @@ mod tests {
             .unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
+        // {eq2, ge5} is itself UNSAT, so a sufficient core must contain both.
+        // Cores need not be minimal, so redundant assumptions may also appear.
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
-        assert_eq!(core.len(), 2);
         assert!(core.contains(&eq2) && core.contains(&ge5));
 
         solver.push().unwrap();
@@ -719,8 +783,9 @@ mod tests {
             .unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
+        // {z_is_1, z_is_2} is itself UNSAT, so a sufficient core must contain both.
+        // Cores need not be minimal, so the unrelated `y_is_1` may also appear.
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
-        assert_eq!(core.len(), 2);
         assert!(core.contains(&z_is_1) && core.contains(&z_is_2));
 
         solver.pop().unwrap();
@@ -732,12 +797,13 @@ mod tests {
 
     /// Check that assertions persist in child contexts
     #[test]
-    fn test_bitwuzla_assert_over_push_pop() {
+    fn test_assert_over_push_pop() {
         let mut ctx = Context::default();
         let x = ctx.bv_symbol("x", 3);
         let eq2 = ctx.build(|c| c.equal(x, c.bit_vec_val(2, 3)));
 
-        let mut solver = BITWUZLA.start(None).unwrap();
+        let mut solver = solver_from_env().start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, x).unwrap();
         solver.assert(&ctx, eq2).unwrap();
 
@@ -753,12 +819,17 @@ mod tests {
 
     /// Check that `(get-unsat-assumptions)` fails after non-`UNSAT` query
     #[test]
-    fn test_bitwuzla_unsat_assumptions_fail() {
+    fn test_unsat_assumptions_fail() {
+        let backend = solver_from_env();
+        if !backend.supports_get_unsat_assumptions() {
+            return;
+        }
         let mut ctx = Context::default();
         let x = ctx.bv_symbol("x", 3);
         let eq2 = ctx.build(|c| c.equal(x, c.bit_vec_val(2, 3)));
 
-        let mut solver = BITWUZLA.start(None).unwrap();
+        let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, x).unwrap();
 
         let res = solver.check_sat_assuming(&ctx, [eq2]).unwrap();
@@ -777,10 +848,11 @@ mod tests {
     }
 
     #[test]
-    fn test_bitwuzla_restart() {
+    fn test_restart() {
         let mut ctx = Context::default();
         let a = ctx.bv_symbol("a", 3);
-        let mut solver = BITWUZLA.start(None).unwrap();
+        let mut solver = solver_from_env().start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
         let three = ctx.bit_vec_val(3, 3);
         let four = ctx.bit_vec_val(3, 3);
         solver.define_const(&ctx, a, three).unwrap();
@@ -788,8 +860,10 @@ mod tests {
         let value_of_a = solver.get_value(&mut ctx, a).unwrap();
         assert_eq!(value_of_a, three);
 
-        // restarting bitwuzla allows us to redefine `a`
+        // restarting the solver allows us to redefine `a`
         solver.restart().unwrap();
+        // restart resets the logic too, so set it again for solvers that need it
+        solver.set_logic(Logic::QfBv).unwrap();
         solver.define_const(&ctx, a, four).unwrap();
         let _res = solver.check_sat().unwrap();
         let value_of_a = solver.get_value(&mut ctx, a).unwrap();
