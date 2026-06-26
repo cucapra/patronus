@@ -1,7 +1,7 @@
 [package]
-name = "bmc"
+name = "mc"
 version = "0.1.0"
-description = "A simple bounded model checking tool based on the patronus library."
+description = "A simple model checking tool based on the patronus library."
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true
