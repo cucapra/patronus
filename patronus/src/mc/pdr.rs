@@ -243,6 +243,9 @@ fn query(
 ///
 /// **Representation Invariant**: `frames.len() > 0`
 struct BasePdr {
+    /// Initial frame
+    init_frame: ExprRef,
+
     /// Frame trace containing frames with blocked cubes
     frames: Vec<Vec<Cube>>,
 }
@@ -253,7 +256,12 @@ impl BasePdr {
     /// # Precondition
     /// State variables in transition system need to be stepped
     /// at two adjacent steps
-    fn init(ctx: &mut Context, sys: &TransitionSystem) -> Self {
+    fn init(
+        ctx: &mut Context,
+        smt_ctx: &mut impl SolverContext,
+        enc: &impl TransitionSystemEncoding,
+        sys: &TransitionSystem,
+    ) -> Result<Self> {
         let mut init_cube = Cube::tru();
 
         // Get all initial states from the system and create equalities between symbol
@@ -265,26 +273,46 @@ impl BasePdr {
             }
         }
 
-        Self {
-            frames: vec![vec![init_cube]],
-        }
+        // Initial frame activation literal
+        let init_act = ctx.bv_symbol("act_0", 1);
+
+        // Create act_0 => init_cube, where init_cube is stepped to the before step
+        let init_expr = init_cube.to_expr(ctx);
+        let init_expr = expr_at_step(ctx, enc, init_expr, FROM_STEP);
+        let imp = ctx.implies(init_act, init_expr);
+
+        // Permanently assert implication in solver
+        smt_ctx.declare_const(ctx, init_act)?;
+        smt_ctx.assert(ctx, imp)?;
+
+        Ok(Self {
+            init_frame: init_act,
+            frames: vec![vec![]], // Keep index consistency by adding dummy frame in place of init
+        })
     }
 
     /// # Returns
-    /// * Clause representing non-init frame
-    /// * Cube representing init frame
-    fn frame_assumptions(&self, ctx: &mut Context, frame: FrameId) -> ExprRef {
-        assert!(frame < self.frames.len());
-
+    /// SMT expression representing over-approximation of states reachable in `frame` steps
+    /// (i.e. state space of `frame`-th frame), stepped at pre-transition step
+    fn frame_assumptions(
+        &self,
+        ctx: &mut Context,
+        enc: &impl TransitionSystemEncoding,
+        frame: FrameId,
+    ) -> ExprRef {
         if frame == 0 {
-            // Special case: init frame is just conjunction
-            self.frames[0][0].to_expr(ctx)
+            // Special case: init frame is just activation literal for initial states
+            self.init_frame
         } else {
+            assert!(frame < self.frames.len());
+
             // Else, just get conjunction of negated cubes (clauses)
-            self.frames[frame].iter().fold(ctx.get_true(), |acc, cube| {
+            let expr = self.frames[frame].iter().fold(ctx.get_true(), |acc, cube| {
                 let clause = cube.negate(ctx);
                 ctx.and(acc, clause)
-            })
+            });
+
+            expr_at_step(ctx, enc, expr, FROM_STEP)
         }
     }
 
@@ -303,8 +331,8 @@ impl BasePdr {
         let mut assumptions = Vec::new();
 
         // Get frame assumption
-        let frame_assumption = self.frame_assumptions(ctx, cube.frame - 1);
-        assumptions.push(expr_at_step(ctx, enc, frame_assumption, FROM_STEP));
+        let frame_assumption = self.frame_assumptions(ctx, enc, cube.frame - 1);
+        assumptions.push(frame_assumption);
 
         // Next step cube
         let cube_expr = cube.cube.to_expr(ctx);
@@ -372,11 +400,10 @@ impl BasePdr {
             .fold(ctx.get_false(), |acc, &b| ctx.or(acc, b));
 
         // Get frame assumptions for frontier frame
-        let front_assumption = self.frame_assumptions(ctx, front);
-        let front_cur = expr_at_step(ctx, enc, front_assumption, FROM_STEP);
+        let front_assumption = self.frame_assumptions(ctx, enc, front);
 
         // Run query SAT?[R_N /\ \neg P]
-        match query(ctx, smt_ctx, sys, enc, vec![front_cur, bad_expr])? {
+        match query(ctx, smt_ctx, sys, enc, vec![front_assumption, bad_expr])? {
             (CheckSatResponse::Sat, Some(cube)) => {
                 // Safety property violation found: return witness cube
                 Ok(Some(cube))
@@ -523,7 +550,7 @@ pub fn pdr(
     enc.unroll(ctx, smt_ctx)?;
 
     // Initialize PDR
-    let mut state = BasePdr::init(ctx, sys);
+    let mut state = BasePdr::init(ctx, smt_ctx, &enc, sys)?;
 
     // PDR loop
     while state.frontier() <= MAX_FRAMES {
