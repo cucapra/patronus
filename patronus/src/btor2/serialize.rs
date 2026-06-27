@@ -140,12 +140,32 @@ impl<'a, W: Write> Serializer<'a, W> {
             self.expr_ids[input] = Some(id);
         }
 
-        // 2. declare states (decl only; init/next come at the end)
+        // 2-4. For each state in declaration order, interleave:
+        //    (a) the state's init expression tree (before the state decl, as required
+        //        by BTOR2: the init line's expr operand must have a smaller id than the
+        //        state id itself),
+        //    (b) the state decl,
+        //    (c) the corresponding `init` line.
+        //
+        //    Emitting one state at a time (rather than pre-walking all inits first) is
+        //    required to handle inputs like `const_array_example.btor`, where one state's
+        //    init references an earlier state (e.g. `mem_n` initialized to `write(mem,
+        //    addr, data)`). By the time we process `mem_n`, `mem` is already declared,
+        //    so its symbol resolves and its state id is smaller than `mem_n`'s.
         let mut state_ids: Vec<u64> = Vec::with_capacity(sys.states.len());
         for state in sys.states.iter() {
-            let tpe = state.symbol.get_type(self.ctx);
-            let sort = self.sort_id(tpe)?;
-            let id = self.new_id();
+            let state_tpe = state.symbol.get_type(self.ctx);
+            let state_sort = self.sort_id(state_tpe)?;
+
+            // (a) init expression tree, if any.
+            let init_id = if let Some(init) = state.init {
+                Some(self.emit_state_init(state, init)?)
+            } else {
+                None
+            };
+
+            // (b) state decl.
+            let state_id = self.new_id();
             let raw = self.ctx[state.symbol]
                 .get_symbol_name(self.ctx)
                 .unwrap_or("");
@@ -154,12 +174,18 @@ impl<'a, W: Write> Serializer<'a, W> {
             } else {
                 decl_name(raw, &label_names)
             };
-            writeln!(self.writer, "{id} state {sort}{}", name_suffix(name))?;
-            self.expr_ids[state.symbol] = Some(id);
-            state_ids.push(id);
+            writeln!(self.writer, "{state_id} state {state_sort}{}", name_suffix(name))?;
+            self.expr_ids[state.symbol] = Some(state_id);
+            state_ids.push(state_id);
+
+            // (c) init line. By construction, init_id < state_id.
+            if let Some(init_id) = init_id {
+                let line_id = self.new_id();
+                writeln!(self.writer, "{line_id} init {state_sort} {state_id} {init_id}")?;
+            }
         }
 
-        // 3. outputs
+        // 5. outputs
         for out in sys.outputs.iter() {
             let body_id = self.emit_expr(out.expr)?;
             let id = self.new_id();
@@ -167,7 +193,7 @@ impl<'a, W: Write> Serializer<'a, W> {
             writeln!(self.writer, "{id} output {body_id}{}", name_suffix(&name))?;
         }
 
-        // 4. constraints
+        // 6. constraints
         for (i, &c) in sys.constraints.iter().enumerate() {
             let body_id = self.emit_expr(c)?;
             let id = self.new_id();
@@ -175,7 +201,7 @@ impl<'a, W: Write> Serializer<'a, W> {
             writeln!(self.writer, "{id} constraint {body_id}{}", name_suffix(&name))?;
         }
 
-        // 5. bad states
+        // 7. bad states
         for (i, &b) in sys.bad_states.iter().enumerate() {
             let body_id = self.emit_expr(b)?;
             let id = self.new_id();
@@ -183,7 +209,7 @@ impl<'a, W: Write> Serializer<'a, W> {
             writeln!(self.writer, "{id} bad {body_id}{}", name_suffix(&name))?;
         }
 
-        // 6. trailing aliases: reassert each affected state's name.
+        // 8. trailing aliases: reassert each affected state's name.
         for (state, &state_id) in sys.states.iter().zip(state_ids.iter()) {
             if !alias_needed.contains(&state.symbol) {
                 continue;
@@ -202,15 +228,11 @@ impl<'a, W: Write> Serializer<'a, W> {
             writeln!(self.writer, "{id} uext {sort} {state_id} 0 {raw}")?;
         }
 
-        // 7. init / next per state
+        // 9. next expressions and lines (next may reference states, so it has to come
+        //    after state decls).
         for (state, &state_id) in sys.states.iter().zip(state_ids.iter()) {
-            let state_sort = self.sort_id(state.symbol.get_type(self.ctx))?;
-            if let Some(init) = state.init {
-                let init_id = self.emit_state_init(state, init)?;
-                let id = self.new_id();
-                writeln!(self.writer, "{id} init {state_sort} {state_id} {init_id}")?;
-            }
             if let Some(next) = state.next {
+                let state_sort = self.sort_id(state.symbol.get_type(self.ctx))?;
                 let next_id = self.emit_expr(next)?;
                 let id = self.new_id();
                 writeln!(self.writer, "{id} next {state_sort} {state_id} {next_id}")?;

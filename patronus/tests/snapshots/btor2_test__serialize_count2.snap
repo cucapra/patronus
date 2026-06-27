@@ -3,13 +3,13 @@ source: patronus/tests/btor2_test.rs
 expression: "skip_first_line(&btor2::serialize_to_str(&ctx, &sys))"
 ---
 1 sort bitvec 3
-2 state 1
-3 ones 1
-4 sort bitvec 1
-5 eq 4 2 3
-6 bad 5 _bad_0
-7 zero 1
-8 init 1 2 7
+2 zero 1
+3 state 1
+4 init 1 3 2
+5 ones 1
+6 sort bitvec 1
+7 eq 6 3 5
+8 bad 7 _bad_0
 9 one 1
-10 add 1 2 9
-11 next 1 2 10
+10 add 1 3 9
+11 next 1 3 10

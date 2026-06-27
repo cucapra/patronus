@@ -6,35 +6,35 @@ expression: "skip_first_line(&btor2::serialize_to_str(&ctx, &sys))"
 2 input 1 reset
 3 sort bitvec 16
 4 state 3 counter
-5 state 1 _resetCount
-6 one 1
-7 ugte 1 5 6
-8 not 1 7
-9 implies 1 8 2
-10 constraint 9 _constraint_0
-11 not 1 2
-12 sort bitvec 4
-13 const 12 1010
-14 uext 3 13 12
-15 ugt 1 4 14
-16 not 1 15
-17 implies 1 11 16
+5 zero 1
+6 state 1 _resetCount
+7 init 1 6 5
+8 one 1
+9 ugte 1 6 8
+10 not 1 9
+11 implies 1 10 2
+12 constraint 11 _constraint_0
+13 not 1 2
+14 sort bitvec 4
+15 const 14 1010
+16 uext 3 15 12
+17 ugt 1 4 16
 18 not 1 17
-19 bad 18 _bad_0
-20 zero 3
-21 sort bitvec 17
-22 uext 21 4 1
-23 uext 21 6 16
-24 add 21 22 23
-25 slice 3 24 15 0
-26 ite 3 2 20 25
-27 next 3 4 26
-28 zero 1
-29 init 1 5 28
+19 implies 1 13 18
+20 not 1 19
+21 bad 20 _bad_0
+22 zero 3
+23 sort bitvec 17
+24 uext 23 4 1
+25 uext 23 8 16
+26 add 23 24 25
+27 slice 3 26 15 0
+28 ite 3 2 22 27
+29 next 3 4 28
 30 sort bitvec 2
-31 uext 30 5 1
-32 uext 30 6 1
+31 uext 30 6 1
+32 uext 30 8 1
 33 add 30 31 32
 34 slice 1 33 0 0
-35 ite 1 8 34 5
-36 next 1 5 35
+35 ite 1 10 34 6
+36 next 1 6 35
