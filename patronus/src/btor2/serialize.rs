@@ -73,6 +73,13 @@ struct Serializer<'a, W: Write> {
     alias_needed: rustc_hash::FxHashSet<ExprRef>,
 }
 
+struct LabelNames {
+    outputs: Vec<String>,
+    constraints: Vec<String>,
+    bads: Vec<String>,
+    all: rustc_hash::FxHashSet<String>,
+}
+
 impl<'a, W: Write> Serializer<'a, W> {
     fn new(ctx: &'a Context, writer: &'a mut W) -> Self {
         Serializer {
@@ -130,14 +137,15 @@ impl<'a, W: Write> Serializer<'a, W> {
         // BTOR2 line: otherwise the second line (the `output` etc.) would be forced to
         // rename via `add_unique_str`, breaking idempotent round-trips. Patronus's
         // `improve_state_names` recovers the symbol name on re-parse.
-        self.label_names = collect_label_names(self.ctx, sys);
+        let labels = compute_label_names(self.ctx, sys);
+        self.label_names = labels.all.clone();
 
         // Labels (outputs/bads/constraints) directly referencing an expression whose
         // canonical name differs from the label's name. For each such expression we
         // defer the name to a trailing `uext <e> 0 <name>` alias line: otherwise the
         // label's `sys.names[e]` overwrite (plus `improve_state_names`, for states)
         // would lose the original name on re-parse.
-        self.alias_needed = compute_alias_needed(self.ctx, sys);
+        self.alias_needed = compute_alias_needed(self.ctx, sys, &labels);
 
         // 1. declare inputs
         for &input in sys.inputs.iter() {
@@ -203,31 +211,28 @@ impl<'a, W: Write> Serializer<'a, W> {
         }
 
         // 5. outputs
-        for out in sys.outputs.iter() {
+        for (out, name) in sys.outputs.iter().zip(labels.outputs.iter()) {
             let body_id = self.emit_expr(sys, out.expr)?;
             let id = self.new_id();
-            let name = self.ctx[out.name].clone();
-            writeln!(self.writer, "{id} output {body_id}{}", name_suffix(&name))?;
+            writeln!(self.writer, "{id} output {body_id}{}", name_suffix(name))?;
         }
 
         // 6. constraints
-        for (i, &c) in sys.constraints.iter().enumerate() {
+        for (&c, name) in sys.constraints.iter().zip(labels.constraints.iter()) {
             let body_id = self.emit_expr(sys, c)?;
             let id = self.new_id();
-            let name = label_name(self.ctx, sys, c, "constraint", i);
             writeln!(
                 self.writer,
                 "{id} constraint {body_id}{}",
-                name_suffix(&name)
+                name_suffix(name)
             )?;
         }
 
         // 7. bad states
-        for (i, &b) in sys.bad_states.iter().enumerate() {
+        for (&b, name) in sys.bad_states.iter().zip(labels.bads.iter()) {
             let body_id = self.emit_expr(sys, b)?;
             let id = self.new_id();
-            let name = label_name(self.ctx, sys, b, "bad", i);
-            writeln!(self.writer, "{id} bad {body_id}{}", name_suffix(&name))?;
+            writeln!(self.writer, "{id} bad {body_id}{}", name_suffix(name))?;
         }
 
         // 8. trailing aliases: reassert the canonical name of every flagged symbol
@@ -376,21 +381,25 @@ fn decl_name<'a>(raw: &'a str, label_names: &rustc_hash::FxHashSet<String>) -> &
 ///   * For any other expression, parser's overwrite of `sys.names[e]` from the
 ///     label line would simply replace the debug name, and on re-serialization we'd
 ///     drop it under the label-collision filter.
-fn compute_alias_needed(ctx: &Context, sys: &TransitionSystem) -> rustc_hash::FxHashSet<ExprRef> {
+fn compute_alias_needed(
+    ctx: &Context,
+    sys: &TransitionSystem,
+    labels: &LabelNames,
+) -> rustc_hash::FxHashSet<ExprRef> {
     // Track the *last* label (in emit order: outputs, then constraints, then bads)
     // that directly references each expression. The parser's `sys.names[e]` after
     // re-parse ends up equal to that last label, so we only need a trailing alias
     // when the canonical name differs from it.
     let mut last_label: rustc_hash::FxHashMap<ExprRef, String> = rustc_hash::FxHashMap::default();
 
-    for o in sys.outputs.iter() {
-        last_label.insert(o.expr, ctx[o.name].clone());
+    for (o, label) in sys.outputs.iter().zip(labels.outputs.iter()) {
+        last_label.insert(o.expr, label.clone());
     }
-    for (i, &e) in sys.constraints.iter().enumerate() {
-        last_label.insert(e, label_name(ctx, sys, e, "constraint", i));
+    for (&e, label) in sys.constraints.iter().zip(labels.constraints.iter()) {
+        last_label.insert(e, label.clone());
     }
-    for (i, &e) in sys.bad_states.iter().enumerate() {
-        last_label.insert(e, label_name(ctx, sys, e, "bad", i));
+    for (&e, label) in sys.bad_states.iter().zip(labels.bads.iter()) {
+        last_label.insert(e, label.clone());
     }
 
     let mut out = rustc_hash::FxHashSet::default();
@@ -416,32 +425,78 @@ fn expr_canonical_name(ctx: &Context, sys: &TransitionSystem, e: ExprRef) -> Str
     sys.names[e].map(|s| ctx[s].clone()).unwrap_or_default()
 }
 
-fn collect_label_names(ctx: &Context, sys: &TransitionSystem) -> rustc_hash::FxHashSet<String> {
-    let mut out = rustc_hash::FxHashSet::default();
+fn compute_label_names(ctx: &Context, sys: &TransitionSystem) -> LabelNames {
+    let mut used = parser_reserved_names();
+    let mut all = rustc_hash::FxHashSet::default();
+
+    let mut outputs = Vec::with_capacity(sys.outputs.len());
     for out_sig in sys.outputs.iter() {
-        out.insert(ctx[out_sig.name].clone());
+        let name = unique_name(&ctx[out_sig.name], &mut used);
+        all.insert(name.clone());
+        outputs.push(name);
     }
-    for (i, &e) in sys.constraints.iter().enumerate() {
-        out.insert(label_name(ctx, sys, e, "constraint", i));
+
+    let mut constraints = Vec::with_capacity(sys.constraints.len());
+    for &e in sys.constraints.iter() {
+        let name = unique_name(
+            &label_name_base(ctx, sys, e, DEFAULT_CONSTRAINT_PREFIX),
+            &mut used,
+        );
+        all.insert(name.clone());
+        constraints.push(name);
     }
-    for (i, &e) in sys.bad_states.iter().enumerate() {
-        out.insert(label_name(ctx, sys, e, "bad", i));
+
+    let mut bads = Vec::with_capacity(sys.bad_states.len());
+    for &e in sys.bad_states.iter() {
+        let name = unique_name(
+            &label_name_base(ctx, sys, e, DEFAULT_BAD_STATE_PREFIX),
+            &mut used,
+        );
+        all.insert(name.clone());
+        bads.push(name);
     }
-    out
+
+    LabelNames {
+        outputs,
+        constraints,
+        bads,
+        all,
+    }
 }
 
-fn label_name(
-    ctx: &Context,
-    sys: &TransitionSystem,
-    e: ExprRef,
-    default: &str,
-    i: usize,
-) -> String {
-    ctx[e]
+fn parser_reserved_names() -> rustc_hash::FxHashSet<String> {
+    [
+        DEFAULT_CONSTRAINT_PREFIX,
+        DEFAULT_OUTPUT_PREFIX,
+        DEFAULT_BAD_STATE_PREFIX,
+        DEFAULT_INPUT_PREFIX,
+        DEFAULT_STATE_PREFIX,
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+fn unique_name(base: &str, used: &mut rustc_hash::FxHashSet<String>) -> String {
+    let mut count = 0usize;
+    let mut name = base.to_string();
+    while used.contains(&name) {
+        name = format!("{base}_{count}");
+        count += 1;
+    }
+    used.insert(name.clone());
+    name
+}
+
+fn label_name_base(ctx: &Context, sys: &TransitionSystem, e: ExprRef, default: &str) -> String {
+    let name = ctx[e]
         .get_symbol_name(ctx)
         .map(|s| s.to_string())
-        .or_else(|| sys.names[e].map(|s| ctx[s].clone()))
-        .unwrap_or_else(|| format!("{default}{i}"))
+        .or_else(|| sys.names[e].map(|s| ctx[s].clone()));
+    match name {
+        Some(name) if !is_autogen_name(&name) => name,
+        _ => default.to_string(),
+    }
 }
 
 fn write_node<W: Write>(

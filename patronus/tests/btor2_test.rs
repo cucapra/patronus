@@ -21,6 +21,15 @@ const COUNT_2: &str = r#"
 11 bad 10
 "#;
 
+const DUPLICATE_LABEL_TARGETS: &str = r#"
+1 sort bitvec 1
+2 zero 1
+3 constraint 2
+4 constraint 2
+5 bad 2
+6 bad 2
+"#;
+
 #[test]
 fn parse_count2() {
     let mut ctx = Context::default();
@@ -33,6 +42,19 @@ fn serialize_count2() {
     let mut ctx = Context::default();
     let sys = btor2::parse_str(&mut ctx, COUNT_2, Some("count2")).unwrap();
     insta::assert_snapshot!(skip_first_line(&btor2::serialize_to_str(&ctx, &sys)));
+}
+
+#[test]
+fn serialize_duplicate_bad_and_constraint_targets() {
+    let mut ctx1 = Context::default();
+    let sys1 = btor2::parse_str(&mut ctx1, DUPLICATE_LABEL_TARGETS, Some("duplicate")).unwrap();
+    let text1 = btor2::serialize_to_str(&ctx1, &sys1);
+
+    let mut ctx2 = Context::default();
+    let sys2 = btor2::parse_str(&mut ctx2, &text1, Some("duplicate")).unwrap();
+    let text2 = btor2::serialize_to_str(&ctx2, &sys2);
+
+    assert_eq!(skip_first_line(&text1), skip_first_line(&text2));
 }
 
 const PASS_THROUGH: &str = r#"
