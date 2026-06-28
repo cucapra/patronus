@@ -1,7 +1,9 @@
 // Copyright 2023-2024 The Regents of the University of California
 // Copyright 2024 Cornell University
+// Copyright 2026 The Hong Kong University of Science and Technology
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
+// author: Guangyu Hu <ghuae@connect.ust.hk>, The Hong Kong University of Science and Technology
 
 use super::parse::{
     DEFAULT_BAD_STATE_PREFIX, DEFAULT_CONSTRAINT_PREFIX, DEFAULT_INPUT_PREFIX,
