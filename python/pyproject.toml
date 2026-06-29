@@ -1,6 +1,6 @@
 [project]
 name = "pypatronus"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dynamic = ["version"]
 license = "BSD-3-Clause"
 description = "The hardware bug-finding toolkit for Python programmers."
@@ -27,7 +27,7 @@ features = ["pyo3/extension-module"]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.4.2",
+    "pytest>=9.1",
 ]
 
 [tool.uv]
