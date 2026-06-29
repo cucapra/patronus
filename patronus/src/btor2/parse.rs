@@ -71,6 +71,14 @@ pub const DEFAULT_OUTPUT_PREFIX: &str = "_output";
 pub const DEFAULT_BAD_STATE_PREFIX: &str = "_bad";
 pub const DEFAULT_CONSTRAINT_PREFIX: &str = "_constraint";
 
+pub const PARSER_RESERVED_NAMES: &[&str] = &[
+    DEFAULT_CONSTRAINT_PREFIX,
+    DEFAULT_OUTPUT_PREFIX,
+    DEFAULT_BAD_STATE_PREFIX,
+    DEFAULT_INPUT_PREFIX,
+    DEFAULT_STATE_PREFIX,
+];
+
 impl<'a> Parser<'a> {
     fn new(ctx: &'a mut Context) -> Self {
         Parser {
@@ -91,17 +99,10 @@ impl<'a> Parser<'a> {
         backup_name: Option<&str>,
     ) -> Result<TransitionSystem, Errors> {
         // ensure that default input and state names are reserved in order to get nicer names
-        self.unique_names = FxHashSet::from_iter(
-            [
-                DEFAULT_CONSTRAINT_PREFIX,
-                DEFAULT_OUTPUT_PREFIX,
-                DEFAULT_BAD_STATE_PREFIX,
-                DEFAULT_INPUT_PREFIX,
-                DEFAULT_STATE_PREFIX,
-            ]
-            .into_iter()
-            .map(|s| s.to_string()),
-        );
+        self.unique_names = PARSER_RESERVED_NAMES
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
 
         for line_res in input.lines() {
             let line = line_res.expect("failed to read line");
@@ -250,15 +251,8 @@ impl<'a> Parser<'a> {
     }
 
     fn add_unique_str(&mut self, start: &str) -> StringRef {
-        let mut count: usize = 0;
-        let mut name = start.to_string();
-        while self.unique_names.contains(&name) {
-            name = format!("{start}_{count}");
-            count += 1;
-        }
-        let id = self.ctx.string(Cow::Borrowed(&name));
-        self.unique_names.insert(name);
-        id
+        let name = unique_name(start, &mut self.unique_names);
+        self.ctx.string(Cow::Borrowed(&name))
     }
 
     fn check_expr_type(
@@ -839,6 +833,17 @@ fn improve_state_names(ctx: &mut Context, sys: &mut TransitionSystem) {
                 .map(|new_name_ref| ctx.symbol(*new_name_ref, expr_ref.get_type(ctx)))
         },
     );
+}
+
+pub(crate) fn unique_name(base: &str, used: &mut FxHashSet<String>) -> String {
+    let mut count = 0usize;
+    let mut name = base.to_string();
+    while used.contains(&name) {
+        name = format!("{base}_{count}");
+        count += 1;
+    }
+    used.insert(name.clone());
+    name
 }
 
 // Line Tokenizer

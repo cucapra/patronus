@@ -6,13 +6,14 @@
 // author: Guangyu Hu <ghuae@connect.ust.hk>, The Hong Kong University of Science and Technology
 
 use super::parse::{
-    DEFAULT_BAD_STATE_PREFIX, DEFAULT_CONSTRAINT_PREFIX, DEFAULT_INPUT_PREFIX,
-    DEFAULT_OUTPUT_PREFIX, DEFAULT_STATE_PREFIX,
+    DEFAULT_BAD_STATE_PREFIX, DEFAULT_CONSTRAINT_PREFIX, PARSER_RESERVED_NAMES, unique_name,
 };
+use crate::VERSION;
 use crate::expr::*;
 use crate::system::{State, TransitionSystem};
 use baa::BitVecOps;
-use rustc_hash::FxHashMap;
+use regex::Regex;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::io::Write;
 
 /// The patronus parser assigns default names of the form `_state`, `_state_0`, `_state_1`,
@@ -21,26 +22,18 @@ use std::io::Write;
 /// and forces unwanted `_N` suffixes on unrelated symbols, which breaks round-trips. We
 /// filter such names back out on the way to BTOR2 and let the parser regenerate them.
 fn is_autogen_name(name: &str) -> bool {
-    const PREFIXES: &[&str] = &[
-        DEFAULT_STATE_PREFIX,
-        DEFAULT_INPUT_PREFIX,
-        DEFAULT_OUTPUT_PREFIX,
-        DEFAULT_BAD_STATE_PREFIX,
-        DEFAULT_CONSTRAINT_PREFIX,
-    ];
-    for prefix in PREFIXES {
-        if name == *prefix {
-            return true;
-        }
-        if let Some(rest) = name.strip_prefix(prefix)
-            && let Some(tail) = rest.strip_prefix('_')
-            && !tail.is_empty()
-            && tail.chars().all(|c| c.is_ascii_digit())
-        {
-            return true;
-        }
-    }
-    false
+    AUTOGEN_NAME_REGEX.is_match(name)
+}
+
+lazy_static! {
+    static ref AUTOGEN_NAME_REGEX: Regex = {
+        let prefix = PARSER_RESERVED_NAMES
+            .iter()
+            .map(|n| format!("({n})"))
+            .collect::<Vec<_>>()
+            .join("|");
+        Regex::new(&format!("^({prefix})(_\\d+)?$")).unwrap()
+    };
 }
 
 pub fn serialize(
@@ -50,8 +43,6 @@ pub fn serialize(
 ) -> std::io::Result<()> {
     Serializer::new(ctx, writer).serialize_sys(sys)
 }
-
-const VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
 
 pub fn serialize_to_str(ctx: &Context, sys: &TransitionSystem) -> String {
     let mut buf = Vec::new();
@@ -65,21 +56,28 @@ struct Serializer<'a, W: Write> {
     next_id: u64,
     sort_ids: FxHashMap<Type, u64>,
     expr_ids: SparseExprMap<Option<u64>>,
-    /// Names on output/bad/constraint lines. Preserving an intermediate
-    /// expression's debug name that happens to collide with a label name would
-    /// confuse the parser's `improve_state_names` pass on re-parse, so we skip
-    /// those.
-    label_names: rustc_hash::FxHashSet<String>,
+    /// precomputed output/bad/constraint labels
+    label_names: FxHashSet<String>,
     /// Expressions whose canonical name is restored via a trailing
     /// `uext <sort> <e> 0 <name>` alias line; they are emitted unnamed inline.
-    alias_needed: rustc_hash::FxHashSet<ExprRef>,
+    alias_needed: FxHashSet<ExprRef>,
 }
 
 struct LabelNames {
     outputs: Vec<String>,
     constraints: Vec<String>,
     bads: Vec<String>,
-    all: rustc_hash::FxHashSet<String>,
+}
+
+impl LabelNames {
+    fn all(&self) -> FxHashSet<String> {
+        self.outputs
+            .iter()
+            .chain(self.constraints.iter())
+            .chain(self.bads.iter())
+            .cloned()
+            .collect()
+    }
 }
 
 impl<'a, W: Write> Serializer<'a, W> {
@@ -90,8 +88,8 @@ impl<'a, W: Write> Serializer<'a, W> {
             next_id: 1,
             sort_ids: FxHashMap::default(),
             expr_ids: SparseExprMap::default(),
-            label_names: rustc_hash::FxHashSet::default(),
-            alias_needed: rustc_hash::FxHashSet::default(),
+            label_names: FxHashSet::default(),
+            alias_needed: FxHashSet::default(),
         }
     }
 
@@ -134,13 +132,9 @@ impl<'a, W: Write> Serializer<'a, W> {
             VERSION.unwrap_or_default()
         )?;
 
-        // Names that appear on output/bad/constraint lines. A state or input whose
-        // symbol already carries such a name must be declared *without* a name on the
-        // BTOR2 line: otherwise the second line (the `output` etc.) would be forced to
-        // rename via `add_unique_str`, breaking idempotent round-trips. Patronus's
-        // `improve_state_names` recovers the symbol name on re-parse.
+        // precompute label names for stable round-trips
         let labels = compute_label_names(self.ctx, sys);
-        self.label_names = labels.all.clone();
+        self.label_names = labels.all();
 
         // Labels (outputs/bads/constraints) directly referencing an expression whose
         // canonical name differs from the label's name. For each such expression we
@@ -351,6 +345,7 @@ impl<'a, W: Write> Serializer<'a, W> {
     }
 }
 
+/// Pads name with a space for use at the end of a btor2 line
 fn name_suffix(name: &str) -> String {
     if name.is_empty() {
         String::new()
@@ -363,7 +358,7 @@ fn name_suffix(name: &str) -> String {
 /// (1) the symbol carries an autogenerated default prefix (the parser will regenerate it),
 /// (2) the name would clash with an output/bad/constraint label (in which case the parser's
 /// `improve_state_names` pass will propagate the name back onto the symbol on re-parse).
-fn decl_name<'a>(raw: &'a str, label_names: &rustc_hash::FxHashSet<String>) -> &'a str {
+fn decl_name<'a>(raw: &'a str, label_names: &FxHashSet<String>) -> &'a str {
     if raw.is_empty() || is_autogen_name(raw) || label_names.contains(raw) {
         ""
     } else {
@@ -387,12 +382,12 @@ fn compute_alias_needed(
     ctx: &Context,
     sys: &TransitionSystem,
     labels: &LabelNames,
-) -> rustc_hash::FxHashSet<ExprRef> {
+) -> FxHashSet<ExprRef> {
     // Track the *last* label (in emit order: outputs, then constraints, then bads)
     // that directly references each expression. The parser's `sys.names[e]` after
     // re-parse ends up equal to that last label, so we only need a trailing alias
     // when the canonical name differs from it.
-    let mut last_label: rustc_hash::FxHashMap<ExprRef, String> = rustc_hash::FxHashMap::default();
+    let mut last_label: FxHashMap<ExprRef, String> = FxHashMap::default();
 
     for (o, label) in sys.outputs.iter().zip(labels.outputs.iter()) {
         last_label.insert(o.expr, label.clone());
@@ -404,7 +399,7 @@ fn compute_alias_needed(
         last_label.insert(e, label.clone());
     }
 
-    let mut out = rustc_hash::FxHashSet::default();
+    let mut out = FxHashSet::default();
     for (e, label) in last_label {
         let name = expr_canonical_name(ctx, sys, e);
         if name.is_empty() || is_autogen_name(&name) {
@@ -428,66 +423,42 @@ fn expr_canonical_name(ctx: &Context, sys: &TransitionSystem, e: ExprRef) -> Str
 }
 
 fn compute_label_names(ctx: &Context, sys: &TransitionSystem) -> LabelNames {
-    let mut used = parser_reserved_names();
-    let mut all = rustc_hash::FxHashSet::default();
+    let mut used = PARSER_RESERVED_NAMES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
 
-    let mut outputs = Vec::with_capacity(sys.outputs.len());
-    for out_sig in sys.outputs.iter() {
-        let name = unique_name(&ctx[out_sig.name], &mut used);
-        all.insert(name.clone());
-        outputs.push(name);
-    }
-
-    let mut constraints = Vec::with_capacity(sys.constraints.len());
-    for &e in sys.constraints.iter() {
-        let name = unique_name(
-            &label_name_base(ctx, sys, e, DEFAULT_CONSTRAINT_PREFIX),
-            &mut used,
-        );
-        all.insert(name.clone());
-        constraints.push(name);
-    }
-
-    let mut bads = Vec::with_capacity(sys.bad_states.len());
-    for &e in sys.bad_states.iter() {
-        let name = unique_name(
-            &label_name_base(ctx, sys, e, DEFAULT_BAD_STATE_PREFIX),
-            &mut used,
-        );
-        all.insert(name.clone());
-        bads.push(name);
-    }
+    let outputs = sys
+        .outputs
+        .iter()
+        .map(|out| unique_name(&ctx[out.name], &mut used))
+        .collect();
+    let constraints = sys
+        .constraints
+        .iter()
+        .map(|&e| {
+            unique_name(
+                &label_name_base(ctx, sys, e, DEFAULT_CONSTRAINT_PREFIX),
+                &mut used,
+            )
+        })
+        .collect();
+    let bads = sys
+        .bad_states
+        .iter()
+        .map(|&e| {
+            unique_name(
+                &label_name_base(ctx, sys, e, DEFAULT_BAD_STATE_PREFIX),
+                &mut used,
+            )
+        })
+        .collect();
 
     LabelNames {
         outputs,
         constraints,
         bads,
-        all,
     }
-}
-
-fn parser_reserved_names() -> rustc_hash::FxHashSet<String> {
-    [
-        DEFAULT_CONSTRAINT_PREFIX,
-        DEFAULT_OUTPUT_PREFIX,
-        DEFAULT_BAD_STATE_PREFIX,
-        DEFAULT_INPUT_PREFIX,
-        DEFAULT_STATE_PREFIX,
-    ]
-    .into_iter()
-    .map(str::to_string)
-    .collect()
-}
-
-fn unique_name(base: &str, used: &mut rustc_hash::FxHashSet<String>) -> String {
-    let mut count = 0usize;
-    let mut name = base.to_string();
-    while used.contains(&name) {
-        name = format!("{base}_{count}");
-        count += 1;
-    }
-    used.insert(name.clone());
-    name
 }
 
 fn label_name_base(ctx: &Context, sys: &TransitionSystem, e: ExprRef, default: &str) -> String {
@@ -596,6 +567,7 @@ fn write_node<W: Write>(
         )?,
 
         Expr::ArrayConstant { .. } => {
+            // TODO: this situation could be handled by creating a new constant state.
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "cannot serialize ArrayConstant outside of a state's init position: \
@@ -616,24 +588,31 @@ fn write_bv_literal<W: Write>(
     // The body is written without a trailing newline; `write_node` appends the
     // name suffix (if any) and the newline.
     let v = value.get(ctx);
-    let width = value.width();
     if v.is_zero() {
         write!(writer, "{id} zero {sort}")
-    } else if width > 1 && v.is_all_ones() {
-        write!(writer, "{id} ones {sort}")
-    } else if is_bv_one(&v) {
-        // width == 1 and v == 1 is also `ones`, but `one` reads just as well and keeps
-        // round-trips stable (parser accepts either).
+    } else if v.is_one() {
         write!(writer, "{id} one {sort}")
+    } else if v.is_all_ones() {
+        write!(writer, "{id} ones {sort}")
     } else {
         write!(writer, "{id} const {sort} {}", v.to_bit_str())
     }
 }
 
-fn is_bv_one<V: BitVecOps>(v: &V) -> bool {
-    if v.width() == 0 {
-        return false;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_is_autogen_name() {
+        assert!(!is_autogen_name(""));
+        assert!(is_autogen_name("_input"));
+        assert!(!is_autogen_name("_input_"));
+        assert!(is_autogen_name("_input_0"));
+        assert!(is_autogen_name("_input_1"));
+        assert!(is_autogen_name("_input_10"));
+        assert!(is_autogen_name("_input_999999"));
+        assert!(!is_autogen_name("_input_999_999"));
+        assert!(!is_autogen_name("_input_999999_"));
     }
-    let one = baa::BitVecValue::from_u64(1, v.width());
-    v.is_equal(&one)
 }
