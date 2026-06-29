@@ -3,19 +3,20 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use clap::{Parser, ValueEnum};
+use clap::error::ErrorKind;
+use clap::{CommandFactory, Parser, ValueEnum};
 use patronus::expr::*;
-use patronus::mc::bmc;
+use patronus::mc::{bmc, pdr};
 use patronus::smt::*;
 use patronus::system::transform::simplify_expressions;
 use patronus::*;
 use std::fs::File;
 
 #[derive(Parser, Debug)]
-#[command(name = "bmc")]
+#[command(name = "mc")]
 #[command(author = "Kevin Laeufer <laeufer@berkeley.edu>")]
 #[command(version)]
-#[command(about = "Performs bounded model checking on a btor2 file.", long_about = None)]
+#[command(about = "Performs model checking on a btor2 file.", long_about = None)]
 struct Args {
     #[arg(
         long,
@@ -24,8 +25,10 @@ struct Args {
         help = "the SMT solver to use"
     )]
     solver: SolverChoice,
-    #[arg(short, long, default_value = "25")]
-    kmax: u64,
+    #[arg(short, long, default_value = "bmc", help = "model checking engine")]
+    engine: ModelCheckEngine,
+    #[arg(short, long, help = "max BMC depth (bmc engine only) [default: 25]")]
+    kmax: Option<u64>,
     #[arg(short, long)]
     verbose: bool,
     #[arg(short, long)]
@@ -44,8 +47,25 @@ pub enum SolverChoice {
     CVC5,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum ModelCheckEngine {
+    Bmc,
+    Pdr,
+}
+
 fn main() {
     let args = Args::parse();
+
+    if args.kmax.is_some() && args.engine != ModelCheckEngine::Bmc {
+        Args::command()
+            .error(
+                ErrorKind::ArgumentConflict,
+                "--kmax can only be used with the bmc engine (--engine bmc)",
+            )
+            .exit();
+    }
+    let kmax = args.kmax.unwrap_or(25);
+
     let (mut ctx, mut sys) = btor2::parse_file(&args.filename).expect("Failed to load btor2 file!");
     if !args.skip_simplify {
         if args.verbose {
@@ -69,7 +89,7 @@ fn main() {
         }
         0
     } else {
-        args.kmax
+        kmax
     };
     let check_constraints = true;
     let check_bad_states_individually = false;
@@ -88,14 +108,17 @@ fn main() {
         None
     };
     let mut smt_ctx = solver.start(dump_file).expect("failed to start solver");
-    let res = bmc(
-        &mut ctx,
-        &mut smt_ctx,
-        &sys,
-        check_constraints,
-        check_bad_states_individually,
-        k_max,
-    )
+    let res = match args.engine {
+        ModelCheckEngine::Bmc => bmc(
+            &mut ctx,
+            &mut smt_ctx,
+            &sys,
+            check_constraints,
+            check_bad_states_individually,
+            k_max,
+        ),
+        ModelCheckEngine::Pdr => pdr(&mut ctx, &mut smt_ctx, &sys),
+    }
     .unwrap();
     match res {
         mc::ModelCheckResult::Success => {
