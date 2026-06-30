@@ -297,7 +297,7 @@ impl Frame {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         enc: &impl TransitionSystemEncoding,
-        cube: &Cube,
+        cube: Cube,
     ) -> Result<()> {
         // Create implication act_i => \neg c, where c is the blocked cube stepped at current step
         let clause = cube.negate(ctx);
@@ -308,7 +308,7 @@ impl Frame {
         smt_ctx.assert(ctx, imp)?;
 
         // Add blocked cube to frame
-        self.cubes.push(cube.clone());
+        self.cubes.push(cube);
 
         Ok(())
     }
@@ -422,20 +422,20 @@ impl BasePdr {
             // Special case: init frame is just activation literal for initial states
             self.init_frame
         } else {
-            // Get conjunction with all other frame activation literals negated
+            // Sanity check
+            assert!(frame_id <= self.frontier());
+
+            // Conjunct all blocked cubes in this frame and higher (since all blocked
+            // cubes in higher delta frames are also blocked in this frame)
             self.iter().fold(ctx.get_true(), |acc, id| {
-                if id == frame_id {
-                    // Include activation literals of target frame
+                if id >= frame_id {
+                    // Include activation literals of target frame and all higher frames,
+                    // which include cubes blocked in the `frame_id`-th frame
                     ctx.and(acc, self[id].act)
                 } else {
-                    // Avoid solver bloat/slowdown by "disabling" other activation literals
-                    //
-                    // Sound since the actual state space represented by the `frame_id`-th
-                    // frame is directly "activated" by `self[frame_id].act`. Allowing the solver
-                    // to explore activation for the other frames would be redundant (for the
-                    // upper frames) or unsound (for the lower frames)
-                    //
-                    // Note: must only "disable" lower frames once delta frames are implemented
+                    // Deactivate lower frames to preserve soundness,
+                    // since they represent overapproximations of reachable state
+                    // that are stronger than that of the `frame_id`-th frame
                     let neg_act = ctx.not(self[id].act);
                     ctx.and(acc, neg_act)
                 }
@@ -475,34 +475,6 @@ impl BasePdr {
 
         // Run SMT query
         query(ctx, smt_ctx, sys, enc, assumptions)
-    }
-
-    /// Add blocked cubes to preceding frames
-    ///
-    /// # Preconditions
-    /// Input cube must be blocked at frame `cube.frame`
-    fn add_blocked_cube(
-        &mut self,
-        ctx: &mut Context,
-        smt_ctx: &mut impl SolverContext,
-        enc: &impl TransitionSystemEncoding,
-        cube: &TimedCube,
-    ) -> Result<()> {
-        // Get frontier index
-        let front = cube.frame;
-
-        // Get frame identifiers up to and including front index
-        let ids = self
-            .iter()
-            .take_while(|id| id <= &front)
-            .collect::<Vec<_>>();
-
-        // Add new cube to all frames
-        for id in ids {
-            self[id].add_blocked_cube(ctx, smt_ctx, enc, &cube.cube)?;
-        }
-
-        Ok(())
     }
 
     /// Frame identifier for frontier frame
@@ -589,10 +561,10 @@ impl BasePdr {
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
         enc: &impl TransitionSystemEncoding,
-        cube: &TimedCube,
+        cube: TimedCube,
     ) -> Result<bool> {
         // Min-queue of proof obligations: start with initial proof obligation
-        let mut worklist = BinaryHeap::from([cube.clone()]);
+        let mut worklist = BinaryHeap::from([cube]);
 
         // Try to solve all proof obligations
         while let Some(obj) = worklist.pop() {
@@ -602,7 +574,7 @@ impl BasePdr {
             }
 
             // Try to get counterexample relative to last frame
-            let res = match self.rel_ind(ctx, smt_ctx, sys, enc, cube, RelIndType::Extended)? {
+            let res = match self.rel_ind(ctx, smt_ctx, sys, enc, &obj, RelIndType::Extended)? {
                 (CheckSatResponse::Sat, Some(cube)) => Some(cube), // Extract counterexample-to-induction
                 (CheckSatResponse::Unsat, _) => None,
                 (CheckSatResponse::Unknown, _) => {
@@ -622,8 +594,26 @@ impl BasePdr {
                 });
                 worklist.push(obj);
             } else {
+                let mut test_cube = TimedCube {
+                    cube: obj.cube.clone(),
+                    frame: obj.frame.increment(),
+                };
+
+                // Push cube as far as possible in the frame trace
+                while test_cube.frame <= self.frontier()
+                    && self
+                        .rel_ind(ctx, smt_ctx, sys, enc, &test_cube, RelIndType::Extended)?
+                        .0
+                        == CheckSatResponse::Unsat
+                {
+                    test_cube.frame = test_cube.frame.increment();
+                }
+
+                // Restore "working" frame
+                test_cube.frame = test_cube.frame.decrement();
+
                 // Refine frame trace with cube
-                self.add_blocked_cube(ctx, smt_ctx, enc, &obj)?;
+                self[test_cube.frame].add_blocked_cube(ctx, smt_ctx, enc, test_cube.cube)?;
             }
         }
 
@@ -650,32 +640,31 @@ impl BasePdr {
 
         // Try to propagate blocked cubes in each frame forward
         for id in ids {
-            let mut num_left = self[id].cubes.len();
-
-            for cube_idx in 0..self[id].cubes.len() {
-                // Get cube
-                let cube = self[id].cubes[cube_idx].clone();
-
+            for cube in std::mem::take(&mut self[id].cubes) {
                 // Get timed cube for relative inductiveness query
                 let query_cube = TimedCube {
-                    cube: cube.clone(),
+                    cube,
                     frame: id.increment(),
                 };
 
-                // Check that cube is still blocked in next frame
-                if self
+                // Run query `SAT?[R_i /\ T /\ c]`, where `c` is the candidate cube
+                // for propagation
+                let smt_res = self
                     .rel_ind(ctx, smt_ctx, sys, enc, &query_cube, RelIndType::Standard)?
-                    .0
-                    == CheckSatResponse::Unsat
-                {
+                    .0;
+
+                // Check that cube is still blocked in next frame
+                if smt_res == CheckSatResponse::Unsat {
                     // Add blocked cube to next frame
-                    self[id.increment()].add_blocked_cube(ctx, smt_ctx, enc, &cube)?;
-                    num_left -= 1;
+                    self[id.increment()].add_blocked_cube(ctx, smt_ctx, enc, query_cube.cube)?;
+                } else {
+                    // Query must have been SAT or UNKNOWN: do not propagate to ensure soundness
+                    self[id].cubes.push(query_cube.cube);
                 }
             }
 
             // Check for inductive invariant: all clauses propagated
-            if num_left == 0 {
+            if self[id].cubes.is_empty() {
                 return Ok(true);
             }
         }
@@ -706,8 +695,10 @@ pub fn pdr(
     // Initialize PDR
     let mut state = BasePdr::init(ctx, smt_ctx, &enc, sys)?;
 
+    let limit = FrameId::Finite(NonZeroUsize::new(MAX_FRAMES).unwrap());
+
     // PDR loop
-    while state.frontier() <= FrameId::Finite(NonZeroUsize::new(MAX_FRAMES).unwrap()) {
+    while state.frontier() <= limit {
         // Try to get bad cube
         let bad_cube = state.get_bad_cube(ctx, smt_ctx, sys, &enc)?;
 
@@ -718,7 +709,7 @@ pub fn pdr(
                 smt_ctx,
                 sys,
                 &enc,
-                &TimedCube {
+                TimedCube {
                     cube: bad,
                     frame: state.frontier(),
                 },
