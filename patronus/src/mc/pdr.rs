@@ -640,13 +640,7 @@ impl BasePdr {
 
         // Try to propagate blocked cubes in each frame forward
         for id in ids {
-            // Blocked cubes that cannot be propagated to the next frame
-            let mut retain = vec![];
-
-            for cube_idx in 0..self[id].cubes.len() {
-                // Get cube
-                let cube = self[id].cubes[cube_idx].clone();
-
+            for cube in std::mem::take(&mut self[id].cubes) {
                 // Get timed cube for relative inductiveness query
                 let query_cube = TimedCube {
                     cube,
@@ -665,17 +659,14 @@ impl BasePdr {
                     self[id.increment()].add_blocked_cube(ctx, smt_ctx, enc, query_cube.cube)?;
                 } else {
                     // Query must have been SAT or UNKNOWN: do not propagate to ensure soundness
-                    retain.push(query_cube.cube);
+                    self[id].cubes.push(query_cube.cube);
                 }
             }
 
             // Check for inductive invariant: all clauses propagated
-            if retain.is_empty() {
+            if self[id].cubes.is_empty() {
                 return Ok(true);
             }
-
-            // Replace current frame with retained blocked cubes
-            self[id].cubes = retain;
         }
 
         // Inductive invariant not found
