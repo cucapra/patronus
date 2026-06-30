@@ -242,7 +242,6 @@ mod pdr {
         case_swap(&solver_from_env());
     }
 
-    #[ignore = "Cubes are not subsumed in PDR, leading to solver explosion"]
     #[test]
     fn test_aman_goel_4bit() {
         case_aman_goel_4bit(&solver_from_env());

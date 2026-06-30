@@ -590,7 +590,7 @@ impl BasePdr {
             }
 
             // Try to get counterexample relative to last frame
-            let res = match self.rel_ind(ctx, smt_ctx, sys, enc, cube, RelIndType::Extended)? {
+            let res = match self.rel_ind(ctx, smt_ctx, sys, enc, &obj, RelIndType::Extended)? {
                 (CheckSatResponse::Sat, Some(cube)) => Some(cube), // Extract counterexample-to-induction
                 (CheckSatResponse::Unsat, _) => None,
                 (CheckSatResponse::Unknown, _) => {
@@ -611,7 +611,7 @@ impl BasePdr {
                 worklist.push(obj);
             } else {
                 let mut test_cube = TimedCube {
-                    cube: cube.cube.clone(),
+                    cube: obj.cube.clone(),
                     frame: obj.frame.increment(),
                 };
 
