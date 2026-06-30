@@ -12,6 +12,8 @@ use crate::smt::*;
 use crate::system::TransitionSystem;
 use baa::{BitVecOps, Value};
 use std::collections::BinaryHeap;
+use std::num::NonZeroUsize;
+use std::ops::{Index, IndexMut};
 
 type Step = u64;
 
@@ -20,6 +22,9 @@ const FROM_STEP: Step = 1;
 const TO_STEP: Step = 2;
 
 const MAX_FRAMES: usize = 1000;
+
+/// Activation literal prefix
+const ACT_LIT_PREFIX: &str = "__pdr_act_";
 
 // -------------------------------------------------------------------------------------------------
 // Core PDR data structures
@@ -59,13 +64,11 @@ impl Cube {
     }
 }
 
-type FrameId = usize;
-
 /// Cube and relevant frame identifier
 #[derive(Debug, Clone)]
 struct TimedCube {
     cube: Cube,
-    frame: usize,
+    frame: FrameId,
 }
 
 // Equality comparators for `TimedCube`
@@ -109,6 +112,47 @@ enum RelIndType {
 
     /// Extended query (`SAT?[R_{i - 1} /\ \neg c /\ T /\ c']`)
     Extended,
+}
+
+/// Equality is defined by constructor and inner fields (i.e. `FrameId::Init == FrameId::Init`,
+/// `FrameId::Finite(5) == FrameId::Finite(5)`)
+///
+/// Comparison is defined as a partial order where `FrameId::Init` <= `FrameId::Finite` and
+/// `FrameId::Finite` is compared against inner field
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum FrameId {
+    /// Initial frame
+    Init,
+
+    /// Finite, non-initial frame
+    Finite(NonZeroUsize),
+}
+
+impl FrameId {
+    const fn increment(self) -> Self {
+        match self {
+            Self::Init => Self::Finite(NonZeroUsize::new(1).unwrap()),
+            Self::Finite(n) => Self::Finite(NonZeroUsize::new(n.get() + 1).unwrap()),
+        }
+    }
+
+    /// # Panics
+    /// If [`FrameId::Init`] is decremented
+    fn decrement(self) -> Self {
+        match self {
+            Self::Init => panic!("Cannot decrement init"),
+            Self::Finite(n) => {
+                let fin = n.get() - 1;
+
+                if fin == 0 {
+                    // Decremented to init frame
+                    Self::Init
+                } else {
+                    Self::Finite(NonZeroUsize::new(fin).unwrap())
+                }
+            }
+        }
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -239,6 +283,37 @@ fn query(
 // Core PDR
 // -------------------------------------------------------------------------------------------------
 
+struct Frame {
+    /// Frame activation literal
+    act: ExprRef,
+
+    /// Blocked cubes in frame
+    cubes: Vec<Cube>,
+}
+
+impl Frame {
+    fn add_blocked_cube(
+        &mut self,
+        ctx: &mut Context,
+        smt_ctx: &mut impl SolverContext,
+        enc: &impl TransitionSystemEncoding,
+        cube: &Cube,
+    ) -> Result<()> {
+        // Create implication act_i => \neg c, where c is the blocked cube stepped at current step
+        let clause = cube.negate(ctx);
+        let clause_expr = expr_at_step(ctx, enc, clause, FROM_STEP);
+        let imp = ctx.implies(self.act, clause_expr);
+
+        // Permanently assert implication in solver
+        smt_ctx.assert(ctx, imp)?;
+
+        // Add blocked cube to frame
+        self.cubes.push(cube.clone());
+
+        Ok(())
+    }
+}
+
 /// Frame trace maintained by vanilla PDR
 ///
 /// **Representation Invariant**: `frames.len() > 0`
@@ -247,7 +322,39 @@ struct BasePdr {
     init_frame: ExprRef,
 
     /// Frame trace containing frames with blocked cubes
-    frames: Vec<Vec<Cube>>,
+    frames: Vec<Frame>,
+
+    /// Incrementing counter for creating unique frame activation literal IDs
+    next_act_id: u64,
+}
+
+impl Index<FrameId> for BasePdr {
+    type Output = Frame;
+
+    /// # Panics
+    /// When indexing init frame
+    fn index(&self, index: FrameId) -> &Self::Output {
+        match index {
+            FrameId::Init => panic!("Cannot index init frame"), // Init frame doesn't explicitly exist
+            FrameId::Finite(n) => &self.frames[n.get() - 1],
+        }
+    }
+}
+
+impl IndexMut<FrameId> for BasePdr {
+    fn index_mut(&mut self, index: FrameId) -> &mut Self::Output {
+        match index {
+            FrameId::Init => panic!("Cannot index init frame"), // Init frame doesn't explicitly exist
+            FrameId::Finite(n) => &mut self.frames[n.get() - 1],
+        }
+    }
+}
+
+/// Iterator method for [`BasePdr`]
+impl BasePdr {
+    fn iter(&'_ self) -> impl Iterator<Item = FrameId> + '_ {
+        (1..=self.frames.len()).map(|ii| FrameId::Finite(NonZeroUsize::new(ii).unwrap()))
+    }
 }
 
 impl BasePdr {
@@ -274,7 +381,7 @@ impl BasePdr {
         }
 
         // Initial frame activation literal
-        let init_act = ctx.bv_symbol("act_0", 1);
+        let init_act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}_init").as_str(), 1);
 
         // Create act_0 => init_cube, where init_cube is stepped to the before step
         let init_expr = init_cube.to_expr(ctx);
@@ -287,32 +394,52 @@ impl BasePdr {
 
         Ok(Self {
             init_frame: init_act,
-            frames: vec![vec![]], // Keep index consistency by adding dummy frame in place of init
+            frames: vec![], // Index consistency taken care by indexing function
+            next_act_id: 0,
         })
     }
 
     /// # Returns
-    /// SMT expression representing over-approximation of states reachable in `frame` steps
-    /// (i.e. state space of `frame`-th frame), stepped at pre-transition step
-    fn frame_assumptions(
-        &self,
+    /// New activation literal
+    fn create_act_lit(
+        &mut self,
         ctx: &mut Context,
-        enc: &impl TransitionSystemEncoding,
-        frame: FrameId,
-    ) -> ExprRef {
-        if frame == 0 {
+        smt_ctx: &mut impl SolverContext,
+    ) -> Result<ExprRef> {
+        let act = ctx.bv_symbol(format!("__pdr_act_{}", self.next_act_id).as_str(), 1);
+        self.next_act_id += 1;
+
+        smt_ctx.declare_const(ctx, act)?;
+
+        Ok(act)
+    }
+
+    /// # Returns
+    /// SMT expression asserting over-approximation of states reachable in `frame` steps
+    /// (i.e. state space of `frame`-th frame), stepped at pre-transition step
+    fn frame_assumptions(&self, ctx: &mut Context, frame_id: FrameId) -> ExprRef {
+        if frame_id == FrameId::Init {
             // Special case: init frame is just activation literal for initial states
             self.init_frame
         } else {
-            assert!(frame < self.frames.len());
-
-            // Else, just get conjunction of negated cubes (clauses)
-            let expr = self.frames[frame].iter().fold(ctx.get_true(), |acc, cube| {
-                let clause = cube.negate(ctx);
-                ctx.and(acc, clause)
-            });
-
-            expr_at_step(ctx, enc, expr, FROM_STEP)
+            // Get conjunction with all other frame activation literals negated
+            self.iter().fold(ctx.get_true(), |acc, id| {
+                if id == frame_id {
+                    // Include activation literals of target frame
+                    ctx.and(acc, self[id].act)
+                } else {
+                    // Avoid solver bloat/slowdown by "disabling" other activation literals
+                    //
+                    // Sound since the actual state space represented by the `frame_id`-th
+                    // frame is directly "activated" by `self[frame_id].act`. Allowing the solver
+                    // to explore activation for the other frames would be redundant (for the
+                    // upper frames) or unsound (for the lower frames)
+                    //
+                    // Note: must only "disable" lower frames once delta frames are implemented
+                    let neg_act = ctx.not(self[id].act);
+                    ctx.and(acc, neg_act)
+                }
+            })
         }
     }
 
@@ -331,13 +458,13 @@ impl BasePdr {
         let mut assumptions = Vec::new();
 
         // Get frame assumption
-        let frame_assumption = self.frame_assumptions(ctx, enc, cube.frame - 1);
+        let frame_assumption = self.frame_assumptions(ctx, cube.frame.decrement());
         assumptions.push(frame_assumption);
 
         // Next step cube
         let cube_expr = cube.cube.to_expr(ctx);
-        let cube_nxt = expr_at_step(ctx, enc, cube_expr, TO_STEP);
-        assumptions.push(cube_nxt);
+        let cube_next = expr_at_step(ctx, enc, cube_expr, TO_STEP);
+        assumptions.push(cube_next);
 
         // Current step negation cube
         if query_type == RelIndType::Extended {
@@ -354,19 +481,37 @@ impl BasePdr {
     ///
     /// # Preconditions
     /// Input cube must be blocked at frame `cube.frame`
-    fn add_blocked_cube(&mut self, cube: &TimedCube) {
+    fn add_blocked_cube(
+        &mut self,
+        ctx: &mut Context,
+        smt_ctx: &mut impl SolverContext,
+        enc: &impl TransitionSystemEncoding,
+        cube: &TimedCube,
+    ) -> Result<()> {
         // Get frontier index
         let front = cube.frame;
 
+        // Get frame identifiers up to and including front index
+        let ids = self
+            .iter()
+            .take_while(|id| id <= &front)
+            .collect::<Vec<_>>();
+
         // Add new cube to all frames
-        for idx in 1..=front {
-            self.frames[idx].push(cube.cube.clone());
+        for id in ids {
+            self[id].add_blocked_cube(ctx, smt_ctx, enc, &cube.cube)?;
         }
+
+        Ok(())
     }
 
     /// Frame identifier for frontier frame
     const fn frontier(&self) -> FrameId {
-        self.frames.len() - 1
+        if self.frames.is_empty() {
+            FrameId::Init
+        } else {
+            FrameId::Finite(NonZeroUsize::new(self.frames.len()).unwrap())
+        }
     }
 
     /// Try to extract safety property violation at frontier frame
@@ -400,7 +545,7 @@ impl BasePdr {
             .fold(ctx.get_false(), |acc, &b| ctx.or(acc, b));
 
         // Get frame assumptions for frontier frame
-        let front_assumption = self.frame_assumptions(ctx, enc, front);
+        let front_assumption = self.frame_assumptions(ctx, front);
 
         // Run query SAT?[R_N /\ \neg P]
         match query(ctx, smt_ctx, sys, enc, vec![front_assumption, bad_expr])? {
@@ -421,8 +566,14 @@ impl BasePdr {
     }
 
     /// Adds empty frame to frame trace
-    fn add_frame(&mut self) {
-        self.frames.push(Vec::new());
+    fn add_frame(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()> {
+        // Create new activation literal for frame
+        let act = self.create_act_lit(ctx, smt_ctx)?;
+
+        // Add new frame
+        self.frames.push(Frame { act, cubes: vec![] });
+
+        Ok(())
     }
 
     /// Block cube in frame trace at certain frame
@@ -446,7 +597,7 @@ impl BasePdr {
         // Try to solve all proof obligations
         while let Some(obj) = worklist.pop() {
             // If initial frame reached, concrete counterexample trace found: fail
-            if obj.frame == 0 {
+            if obj.frame == FrameId::Init {
                 return Ok(false);
             }
 
@@ -467,12 +618,12 @@ impl BasePdr {
                 // Counterexample found: try to block predecessor and current obligation
                 worklist.push(TimedCube {
                     cube: wit,
-                    frame: obj.frame - 1,
+                    frame: obj.frame.decrement(),
                 });
                 worklist.push(obj);
             } else {
                 // Refine frame trace with cube
-                self.add_blocked_cube(&obj);
+                self.add_blocked_cube(ctx, smt_ctx, enc, &obj)?;
             }
         }
 
@@ -494,18 +645,21 @@ impl BasePdr {
         // Get frame index
         let front = self.frontier();
 
-        // Try to propagate blocked cubes in each frame forward
-        for idx in 1..front {
-            let mut num_left = self.frames[idx].len();
+        // Get ids until the front identifier
+        let ids = self.iter().take_while(|id| id < &front).collect::<Vec<_>>();
 
-            for cube_idx in 0..self.frames[idx].len() {
+        // Try to propagate blocked cubes in each frame forward
+        for id in ids {
+            let mut num_left = self[id].cubes.len();
+
+            for cube_idx in 0..self[id].cubes.len() {
                 // Get cube
-                let cube = self.frames[idx][cube_idx].clone();
+                let cube = self[id].cubes[cube_idx].clone();
 
                 // Get timed cube for relative inductiveness query
                 let query_cube = TimedCube {
                     cube: cube.clone(),
-                    frame: idx + 1,
+                    frame: id.increment(),
                 };
 
                 // Check that cube is still blocked in next frame
@@ -515,7 +669,7 @@ impl BasePdr {
                     == CheckSatResponse::Unsat
                 {
                     // Add blocked cube to next frame
-                    self.frames[idx + 1].push(cube.clone());
+                    self[id.increment()].add_blocked_cube(ctx, smt_ctx, enc, &cube)?;
                     num_left -= 1;
                 }
             }
@@ -553,7 +707,7 @@ pub fn pdr(
     let mut state = BasePdr::init(ctx, smt_ctx, &enc, sys)?;
 
     // PDR loop
-    while state.frontier() <= MAX_FRAMES {
+    while state.frontier() <= FrameId::Finite(NonZeroUsize::new(MAX_FRAMES).unwrap()) {
         // Try to get bad cube
         let bad_cube = state.get_bad_cube(ctx, smt_ctx, sys, &enc)?;
 
@@ -583,7 +737,7 @@ pub fn pdr(
             }
         } else {
             // Add new frame
-            state.add_frame();
+            state.add_frame(ctx, smt_ctx)?;
 
             // Check if inductive invariant found
             if state.propagate_blocked_cubes(ctx, smt_ctx, sys, &enc)? {
@@ -593,4 +747,40 @@ pub fn pdr(
     }
 
     Ok(ModelCheckResult::Unknown)
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_frame_id_cmp() {
+        assert!(FrameId::Init < FrameId::Finite(NonZeroUsize::new(1).unwrap()));
+        assert!(FrameId::Init < FrameId::Finite(NonZeroUsize::new(5).unwrap()));
+        assert!(
+            FrameId::Finite(NonZeroUsize::new(3).unwrap())
+                < FrameId::Finite(NonZeroUsize::new(5).unwrap())
+        );
+        assert!(FrameId::Init >= FrameId::Init);
+        assert!(
+            FrameId::Finite(NonZeroUsize::new(5).unwrap())
+                >= FrameId::Finite(NonZeroUsize::new(5).unwrap())
+        );
+    }
+
+    #[test]
+    fn test_frame_id_eq() {
+        assert_ne!(
+            FrameId::Init,
+            FrameId::Finite(NonZeroUsize::new(1).unwrap())
+        );
+        assert_ne!(
+            FrameId::Finite(NonZeroUsize::new(2).unwrap()),
+            FrameId::Finite(NonZeroUsize::new(1).unwrap())
+        );
+        assert_eq!(FrameId::Init, FrameId::Init);
+        assert_eq!(
+            FrameId::Finite(NonZeroUsize::new(1).unwrap()),
+            FrameId::Finite(NonZeroUsize::new(1).unwrap())
+        );
+    }
 }
