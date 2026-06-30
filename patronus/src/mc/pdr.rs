@@ -297,7 +297,7 @@ impl Frame {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         enc: &impl TransitionSystemEncoding,
-        cube: &Cube,
+        cube: Cube,
     ) -> Result<()> {
         // Create implication act_i => \neg c, where c is the blocked cube stepped at current step
         let clause = cube.negate(ctx);
@@ -308,7 +308,7 @@ impl Frame {
         smt_ctx.assert(ctx, imp)?;
 
         // Add blocked cube to frame
-        self.cubes.push(cube.clone());
+        self.cubes.push(cube);
 
         Ok(())
     }
@@ -486,10 +486,10 @@ impl BasePdr {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         enc: &impl TransitionSystemEncoding,
-        cube: &TimedCube,
+        cube: TimedCube,
     ) -> Result<()> {
         // Add new cube to highest frame
-        self[cube.frame].add_blocked_cube(ctx, smt_ctx, enc, &cube.cube)?;
+        self[cube.frame].add_blocked_cube(ctx, smt_ctx, enc, cube.cube)?;
         Ok(())
     }
 
@@ -577,7 +577,7 @@ impl BasePdr {
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
         enc: &impl TransitionSystemEncoding,
-        cube: &TimedCube,
+        cube: TimedCube,
     ) -> Result<bool> {
         // Min-queue of proof obligations: start with initial proof obligation
         let mut worklist = BinaryHeap::from([cube.clone()]);
@@ -629,7 +629,7 @@ impl BasePdr {
                 test_cube.frame = test_cube.frame.decrement();
 
                 // Refine frame trace with cube
-                self.add_blocked_cube(ctx, smt_ctx, enc, &test_cube)?;
+                self.add_blocked_cube(ctx, smt_ctx, enc, test_cube)?;
             }
         }
 
@@ -678,7 +678,7 @@ impl BasePdr {
                 // Check that cube is still blocked in next frame
                 if smt_res == CheckSatResponse::Unsat {
                     // Add blocked cube to next frame
-                    self[id.increment()].add_blocked_cube(ctx, smt_ctx, enc, &cube)?;
+                    self[id.increment()].add_blocked_cube(ctx, smt_ctx, enc, cube)?;
                 } else {
                     // Query must have been SAT or UNKNOWN: do not propagate to ensure soundness
                     retain.push(cube);
@@ -734,7 +734,7 @@ pub fn pdr(
                 smt_ctx,
                 sys,
                 &enc,
-                &TimedCube {
+                TimedCube {
                     cube: bad,
                     frame: state.frontier(),
                 },
