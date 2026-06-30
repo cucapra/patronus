@@ -477,22 +477,6 @@ impl BasePdr {
         query(ctx, smt_ctx, sys, enc, assumptions)
     }
 
-    /// Add blocked cube to the highest possible frame
-    ///
-    /// # Preconditions
-    /// Input cube must be blocked at frame `cube.frame`
-    fn add_blocked_cube(
-        &mut self,
-        ctx: &mut Context,
-        smt_ctx: &mut impl SolverContext,
-        enc: &impl TransitionSystemEncoding,
-        cube: TimedCube,
-    ) -> Result<()> {
-        // Add new cube to highest frame
-        self[cube.frame].add_blocked_cube(ctx, smt_ctx, enc, cube.cube)?;
-        Ok(())
-    }
-
     /// Frame identifier for frontier frame
     const fn frontier(&self) -> FrameId {
         if self.frames.is_empty() {
@@ -629,7 +613,7 @@ impl BasePdr {
                 test_cube.frame = test_cube.frame.decrement();
 
                 // Refine frame trace with cube
-                self.add_blocked_cube(ctx, smt_ctx, enc, test_cube)?;
+                self[cube.frame].add_blocked_cube(ctx, smt_ctx, enc, test_cube.cube)?;
             }
         }
 
