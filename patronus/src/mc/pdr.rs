@@ -115,6 +115,12 @@ enum RelIndType {
 }
 
 /// Frame identifier
+///
+/// Equality is defined by constructor and inner fields (i.e. `FrameId::Init == FrameId::Init`,
+/// `FrameId::Finite(5) == FrameId::Finite(5)`)
+///
+/// Comparison is defined as a partial order where `FrameId::Init` <= `FrameId::Finite` and
+/// `FrameId::Finite` is compared against inner field
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum FrameId {
     /// Initial frame
@@ -141,10 +147,13 @@ impl FrameId {
         match self {
             Self::Init => panic!("Cannot decrement init"),
             Self::Finite(n) => {
-                if n.get() - 1 == 0 {
+                let fin = n.get() - 1;
+
+                if fin == 0 {
+                    // Decremented to init frame
                     Self::Init
                 } else {
-                    Self::Finite(NonZeroUsize::new(n.get() - 1).unwrap())
+                    Self::Finite(NonZeroUsize::new(fin).unwrap())
                 }
             }
         }
@@ -302,7 +311,7 @@ impl Frame {
         let clause_expr = expr_at_step(ctx, enc, clause, FROM_STEP);
         let imp = ctx.implies(self.act, clause_expr);
 
-        // Permanently assert in solver
+        // Permanently assert implication in solver
         smt_ctx.assert(ctx, imp)?;
 
         // Add blocked cube to frame
@@ -326,9 +335,12 @@ struct BasePdr {
     next_act_id: u64,
 }
 
+/// Indexing into frames for [`BasePdr`]
 impl Index<FrameId> for BasePdr {
     type Output = Frame;
 
+    /// # Panics
+    /// When indexing init frame
     fn index(&self, index: FrameId) -> &Self::Output {
         match index {
             FrameId::Init => panic!("Cannot index init frame"), // Init frame doesn't explicitly exist
@@ -337,7 +349,7 @@ impl Index<FrameId> for BasePdr {
     }
 }
 
-/// Indexing into frames for `BasePdr`
+/// Indexing into frames for [`BasePdr`] (mutable reference)
 impl IndexMut<FrameId> for BasePdr {
     fn index_mut(&mut self, index: FrameId) -> &mut Self::Output {
         match index {
@@ -347,7 +359,7 @@ impl IndexMut<FrameId> for BasePdr {
     }
 }
 
-/// Iterator for `BasePdr`
+/// Iterator for [`BasePdr`]
 struct BasePdrIterator<'a> {
     frames: &'a Vec<Frame>,
     cur_idx: usize,
@@ -370,7 +382,7 @@ impl<'a> Iterator for BasePdrIterator<'a> {
     }
 }
 
-/// Iterator method for `BasePdr`
+/// Iterator method for [`BasePdr`]
 impl BasePdr {
     const fn iter(&'_ self) -> BasePdrIterator<'_> {
         BasePdrIterator {
@@ -380,7 +392,7 @@ impl BasePdr {
     }
 }
 
-/// Iterator convenience method for `BasePdr`
+/// Implicit iterator conversion for [`BasePdr`]
 impl<'a> IntoIterator for &'a mut BasePdr {
     type Item = FrameId;
     type IntoIter = BasePdrIterator<'a>;
@@ -460,7 +472,8 @@ impl BasePdr {
                     // Include activation literals of target frame
                     ctx.and(acc, self[id].act)
                 } else {
-                    // Avoid solver bloat by setting "disabling" other activation literals
+                    // Avoid solver bloat/slowdown by "disabling" other activation literals
+                    // NOTE: will be fixed with delta frame trace
                     let neg_act = ctx.not(self[id].act);
                     ctx.and(acc, neg_act)
                 }
@@ -516,7 +529,7 @@ impl BasePdr {
         // Get frontier index
         let front = cube.frame;
 
-        // Get identifiers until front index
+        // Get frame identifiers up to and including front index
         let ids = self
             .iter()
             .take_while(|id| id <= &front)
