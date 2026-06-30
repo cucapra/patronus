@@ -114,8 +114,6 @@ enum RelIndType {
     Extended,
 }
 
-/// Frame identifier
-///
 /// Equality is defined by constructor and inner fields (i.e. `FrameId::Init == FrameId::Init`,
 /// `FrameId::Finite(5) == FrameId::Finite(5)`)
 ///
@@ -131,7 +129,6 @@ enum FrameId {
 }
 
 impl FrameId {
-    /// Increment frame identifier
     const fn increment(self) -> Self {
         match self {
             Self::Init => Self::Finite(NonZeroUsize::new(1).unwrap()),
@@ -139,8 +136,6 @@ impl FrameId {
         }
     }
 
-    /// Decrement frame identifier
-    ///
     /// # Panics
     /// If [`FrameId::Init`] is decremented
     fn decrement(self) -> Self {
@@ -288,7 +283,6 @@ fn query(
 // Core PDR
 // -------------------------------------------------------------------------------------------------
 
-/// Frame in PDR
 struct Frame {
     /// Frame activation literal
     act: ExprRef,
@@ -298,7 +292,6 @@ struct Frame {
 }
 
 impl Frame {
-    /// Add blocked cube to this frame
     fn add_blocked_cube(
         &mut self,
         ctx: &mut Context,
@@ -331,11 +324,10 @@ struct BasePdr {
     /// Frame trace containing frames with blocked cubes
     frames: Vec<Frame>,
 
-    /// Next activation literal identifier
+    /// Incrementing counter for creating unique frame activation literal IDs
     next_act_id: u64,
 }
 
-/// Indexing into frames for [`BasePdr`]
 impl Index<FrameId> for BasePdr {
     type Output = Frame;
 
@@ -349,7 +341,6 @@ impl Index<FrameId> for BasePdr {
     }
 }
 
-/// Indexing into frames for [`BasePdr`] (mutable reference)
 impl IndexMut<FrameId> for BasePdr {
     fn index_mut(&mut self, index: FrameId) -> &mut Self::Output {
         match index {
@@ -359,45 +350,10 @@ impl IndexMut<FrameId> for BasePdr {
     }
 }
 
-/// Iterator for [`BasePdr`]
-struct BasePdrIterator<'a> {
-    frames: &'a Vec<Frame>,
-    cur_idx: usize,
-}
-
-/// Iterator yields frame identifiers for all non-init, finite frames
-//
-/// **NOTE**: skips init frame since it doesn't exist explicitly in struct
-impl<'a> Iterator for BasePdrIterator<'a> {
-    /// Pair of frame identifiers and reference to frame
-    type Item = FrameId;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.cur_idx < self.frames.len() {
-            self.cur_idx += 1;
-            Some(FrameId::Finite(NonZeroUsize::new(self.cur_idx).unwrap()))
-        } else {
-            None
-        }
-    }
-}
-
 /// Iterator method for [`BasePdr`]
 impl BasePdr {
-    const fn iter(&'_ self) -> BasePdrIterator<'_> {
-        BasePdrIterator {
-            frames: &self.frames,
-            cur_idx: 0,
-        }
-    }
-}
-
-/// Implicit iterator conversion for [`BasePdr`]
-impl<'a> IntoIterator for &'a mut BasePdr {
-    type Item = FrameId;
-    type IntoIter = BasePdrIterator<'a>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
+    fn iter(&'_ self) -> impl Iterator<Item = FrameId> + '_ {
+        (1..=self.frames.len()).map(|ii| FrameId::Finite(NonZeroUsize::new(ii).unwrap()))
     }
 }
 
@@ -473,7 +429,13 @@ impl BasePdr {
                     ctx.and(acc, self[id].act)
                 } else {
                     // Avoid solver bloat/slowdown by "disabling" other activation literals
-                    // NOTE: will be fixed with delta frame trace
+                    //
+                    // Sound since the actual state space represented by the `frame_id`-th
+                    // frame is directly "activated" by `self[frame_id].act`. Allowing the solver
+                    // to explore activation for the other frames would be redundant (for the
+                    // upper frames) or unsound (for the lower frames)
+                    //
+                    // Note: must only "disable" lower frames once delta frames are implemented
                     let neg_act = ctx.not(self[id].act);
                     ctx.and(acc, neg_act)
                 }
@@ -785,4 +747,40 @@ pub fn pdr(
     }
 
     Ok(ModelCheckResult::Unknown)
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_frame_id_cmp() {
+        assert!(FrameId::Init < FrameId::Finite(NonZeroUsize::new(1).unwrap()));
+        assert!(FrameId::Init < FrameId::Finite(NonZeroUsize::new(5).unwrap()));
+        assert!(
+            FrameId::Finite(NonZeroUsize::new(3).unwrap())
+                < FrameId::Finite(NonZeroUsize::new(5).unwrap())
+        );
+        assert!(FrameId::Init >= FrameId::Init);
+        assert!(
+            FrameId::Finite(NonZeroUsize::new(5).unwrap())
+                >= FrameId::Finite(NonZeroUsize::new(5).unwrap())
+        );
+    }
+
+    #[test]
+    fn test_frame_id_eq() {
+        assert_ne!(
+            FrameId::Init,
+            FrameId::Finite(NonZeroUsize::new(1).unwrap())
+        );
+        assert_ne!(
+            FrameId::Finite(NonZeroUsize::new(2).unwrap()),
+            FrameId::Finite(NonZeroUsize::new(1).unwrap())
+        );
+        assert_eq!(FrameId::Init, FrameId::Init);
+        assert_eq!(
+            FrameId::Finite(NonZeroUsize::new(1).unwrap()),
+            FrameId::Finite(NonZeroUsize::new(1).unwrap())
+        );
+    }
 }
