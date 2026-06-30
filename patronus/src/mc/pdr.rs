@@ -485,28 +485,11 @@ impl BasePdr {
         &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
-        sys: &TransitionSystem,
         enc: &impl TransitionSystemEncoding,
         cube: &TimedCube,
     ) -> Result<()> {
-        let mut test_cube = cube.clone();
-
-        // Push cube as far as possible in the frame trace
-        while test_cube.frame <= self.frontier()
-            && self
-                .rel_ind(ctx, smt_ctx, sys, enc, &test_cube, RelIndType::Extended)?
-                .0
-                == CheckSatResponse::Unsat
-        {
-            test_cube.frame = test_cube.frame.increment();
-        }
-
-        // Sanity check for precondition violations
-        assert!(test_cube.frame > cube.frame);
-
         // Add new cube to highest frame
-        self[test_cube.frame.decrement()].add_blocked_cube(ctx, smt_ctx, enc, &test_cube.cube)?;
-
+        self[cube.frame].add_blocked_cube(ctx, smt_ctx, enc, &cube.cube)?;
         Ok(())
     }
 
@@ -627,8 +610,26 @@ impl BasePdr {
                 });
                 worklist.push(obj);
             } else {
+                let mut test_cube = TimedCube {
+                    cube: cube.cube.clone(),
+                    frame: obj.frame.increment(),
+                };
+
+                // Push cube as far as possible in the frame trace
+                while test_cube.frame <= self.frontier()
+                    && self
+                        .rel_ind(ctx, smt_ctx, sys, enc, &test_cube, RelIndType::Extended)?
+                        .0
+                        == CheckSatResponse::Unsat
+                {
+                    test_cube.frame = test_cube.frame.increment();
+                }
+
+                // Restore "working" frame
+                test_cube.frame = test_cube.frame.decrement();
+
                 // Refine frame trace with cube
-                self.add_blocked_cube(ctx, smt_ctx, sys, enc, &obj)?;
+                self.add_blocked_cube(ctx, smt_ctx, enc, &test_cube)?;
             }
         }
 
