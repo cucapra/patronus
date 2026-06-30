@@ -564,7 +564,7 @@ impl BasePdr {
         cube: TimedCube,
     ) -> Result<bool> {
         // Min-queue of proof obligations: start with initial proof obligation
-        let mut worklist = BinaryHeap::from([cube.clone()]);
+        let mut worklist = BinaryHeap::from([cube]);
 
         // Try to solve all proof obligations
         while let Some(obj) = worklist.pop() {
@@ -613,7 +613,7 @@ impl BasePdr {
                 test_cube.frame = test_cube.frame.decrement();
 
                 // Refine frame trace with cube
-                self[cube.frame].add_blocked_cube(ctx, smt_ctx, enc, test_cube.cube)?;
+                self[test_cube.frame].add_blocked_cube(ctx, smt_ctx, enc, test_cube.cube)?;
             }
         }
 
@@ -649,7 +649,7 @@ impl BasePdr {
 
                 // Get timed cube for relative inductiveness query
                 let query_cube = TimedCube {
-                    cube: cube.clone(),
+                    cube,
                     frame: id.increment(),
                 };
 
@@ -662,10 +662,10 @@ impl BasePdr {
                 // Check that cube is still blocked in next frame
                 if smt_res == CheckSatResponse::Unsat {
                     // Add blocked cube to next frame
-                    self[id.increment()].add_blocked_cube(ctx, smt_ctx, enc, cube)?;
+                    self[id.increment()].add_blocked_cube(ctx, smt_ctx, enc, query_cube.cube)?;
                 } else {
                     // Query must have been SAT or UNKNOWN: do not propagate to ensure soundness
-                    retain.push(cube);
+                    retain.push(query_cube.cube);
                 }
             }
 
