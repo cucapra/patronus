@@ -583,14 +583,12 @@ impl BasePdr {
         // Create new activation literal for frame
         let act = self.create_act_lit(ctx, smt_ctx)?;
 
-        // Get infinite frame
-        let inf_frame = self.frames.pop().unwrap();
-
         // Add new frame
         self.frames.push(Frame { act, cubes: vec![] });
 
-        // Push back infinite frame
-        self.frames.push(inf_frame);
+        // Swap with infinite frame
+        let trace_len = self.frames.len();
+        self.frames.swap(trace_len - 1, trace_len - 2);
 
         Ok(())
     }
@@ -841,6 +839,10 @@ mod tests {
             FrameId::Finite(NonZeroUsize::new(5).unwrap())
                 >= FrameId::Finite(NonZeroUsize::new(5).unwrap())
         );
+
+        assert!(FrameId::Init < FrameId::Infinite);
+        assert!(FrameId::Infinite >= FrameId::Infinite);
+        assert!(FrameId::Finite(NonZeroUsize::new(5).unwrap()) < FrameId::Infinite);
     }
 
     #[test]
@@ -853,10 +855,16 @@ mod tests {
             FrameId::Finite(NonZeroUsize::new(2).unwrap()),
             FrameId::Finite(NonZeroUsize::new(1).unwrap())
         );
+        assert_ne!(FrameId::Init, FrameId::Infinite);
+        assert_ne!(
+            FrameId::Infinite,
+            FrameId::Finite(NonZeroUsize::new(5).unwrap())
+        );
         assert_eq!(FrameId::Init, FrameId::Init);
         assert_eq!(
             FrameId::Finite(NonZeroUsize::new(1).unwrap()),
             FrameId::Finite(NonZeroUsize::new(1).unwrap())
         );
+        assert_eq!(FrameId::Infinite, FrameId::Infinite);
     }
 }
