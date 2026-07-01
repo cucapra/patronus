@@ -375,11 +375,16 @@ impl IndexMut<FrameId> for BasePdr {
 }
 
 /// Iterator method for [`BasePdr`]
-///
-/// **NOTE**: Only iterates over identifiers for non-init, finite frames
 impl BasePdr {
     fn iter(&'_ self) -> impl Iterator<Item = FrameId> + '_ {
-        (1..self.frames.len()).map(|ii| FrameId::Finite(NonZeroUsize::new(ii).unwrap()))
+        (1..=self.frames.len()).map(|ii| {
+            if ii < self.frames.len() {
+                FrameId::Finite(NonZeroUsize::new(ii).unwrap())
+            } else {
+                // Last frame is the infinite frame
+                FrameId::Infinite
+            }
+        })
     }
 }
 
