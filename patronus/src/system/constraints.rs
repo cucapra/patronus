@@ -149,7 +149,7 @@ mod tests {
     use crate::system::transform::simplify_expressions;
 
     #[test]
-    fn test_find_constraints() {
+    fn test_mann_fifo() {
         let (mut ctx, mut sys) =
             parse_file("../inputs/hwmcc/shift_register_top_w64_d16_e0.btor2").unwrap();
         assert_eq!(sys.constraints.len(), 5);
@@ -169,6 +169,32 @@ mod tests {
         assert!(
             sys.constraints.is_empty(),
             "All three constraints are input equality constraints."
+        );
+        for c in cs {
+            println!(
+                "{} == {} when {}",
+                c.input.serialize_to_str(&ctx),
+                c.rhs.serialize_to_str(&ctx),
+                c.guard.serialize_to_str(&ctx)
+            )
+        }
+    }
+
+    #[test]
+    fn test_chisel_constraints() {
+        let (mut ctx, mut sys) =
+            parse_file("../inputs/chiseltest/formal_backend_should_do_division_and_remainder_correctly_for_all_2bit_UInts_DivisionAndRemainderTest.btor").unwrap();
+        assert_eq!(sys.constraints.len(), 1);
+        simplify_expressions(&mut ctx, &mut sys);
+        assert_eq!(sys.constraints.len(), 1);
+        split_constraints(&mut ctx, &mut sys);
+        assert_eq!(sys.constraints.len(), 1);
+        println!("{}", sys.serialize_to_str(&ctx));
+        let cs = collect_input_equality_constraints(&mut ctx, &mut sys);
+        assert!(
+            sys.constraints.is_empty(),
+            // TODO: should we remove BVImplies in the simplifier or add another pattern here?
+            "TODO: deal with implies constraint!"
         );
         for c in cs {
             println!(
