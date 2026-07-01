@@ -8,6 +8,7 @@ use clap::{CommandFactory, Parser, ValueEnum};
 use patronus::expr::*;
 use patronus::mc::{bmc, pdr};
 use patronus::smt::*;
+use patronus::system::TransitionSystem;
 use patronus::system::transform::simplify_expressions;
 use patronus::*;
 use std::fs::File;
@@ -33,6 +34,8 @@ struct Args {
     verbose: bool,
     #[arg(short, long)]
     skip_simplify: bool,
+    #[arg(short, long)]
+    check_for_trivially_unsat: bool,
     #[arg(short, long)]
     dump_smt: bool,
     #[arg(value_name = "BTOR2", index = 1)]
@@ -65,6 +68,12 @@ fn main() {
             .exit();
     }
     let kmax = args.kmax.unwrap_or(25);
+    let solver = match args.solver {
+        SolverChoice::Bitwuzla => BITWUZLA,
+        SolverChoice::Yices2 => YICES2,
+        SolverChoice::Z3 => Z3,
+        SolverChoice::CVC5 => CVC5,
+    };
 
     let (mut ctx, mut sys) = btor2::parse_file(&args.filename).expect("Failed to load btor2 file!");
     if !args.skip_simplify {
@@ -80,6 +89,14 @@ fn main() {
         println!();
         println!();
     }
+
+    if args.check_for_trivially_unsat {
+        let before = sys.bad_states.len();
+        let mut smt_ctx = solver.start(None).expect("failed to start solver");
+        smt_ctx.set_logic(Logic::QfAufbv).unwrap();
+        remove_trivial_unsat_bad_states(&mut ctx, &mut sys, &mut smt_ctx);
+    }
+
     let k_max = if sys.states.is_empty() {
         if args.verbose {
             println!(
@@ -93,12 +110,7 @@ fn main() {
     };
     let check_constraints = true;
     let check_bad_states_individually = false;
-    let solver = match args.solver {
-        SolverChoice::Bitwuzla => BITWUZLA,
-        SolverChoice::Yices2 => YICES2,
-        SolverChoice::Z3 => Z3,
-        SolverChoice::CVC5 => CVC5,
-    };
+
     if args.verbose {
         println!("Checking up to {k_max} using {}.", solver.name());
     }
@@ -131,4 +143,18 @@ fn main() {
             btor2::print_witness(&mut std::io::stdout(), &wit).unwrap();
         }
     }
+}
+
+/// Checks each bad state to see if it is satisfiable when starting from a totally unconstraint
+/// starting state. Removes it if it is not.
+fn remove_trivial_unsat_bad_states(
+    ctx: &mut Context,
+    sys: &mut TransitionSystem,
+    smt_ctx: &mut SmtLibSolverCtx,
+) {
+    let mut enc = match start_bmc_or_pdr(ctx, smt_ctx, sys)? {
+        (r, None) => return Ok(r),
+        (_, Some(enc)) => enc,
+    };
+    enc.init_at(ctx, smt_ctx, 0)?;
 }

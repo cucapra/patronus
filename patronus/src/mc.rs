@@ -3,6 +3,7 @@
 // author: Kevin Laeufer <laeufer@berkeley.edu>
 
 mod bmc;
+mod ind;
 mod pdr;
 mod types;
 

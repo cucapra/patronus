@@ -98,8 +98,9 @@ pub fn bmc(
         enc.unroll(ctx, smt_ctx)?;
     }
 
-    // we have not found any assertion violations
-    Ok(ModelCheckResult::Success)
+    // we have not found any assertion violations, but with BMC we do not know if we have explored
+    // enough depth, so the result is unknown
+    Ok(ModelCheckResult::Unknown)
 }
 
 pub(crate) fn start_bmc_or_pdr<S: SolverContext>(
