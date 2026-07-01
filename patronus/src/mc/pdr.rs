@@ -1,6 +1,6 @@
-// Copyright 2024-2025 Cornell University
+// Copyright 2025-2026 Cornell University
 // released under BSD 3-Clause License
-// author: Kevin Laeufer <laeufer@cornell.edu>
+// author: Michael Zhang <mxz6@cornell.edu>, Kevin Laeufer <laeufer@cornell.edu>
 
 use crate::expr::*;
 use crate::mc::bmc::start_bmc_or_pdr;
@@ -127,7 +127,7 @@ enum FrameId {
     /// Finite, non-initial frame
     Finite(NonZeroUsize),
 
-    /// Infinite frame,
+    /// Infinite frame
     Infinite,
 }
 
@@ -321,7 +321,7 @@ impl Frame {
 
 /// Frame trace maintained by vanilla PDR
 ///
-/// **Representation Invariant**: `frames.len() > 1`, where the last frame is always
+/// **Representation Invariant**: `frames.len() > 0`, where the last frame is always
 /// the infinite frame
 struct BasePdr {
     /// Initial frame
@@ -685,9 +685,6 @@ impl BasePdr {
 
         // Try to propagate blocked cubes in each frame forward
         for id in ids {
-            // Propagated cubes
-            let mut prop_cubes = vec![];
-
             for cube in std::mem::take(&mut self[id].cubes) {
                 // Get timed cube for relative inductiveness query
                 let query_cube = TimedCube {
@@ -704,7 +701,6 @@ impl BasePdr {
                 // Check that cube is still blocked in next frame
                 if smt_res == CheckSatResponse::Unsat {
                     // Add blocked cube to next frame
-                    prop_cubes.push(query_cube.cube.clone());
                     self[id.increment()].add_blocked_cube(ctx, smt_ctx, enc, query_cube.cube)?;
                 } else {
                     // Query must have been SAT or UNKNOWN: do not propagate to ensure soundness
@@ -714,9 +710,17 @@ impl BasePdr {
 
             // Check for inductive invariant: all clauses propagated
             if self[id].cubes.is_empty() {
+                // Collect all frame IDs from this frame to just before infinite frame
+                let inv_ids = self
+                    .iter()
+                    .filter(|iid| iid > &id && iid < &FrameId::Infinite)
+                    .collect::<Vec<_>>();
+
                 // Add all learned invariants to infinite frame
-                for cube in prop_cubes {
-                    self[FrameId::Infinite].add_blocked_cube(ctx, smt_ctx, enc, cube)?;
+                for iid in inv_ids {
+                    for cube in std::mem::take(&mut self[iid].cubes) {
+                        self[FrameId::Infinite].add_blocked_cube(ctx, smt_ctx, enc, cube)?;
+                    }
                 }
 
                 return Ok(true);
@@ -823,6 +827,7 @@ pub fn pdr(
     Ok(ModelCheckResult::Unknown)
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 
