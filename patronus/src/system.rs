@@ -4,6 +4,7 @@
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
 pub mod analysis;
+mod constraints;
 mod serialize;
 pub mod transform;
 mod transition_system;
