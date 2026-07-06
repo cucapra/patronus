@@ -443,9 +443,9 @@ impl BasePdr {
     /// (i.e. state space of `frame`-th frame), stepped at pre-transition step
     fn frame_assumptions(&self, ctx: &mut Context, frame_id: FrameId) -> ExprRef {
         assert!(
-            frame_id == FrameId::Init ||
-                frame_id <= self.frontier() ||
-                frame_id == FrameId::Infinite
+            frame_id == FrameId::Init
+                || frame_id <= self.frontier()
+                || frame_id == FrameId::Infinite
         );
 
         // Special case: for init frame, just return initial activation literal
