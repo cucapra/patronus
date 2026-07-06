@@ -320,12 +320,12 @@ impl Frame {
 }
 
 /// Frame trace maintained by vanilla PDR
-///
-/// **Representation Invariant**: `frames.len() > 0`, where the last frame is always
-/// the infinite frame
 struct BasePdr {
     /// Initial frame
     init_frame: ExprRef,
+
+    /// Infinite frame
+    inf_frame: Frame,
 
     /// Frame trace containing frames with blocked cubes
     frames: Vec<Frame>,
@@ -342,16 +342,8 @@ impl Index<FrameId> for BasePdr {
     fn index(&self, index: FrameId) -> &Self::Output {
         match index {
             FrameId::Init => panic!("Cannot index init frame"), // Init frame doesn't explicitly exist
-            FrameId::Finite(n) => {
-                let real_idx = n.get() - 1;
-
-                if real_idx < self.frames.len() - 1 {
-                    &self.frames[real_idx]
-                } else {
-                    panic!("Out-of-bounds finite frame")
-                }
-            }
-            FrameId::Infinite => self.frames.last().unwrap(),
+            FrameId::Finite(n) => &self.frames[n.get() - 1],
+            FrameId::Infinite => &self.inf_frame,
         }
     }
 }
@@ -360,16 +352,8 @@ impl IndexMut<FrameId> for BasePdr {
     fn index_mut(&mut self, index: FrameId) -> &mut Self::Output {
         match index {
             FrameId::Init => panic!("Cannot index init frame"), // Init frame doesn't explicitly exist
-            FrameId::Finite(n) => {
-                let real_idx = n.get() - 1;
-
-                if real_idx < self.frames.len() - 1 {
-                    &mut self.frames[real_idx]
-                } else {
-                    panic!("Out-of-bounds finite frame")
-                }
-            }
-            FrameId::Infinite => self.frames.last_mut().unwrap(),
+            FrameId::Finite(n) => &mut self.frames[n.get() - 1],
+            FrameId::Infinite => &mut self.inf_frame,
         }
     }
 }
@@ -377,8 +361,8 @@ impl IndexMut<FrameId> for BasePdr {
 /// Iterator method for [`BasePdr`]
 impl BasePdr {
     fn iter(&'_ self) -> impl Iterator<Item = FrameId> + '_ {
-        (1..=self.frames.len()).map(|ii| {
-            if ii < self.frames.len() {
+        (1..=(self.frames.len() + 1)).map(|ii| {
+            if ii <= self.frames.len() {
                 FrameId::Finite(NonZeroUsize::new(ii).unwrap())
             } else {
                 // Last frame is the infinite frame
@@ -433,7 +417,8 @@ impl BasePdr {
 
         Ok(Self {
             init_frame: init_act,
-            frames: vec![inf_frame], // Index consistency taken care by indexing function
+            inf_frame,
+            frames: vec![], // Index consistency taken care by indexing function
             next_act_id: 0,
         })
     }
@@ -457,31 +442,35 @@ impl BasePdr {
     /// SMT expression asserting over-approximation of states reachable in `frame` steps
     /// (i.e. state space of `frame`-th frame), stepped at pre-transition step
     fn frame_assumptions(&self, ctx: &mut Context, frame_id: FrameId) -> ExprRef {
-        match frame_id {
-            // Special case: init frame is just activation literal for initial states
-            FrameId::Init => self.init_frame,
-            FrameId::Finite(_) => {
-                // Sanity check
-                assert!(frame_id <= self.frontier());
+        assert!(
+            frame_id == FrameId::Init ||
+                frame_id <= self.frontier() ||
+                frame_id == FrameId::Infinite
+        );
 
-                // Conjunct all blocked cubes in this frame and higher (since all blocked
-                // cubes in higher delta frames are also blocked in this frame)
-                self.iter().fold(ctx.get_true(), |acc, id| {
-                    if id >= frame_id {
-                        // Include activation literals of target frame and all higher frames,
-                        // which include cubes blocked in the `frame_id`-th frame
-                        ctx.and(acc, self[id].act)
-                    } else {
-                        // Deactivate lower frames to preserve soundness,
-                        // since they represent overapproximations of reachable state
-                        // that are stronger than that of the `frame_id`-th frame
-                        let neg_act = ctx.not(self[id].act);
-                        ctx.and(acc, neg_act)
-                    }
-                })
-            }
-            FrameId::Infinite => self.frames.last().unwrap().act,
+        // Special case: for init frame, just return initial activation literal
+        if frame_id == FrameId::Init {
+            return self.iter().fold(self.init_frame, |acc, id| {
+                let neg_act = ctx.not(self[id].act);
+                ctx.and(acc, neg_act)
+            });
         }
+
+        // Conjunct all blocked cubes in this frame and higher (since all blocked
+        // cubes in higher delta frames are also blocked in this frame)
+        self.iter().fold(ctx.not(self.init_frame), |acc, id| {
+            if id >= frame_id {
+                // Include activation literals of target frame and all higher frames,
+                // which include cubes blocked in the `frame_id`-th frame
+                ctx.and(acc, self[id].act)
+            } else {
+                // Deactivate lower frames to preserve soundness,
+                // since they represent overapproximations of reachable state
+                // that are stronger than that of the `frame_id`-th frame
+                let neg_act = ctx.not(self[id].act);
+                ctx.and(acc, neg_act)
+            }
+        })
     }
 
     /// Run relative inductiveness query
@@ -520,10 +509,10 @@ impl BasePdr {
 
     /// Frame identifier for frontier frame
     const fn frontier(&self) -> FrameId {
-        if self.frames.len() == 1 {
+        if self.frames.is_empty() {
             FrameId::Init
         } else {
-            FrameId::Finite(NonZeroUsize::new(self.frames.len() - 1).unwrap())
+            FrameId::Finite(NonZeroUsize::new(self.frames.len()).unwrap())
         }
     }
 
@@ -585,11 +574,6 @@ impl BasePdr {
 
         // Add new frame
         self.frames.push(Frame { act, cubes: vec![] });
-
-        // Swap with infinite frame
-        let trace_len = self.frames.len();
-        self.frames.swap(trace_len - 1, trace_len - 2);
-
         Ok(())
     }
 
