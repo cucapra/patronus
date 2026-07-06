@@ -193,6 +193,36 @@ fn case_simple_fail(solver: &SmtLibSolver) {
     }
 }
 
+fn case_quiz1_sat(solver: &SmtLibSolver) {
+    let (ctx, sys, res) = run_pdr_file(solver, "../inputs/chiseltest/Quiz1.btor", None);
+
+    if let ModelCheckResult::Fail(wit) = res {
+        validate_witness(&ctx, &sys, &wit);
+    } else {
+        panic!("test_simple_fail failed");
+    }
+}
+
+fn case_quiz2_sat(solver: &SmtLibSolver) {
+    let (ctx, sys, res) = run_pdr_file(solver, "../inputs/chiseltest/Quiz2.sat.btor", None);
+
+    if let ModelCheckResult::Fail(wit) = res {
+        validate_witness(&ctx, &sys, &wit);
+    } else {
+        panic!("test_simple_fail failed");
+    }
+}
+
+fn case_quiz4_sat(solver: &SmtLibSolver) {
+    let (ctx, sys, res) = run_pdr_file(solver, "../inputs/chiseltest/Quiz4.sat.btor", None);
+
+    if let ModelCheckResult::Fail(wit) = res {
+        validate_witness(&ctx, &sys, &wit);
+    } else {
+        panic!("test_simple_fail failed");
+    }
+}
+
 fn case_delay(solver: &SmtLibSolver) {
     let (_, _, res) = run_pdr_file(solver, "../inputs/verilog_tests/Delay.btor", None);
     assert!(matches!(res, ModelCheckResult::Success));
@@ -205,6 +235,21 @@ fn case_swap(solver: &SmtLibSolver) {
 
 fn case_aman_goel_4bit(solver: &SmtLibSolver) {
     let (_, _, res) = run_pdr_file(solver, "../inputs/unittest/aman_goel_4bit.btor", None);
+    assert!(matches!(res, ModelCheckResult::Success));
+}
+
+fn case_quiz1_unsat(solver: &SmtLibSolver) {
+    let (_, _, res) = run_pdr_file(solver, "../inputs/chiseltest/Quiz1.unsat.btor", None);
+    assert!(matches!(res, ModelCheckResult::Success));
+}
+
+fn case_quiz2_unsat(solver: &SmtLibSolver) {
+    let (_, _, res) = run_pdr_file(solver, "../inputs/chiseltest/Quiz2.unsat.btor", None);
+    assert!(matches!(res, ModelCheckResult::Success));
+}
+
+fn case_quiz4_unsat(solver: &SmtLibSolver) {
+    let (_, _, res) = run_pdr_file(solver, "../inputs/chiseltest/Quiz4.unsat.btor", None);
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
@@ -232,6 +277,22 @@ mod pdr {
         case_simple_fail(&solver_from_env());
     }
 
+    #[ignore = "Need blocked cube generalization"]
+    #[test]
+    fn test_quiz1_sat() {
+        case_quiz1_sat(&solver_from_env());
+    }
+
+    #[test]
+    fn test_quiz2_sat() {
+        case_quiz2_sat(&solver_from_env());
+    }
+
+    #[test]
+    fn test_quiz4_sat() {
+        case_quiz4_sat(&solver_from_env());
+    }
+
     #[test]
     fn test_delay() {
         case_delay(&solver_from_env());
@@ -245,5 +306,22 @@ mod pdr {
     #[test]
     fn test_aman_goel_4bit() {
         case_aman_goel_4bit(&solver_from_env());
+    }
+
+    #[test]
+    fn test_quiz1_unsat() {
+        case_quiz1_unsat(&solver_from_env());
+    }
+
+    #[ignore = "Need blocked cube generalization"]
+    #[test]
+    fn test_quiz2_unsat() {
+        case_quiz2_unsat(&solver_from_env());
+    }
+
+    #[ignore = "Need blocked cube generalization"]
+    #[test]
+    fn test_quiz4_unsat() {
+        case_quiz4_unsat(&solver_from_env());
     }
 }

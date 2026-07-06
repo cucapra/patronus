@@ -144,7 +144,7 @@ impl FrameId {
     /// If [`FrameId::Init`] is decremented
     fn decrement(self) -> Self {
         match self {
-            Self::Init => panic!("Cannot decrement init"),
+            Self::Init => panic!("cannot decrement init"),
             Self::Finite(n) => {
                 let fin = n.get() - 1;
 
@@ -395,6 +395,12 @@ impl BasePdr {
             }
         }
 
+        // Always assert constraints at current step
+        for &cons in &sys.constraints {
+            let cons_cur = expr_at_step(ctx, enc, cons, FROM_STEP);
+            smt_ctx.assert(ctx, cons_cur)?;
+        }
+
         // Initial frame activation literal
         let init_act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}init").as_str(), 1);
 
@@ -502,6 +508,13 @@ impl BasePdr {
             let neg_cube_cur = expr_at_step(ctx, enc, neg_cube_expr, FROM_STEP);
             assumptions.push(neg_cube_cur);
         }
+
+        // Assert constraints hold after transition
+        assumptions.extend(
+            sys.constraints
+                .iter()
+                .map(|&c| expr_at_step(ctx, enc, c, TO_STEP)),
+        );
 
         // Run SMT query
         query(ctx, smt_ctx, sys, enc, assumptions)
@@ -721,13 +734,23 @@ impl BasePdr {
             let cube_expr = cube.to_expr(ctx);
             let cube_next = expr_at_step(ctx, enc, cube_expr, TO_STEP);
 
+            // Post-transition constraint assertions
+            let cons_next = sys
+                .constraints
+                .iter()
+                .map(|&c| expr_at_step(ctx, enc, c, TO_STEP))
+                .collect::<Vec<_>>();
+            let cons_expr = cons_next
+                .iter()
+                .fold(ctx.get_true(), |acc, &e| ctx.and(acc, e));
+
             // Run the query `SAT?[R_\infty /\ \neg c /\ T /\ c']`
             let smt_res = query(
                 ctx,
                 smt_ctx,
                 sys,
                 enc,
-                vec![inf_assumption, clause_cur, cube_next],
+                vec![inf_assumption, clause_cur, cube_next, cons_expr],
             )?
             .0;
 
@@ -755,9 +778,6 @@ pub fn pdr(
         (r, None) => return Ok(r),
         (_, Some(enc)) => enc,
     };
-
-    // TODO: take care of constraints later
-    assert!(sys.constraints.is_empty());
 
     // Initialize two-step variables in solver
     enc.init_at(ctx, smt_ctx, FROM_STEP)?;
