@@ -398,24 +398,22 @@ impl BasePdr {
             }
         }
 
-        // Next step constraints
-        let mut cons_next_lits = vec![];
-
         // Always assert constraints at current step
         for &cons in &sys.constraints {
             let cons_cur = expr_at_step(ctx, enc, cons, FROM_STEP);
-            let cons_next = expr_at_step(ctx, enc, cons, TO_STEP);
-
             smt_ctx.assert(ctx, cons_cur)?;
-            cons_next_lits.push(cons_next);
         }
 
         // Next step constraint activation literal
         let cons_act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}nxt_cons").as_str(), 1);
 
-        let cons_next_expr = cons_next_lits
+        let cons_next_expr = sys
+            .constraints
             .iter()
-            .fold(ctx.get_true(), |acc, &c| ctx.and(acc, c));
+            .map(|&c| expr_at_step(ctx, enc, c, TO_STEP))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .fold(ctx.get_true(), |acc, c| ctx.and(acc, c));
         let cons_imp = ctx.implies(cons_act, cons_next_expr);
 
         // Permanently assert in solver
