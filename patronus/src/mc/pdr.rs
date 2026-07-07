@@ -8,12 +8,16 @@ use crate::mc::{
     ModelCheckResult, TransitionSystemEncoding, bmc, check_assuming, check_assuming_end,
     get_smt_value,
 };
+use crate::smt::Error::UnexpectedResponse;
 use crate::smt::*;
 use crate::system::TransitionSystem;
 use baa::{BitVecOps, Value};
+use rustc_hash::FxHashMap;
+use std::cell::RefCell;
 use std::collections::BinaryHeap;
 use std::num::NonZeroUsize;
 use std::ops::{Index, IndexMut};
+use std::str::EncodeUtf16;
 
 type Step = u64;
 
@@ -25,6 +29,16 @@ const MAX_FRAMES: usize = 1000;
 
 /// Activation literal prefix
 const ACT_LIT_PREFIX: &str = "__pdr_act_";
+
+// -------------------------------------------------------------------------------------------------
+// Public PDR interface structures
+// -------------------------------------------------------------------------------------------------
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PdrOptions {
+    /// Disable UNSAT core generalization
+    DisableUnsatCores,
+}
 
 // -------------------------------------------------------------------------------------------------
 // Core PDR data structures
@@ -256,24 +270,33 @@ fn get_bit_level_cube(
     Ok(Cube { literals })
 }
 
-/// Run `check-sat-assuming` query on solver, possibly extracting a model on `SAT` queries
+/// Run `check-sat-assuming` query on solver, possibly extracting a model on `SAT` queries, or a
+/// cube containing a subset of `assumptions` if `use_unsat_gen` is true (yielded through `UNSAT`
+/// core generalization)
 ///
 /// # Returns
-/// A pair containing the query result, and a solver model from `SAT` queries
+/// A pair containing the query result, and a solver model for `SAT` queries, or an `UNSAT` core
+/// generalized cube if `use_unsat_gen` is true
 fn query(
     ctx: &mut Context,
     smt_ctx: &mut impl SolverContext,
     sys: &TransitionSystem,
     enc: &impl TransitionSystemEncoding,
     assumptions: impl IntoIterator<Item = ExprRef>,
+    use_unsat_gen: bool,
 ) -> Result<(CheckSatResponse, Option<Cube>)> {
     // Run SMT query and remove SMT frame
     let smt_res = check_assuming(ctx, smt_ctx, assumptions)?;
 
     // Extract appropriate model if `SAT`
-    let model = if smt_res == CheckSatResponse::Sat {
+    let out_cube = if smt_res == CheckSatResponse::Sat {
         let cex = get_bit_level_cube(ctx, smt_ctx, sys, enc, FROM_STEP)?;
         Some(cex)
+    } else if smt_res == CheckSatResponse::Unsat && use_unsat_gen {
+        let unsat_assumps = smt_ctx.get_unsat_assumptions(ctx)?;
+        Some(Cube {
+            literals: unsat_assumps,
+        })
     } else {
         None
     };
@@ -281,7 +304,7 @@ fn query(
     check_assuming_end(smt_ctx)?;
 
     // Return result
-    Ok((smt_res, model))
+    Ok((smt_res, out_cube))
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -317,6 +340,16 @@ impl Frame {
 
         Ok(())
     }
+}
+
+/// Boolean flags for set PDR options
+struct Opts {
+    unsat_cores_enabled: bool,
+}
+
+thread_local! {
+    /// Global PDR options
+    static GLOB_PDR_OPTS: RefCell<Opts> = const { RefCell::new(Opts { unsat_cores_enabled: false }) };
 }
 
 /// Frame trace maintained by vanilla PDR
@@ -400,21 +433,21 @@ impl BasePdr {
 
         // Always assert constraints at current step
         for &cons in &sys.constraints {
-            let cons_cur = expr_at_step(ctx, enc, cons, FROM_STEP);
-            smt_ctx.assert(ctx, cons_cur)?;
+            let cons_from = expr_at_step(ctx, enc, cons, FROM_STEP);
+            smt_ctx.assert(ctx, cons_from)?;
         }
 
         // Next step constraint activation literal
-        let cons_act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}nxt_cons").as_str(), 1);
+        let cons_act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}to_cons").as_str(), 1);
 
-        let cons_next_expr = sys
+        let cons_to_expr = sys
             .constraints
             .iter()
             .map(|&c| expr_at_step(ctx, enc, c, TO_STEP))
             .collect::<Vec<_>>()
             .into_iter()
             .fold(ctx.get_true(), |acc, c| ctx.and(acc, c));
-        let cons_imp = ctx.implies(cons_act, cons_next_expr);
+        let cons_imp = ctx.implies(cons_act, cons_to_expr);
 
         // Permanently assert in solver
         smt_ctx.declare_const(ctx, cons_act)?;
@@ -499,8 +532,110 @@ impl BasePdr {
         })
     }
 
+    /// "Fix" generalized cube by restoring enough removed literals until non-intersection
+    /// with initial states
+    ///
+    /// # Errors
+    /// Returns [`Error::UnexpectedResponse`] if any SMT query returns `UNKNOWN` or original cube
+    /// truly intersects the initial states
+    fn fix_gen_cube(
+        &self,
+        ctx: &mut Context,
+        smt_ctx: &mut impl SolverContext,
+        sys: &TransitionSystem,
+        enc: &impl TransitionSystemEncoding,
+        gen_cube: &Cube,
+        rm_lits: impl IntoIterator<Item = ExprRef>,
+    ) -> Result<Cube> {
+        let init = self.frame_assumptions(ctx, FrameId::Init);
+        let not_cons = ctx.not(self.to_step_constraints_active);
+        let cube_expr = gen_cube.to_expr(ctx);
+        let cube_from = expr_at_step(ctx, enc, cube_expr, FROM_STEP);
+
+        // If generalized cube already doesn't intersect with initial states, just return it
+        match query(ctx, smt_ctx, sys, enc, [init, cube_from, not_cons], false)?.0 {
+            CheckSatResponse::Unsat => return Ok(gen_cube.clone()),
+            CheckSatResponse::Sat => (),
+            CheckSatResponse::Unknown => {
+                return Err(UnexpectedResponse(
+                    "`fix_gen_cube` in `BasePdr`".into(),
+                    "unknown query".into(),
+                ));
+            }
+        }
+
+        // Add all removed literals back to generalized cube
+        let mut test_cube = gen_cube.clone();
+        test_cube.literals.extend(rm_lits);
+
+        // Flag for first iteration
+        let mut first_iter = true;
+
+        loop {
+            let mut assumps = vec![init, not_cons];
+
+            // Map between `FROM_STEP` cube literal to unstepped cube literal
+            let lit_map = test_cube
+                .literals
+                .iter()
+                .map(|&e| (expr_at_step(ctx, enc, e, FROM_STEP), e))
+                .collect::<FxHashMap<_, _>>();
+
+            // Step candidate cube
+            assumps.extend(lit_map.keys().copied());
+
+            // Run query `SAT[R_0 /\ c]`
+            let smt_res = query(ctx, smt_ctx, sys, enc, assumps, true)?;
+
+            match smt_res.0 {
+                CheckSatResponse::Sat => {
+                    if first_iter {
+                        // If first iteration, original cube must truly intersect with init frame
+                        return Err(UnexpectedResponse(
+                            "`fix_gen_cube` in `BasePdr`".into(),
+                            "original cube intersects with init".into(),
+                        ));
+                    }
+
+                    // Removed literals are only in UNSAT core: SAT should never occur
+                    unreachable!()
+                }
+                CheckSatResponse::Unsat => {
+                    // Remove all literals not in the UNSAT core
+                    let gen_lits = smt_res
+                        .1
+                        .unwrap()
+                        .literals
+                        .iter()
+                        .filter(|e| lit_map.contains_key(e))
+                        .map(|e| lit_map[e])
+                        .collect::<Vec<_>>();
+
+                    if gen_lits.len() == test_cube.literals.len() {
+                        // If no literals are removed, then fixpoint reached: return
+                        return Ok(Cube { literals: gen_lits });
+                    }
+
+                    test_cube.literals = gen_lits;
+                }
+                CheckSatResponse::Unknown => {
+                    return Err(UnexpectedResponse(
+                        "`fix_gen_cube` in `BasePdr`".into(),
+                        "unknown query".into(),
+                    ));
+                }
+            }
+
+            first_iter = false;
+        }
+    }
+
     /// Run relative inductiveness query
     /// (i.e. `SAT?[R_{i - 1} /\ \neg c /\ T c']`)
+    ///
+    /// # Returns
+    /// Query result and possibly a model for `SAT` cases, or a generalized cube if
+    /// `unsat_core_enabled` is set in [`GLOB_PDR_OPTS`]
     fn rel_ind(
         &self,
         ctx: &mut Context,
@@ -517,23 +652,57 @@ impl BasePdr {
         let frame_assumption = self.frame_assumptions(ctx, cube.frame.decrement());
         assumptions.push(frame_assumption);
 
-        // Next step cube
-        let cube_expr = cube.cube.to_expr(ctx);
-        let cube_next = expr_at_step(ctx, enc, cube_expr, TO_STEP);
-        assumptions.push(cube_next);
+        // Mapping between `TO_STEP` cube literals to unstepped cube literals
+        let lit_map = cube
+            .cube
+            .literals
+            .iter()
+            .map(|&e| (expr_at_step(ctx, enc, e, TO_STEP), e))
+            .collect::<FxHashMap<_, _>>();
+
+        // Next step cube (expressed as `TO_STEP` literals)
+        assumptions.extend(lit_map.keys());
 
         // Current step negation cube
         if query_type == RelIndType::Extended {
             let neg_cube_expr = cube.cube.negate(ctx);
-            let neg_cube_cur = expr_at_step(ctx, enc, neg_cube_expr, FROM_STEP);
-            assumptions.push(neg_cube_cur);
+            let neg_cube_from = expr_at_step(ctx, enc, neg_cube_expr, FROM_STEP);
+            assumptions.push(neg_cube_from);
         }
 
         // Assert constraints hold after transition
         assumptions.push(self.to_step_constraints_active);
 
         // Run SMT query
-        query(ctx, smt_ctx, sys, enc, assumptions)
+        let smt_res = query(
+            ctx,
+            smt_ctx,
+            sys,
+            enc,
+            assumptions,
+            GLOB_PDR_OPTS.with_borrow(|opts| opts.unsat_cores_enabled),
+        )?;
+
+        // Extract candidate cube literals if generalized cube was created
+        if smt_res.0 == CheckSatResponse::Unsat
+            && let Some(genr) = smt_res.1
+        {
+            let gen_lits = genr
+                .literals
+                .iter()
+                .filter(|e| lit_map.contains_key(e))
+                .map(|e| lit_map[e])
+                .collect::<Vec<_>>();
+
+            // Make generalized cube not intersect initial states
+            let gen_cube = Cube { literals: gen_lits };
+            let fixed =
+                self.fix_gen_cube(ctx, smt_ctx, sys, enc, &gen_cube, lit_map.values().copied())?;
+
+            Ok((CheckSatResponse::Unsat, Some(fixed)))
+        } else {
+            Ok(smt_res)
+        }
     }
 
     /// Frame identifier for frontier frame
@@ -563,7 +732,7 @@ impl BasePdr {
         // Get frontier frame identifier
         let front = self.frontier();
 
-        // Get next-state bad state literals
+        // Get from-state bad state literals
         let bad_lits: Vec<ExprRef> = sys
             .bad_states
             .iter()
@@ -588,6 +757,7 @@ impl BasePdr {
             sys,
             enc,
             vec![front_assumption, bad_expr, neg_cons],
+            false,
         )? {
             (CheckSatResponse::Sat, Some(cube)) => {
                 // Safety property violation found: return witness cube
@@ -641,9 +811,11 @@ impl BasePdr {
             }
 
             // Try to get counterexample relative to last frame
-            let res = match self.rel_ind(ctx, smt_ctx, sys, enc, &obj, RelIndType::Extended)? {
+            let smt_res = self.rel_ind(ctx, smt_ctx, sys, enc, &obj, RelIndType::Extended)?;
+            let ex_cube = match smt_res {
                 (CheckSatResponse::Sat, Some(cube)) => Some(cube), // Extract counterexample-to-induction
-                (CheckSatResponse::Unsat, _) => None,
+                (CheckSatResponse::Unsat, Some(gen_cube)) => Some(gen_cube), // Extract UNSAT core generalized cube
+                (CheckSatResponse::Unsat, None) => None,                     // No generalized cube
                 (CheckSatResponse::Unknown, _) => {
                     return Err(Error::UnexpectedResponse(
                         "`block_cube` in `BasePdr`".into(),
@@ -653,7 +825,9 @@ impl BasePdr {
                 _ => unreachable!(),
             };
 
-            if let Some(wit) = res {
+            if smt_res.0 == CheckSatResponse::Sat
+                && let Some(wit) = ex_cube
+            {
                 // Counterexample found: try to block predecessor and current obligation
                 worklist.push(TimedCube {
                     cube: wit,
@@ -661,8 +835,15 @@ impl BasePdr {
                 });
                 worklist.push(obj);
             } else {
+                // Extract generalized cube if there is one
+                let cand_cube = if let Some(gen_cube) = ex_cube {
+                    gen_cube
+                } else {
+                    obj.cube
+                };
+
                 let mut test_cube = TimedCube {
-                    cube: obj.cube.clone(),
+                    cube: cand_cube,
                     frame: obj.frame.increment(),
                 };
 
@@ -754,10 +935,10 @@ impl BasePdr {
             let inf_assumption = self.frame_assumptions(ctx, FrameId::Infinite);
 
             let clause_expr = cube.negate(ctx);
-            let clause_cur = expr_at_step(ctx, enc, clause_expr, FROM_STEP);
+            let clause_from = expr_at_step(ctx, enc, clause_expr, FROM_STEP);
 
             let cube_expr = cube.to_expr(ctx);
-            let cube_next = expr_at_step(ctx, enc, cube_expr, TO_STEP);
+            let cube_to = expr_at_step(ctx, enc, cube_expr, TO_STEP);
 
             // Run the query `SAT?[R_\infty /\ \neg c /\ T /\ c']`, asserting that the
             // constraints hold at `TO_STEP`
@@ -768,10 +949,11 @@ impl BasePdr {
                 enc,
                 vec![
                     inf_assumption,
-                    clause_cur,
-                    cube_next,
+                    clause_from,
+                    cube_to,
                     self.to_step_constraints_active,
                 ],
+                false,
             )?
             .0;
 
@@ -794,11 +976,26 @@ pub fn pdr(
     ctx: &mut Context,
     smt_ctx: &mut impl SolverContext,
     sys: &TransitionSystem,
+    opts: impl IntoIterator<Item = PdrOptions>,
 ) -> Result<ModelCheckResult> {
     let mut enc = match start_bmc_or_pdr(ctx, smt_ctx, sys)? {
         (r, None) => return Ok(r),
         (_, Some(enc)) => enc,
     };
+
+    let mut sel_opts = Opts {
+        unsat_cores_enabled: true,
+    };
+
+    // Parse options
+    for opt in opts {
+        match opt {
+            PdrOptions::DisableUnsatCores => sel_opts.unsat_cores_enabled = false,
+        }
+    }
+
+    // Set global options
+    GLOB_PDR_OPTS.set(sel_opts);
 
     // Initialize two-step variables in solver
     enc.init_at(ctx, smt_ctx, FROM_STEP)?;

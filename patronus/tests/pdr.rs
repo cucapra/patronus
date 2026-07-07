@@ -71,7 +71,7 @@ fn run_pdr_str(
         },
     );
 
-    let res = pdr(&mut ctx, &mut smt_ctx, &sys).expect("pdr failed");
+    let res = pdr(&mut ctx, &mut smt_ctx, &sys, []).expect("pdr failed");
     (ctx, sys, res)
 }
 
@@ -96,7 +96,7 @@ fn run_pdr_file(
         },
     );
 
-    let res = pdr(&mut ctx, &mut smt_ctx, &sys).expect("pdr failed");
+    let res = pdr(&mut ctx, &mut smt_ctx, &sys, []).expect("pdr failed");
     (ctx, sys, res)
 }
 
