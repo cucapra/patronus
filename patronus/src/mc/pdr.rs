@@ -322,7 +322,7 @@ impl Frame {
 /// Frame trace maintained by vanilla PDR
 struct BasePdr {
     /// `TO_STEP` constraints
-    to_step_constraints: ExprRef,
+    to_step_constraints_active: ExprRef,
 
     /// Initial frame
     init_frame: ExprRef,
@@ -443,7 +443,7 @@ impl BasePdr {
         };
 
         Ok(Self {
-            to_step_constraints: cons_act,
+            to_step_constraints_active: cons_act,
             init_frame: init_act,
             inf_frame,
             frames: vec![], // Index consistency taken care by indexing function
@@ -532,7 +532,7 @@ impl BasePdr {
         }
 
         // Assert constraints hold after transition
-        assumptions.push(self.to_step_constraints);
+        assumptions.push(self.to_step_constraints_active);
 
         // Run SMT query
         query(ctx, smt_ctx, sys, enc, assumptions)
@@ -581,7 +581,7 @@ impl BasePdr {
         let front_assumption = self.frame_assumptions(ctx, front);
 
         // Turn off constraint requirements for `TO_STEP`
-        let neg_cons = ctx.not(self.to_step_constraints);
+        let neg_cons = ctx.not(self.to_step_constraints_active);
 
         // Run query SAT?[R_N /\ \neg P]
         match query(
@@ -772,7 +772,7 @@ impl BasePdr {
                     inf_assumption,
                     clause_cur,
                     cube_next,
-                    self.to_step_constraints,
+                    self.to_step_constraints_active,
                 ],
             )?
             .0;
