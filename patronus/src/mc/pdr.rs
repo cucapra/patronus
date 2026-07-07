@@ -321,6 +321,9 @@ impl Frame {
 
 /// Frame trace maintained by vanilla PDR
 struct BasePdr {
+    /// `TO_STEP` constraints
+    cons_next: ExprRef,
+
     /// Initial frame
     init_frame: ExprRef,
 
@@ -395,11 +398,29 @@ impl BasePdr {
             }
         }
 
+        // Next step constraints
+        let mut cons_next_lits = vec![];
+
         // Always assert constraints at current step
         for &cons in &sys.constraints {
             let cons_cur = expr_at_step(ctx, enc, cons, FROM_STEP);
+            let cons_next = expr_at_step(ctx, enc, cons, TO_STEP);
+
             smt_ctx.assert(ctx, cons_cur)?;
+            cons_next_lits.push(cons_next);
         }
+
+        // Next step constraint activation literal
+        let cons_act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}nxt_cons").as_str(), 1);
+
+        let cons_next_expr = cons_next_lits
+            .iter()
+            .fold(ctx.get_true(), |acc, &c| ctx.and(acc, c));
+        let cons_imp = ctx.implies(cons_act, cons_next_expr);
+
+        // Permanently assert in solver
+        smt_ctx.declare_const(ctx, cons_act)?;
+        smt_ctx.assert(ctx, cons_imp)?;
 
         // Initial frame activation literal
         let init_act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}init").as_str(), 1);
@@ -407,11 +428,11 @@ impl BasePdr {
         // Create act_0 => init_cube, where init_cube is stepped to the before step
         let init_expr = init_cube.to_expr(ctx);
         let init_expr = expr_at_step(ctx, enc, init_expr, FROM_STEP);
-        let imp = ctx.implies(init_act, init_expr);
+        let init_imp = ctx.implies(init_act, init_expr);
 
         // Permanently assert implication in solver
         smt_ctx.declare_const(ctx, init_act)?;
-        smt_ctx.assert(ctx, imp)?;
+        smt_ctx.assert(ctx, init_imp)?;
 
         // Create infinite frame
         let inf_act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}inf").as_str(), 1);
@@ -422,6 +443,7 @@ impl BasePdr {
         };
 
         Ok(Self {
+            cons_next: cons_act,
             init_frame: init_act,
             inf_frame,
             frames: vec![], // Index consistency taken care by indexing function
@@ -510,11 +532,7 @@ impl BasePdr {
         }
 
         // Assert constraints hold after transition
-        assumptions.extend(
-            sys.constraints
-                .iter()
-                .map(|&c| expr_at_step(ctx, enc, c, TO_STEP)),
-        );
+        assumptions.push(self.cons_next);
 
         // Run SMT query
         query(ctx, smt_ctx, sys, enc, assumptions)
@@ -562,8 +580,17 @@ impl BasePdr {
         // Get frame assumptions for frontier frame
         let front_assumption = self.frame_assumptions(ctx, front);
 
+        // Turn off constraint requirements for `TO_STEP`
+        let neg_cons = ctx.not(self.cons_next);
+
         // Run query SAT?[R_N /\ \neg P]
-        match query(ctx, smt_ctx, sys, enc, vec![front_assumption, bad_expr])? {
+        match query(
+            ctx,
+            smt_ctx,
+            sys,
+            enc,
+            vec![front_assumption, bad_expr, neg_cons],
+        )? {
             (CheckSatResponse::Sat, Some(cube)) => {
                 // Safety property violation found: return witness cube
                 Ok(Some(cube))
@@ -734,23 +761,14 @@ impl BasePdr {
             let cube_expr = cube.to_expr(ctx);
             let cube_next = expr_at_step(ctx, enc, cube_expr, TO_STEP);
 
-            // Post-transition constraint assertions
-            let cons_next = sys
-                .constraints
-                .iter()
-                .map(|&c| expr_at_step(ctx, enc, c, TO_STEP))
-                .collect::<Vec<_>>();
-            let cons_expr = cons_next
-                .iter()
-                .fold(ctx.get_true(), |acc, &e| ctx.and(acc, e));
-
-            // Run the query `SAT?[R_\infty /\ \neg c /\ T /\ c']`
+            // Run the query `SAT?[R_\infty /\ \neg c /\ T /\ c']`, asserting that the
+            // constraints hold at `TO_STEP`
             let smt_res = query(
                 ctx,
                 smt_ctx,
                 sys,
                 enc,
-                vec![inf_assumption, clause_cur, cube_next, cons_expr],
+                vec![inf_assumption, clause_cur, cube_next, self.cons_next],
             )?
             .0;
 
