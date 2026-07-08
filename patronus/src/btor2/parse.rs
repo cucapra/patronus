@@ -832,6 +832,7 @@ fn improve_state_names(ctx: &mut Context, sys: &mut TransitionSystem) {
                 .get(&expr_ref)
                 .map(|new_name_ref| ctx.symbol(*new_name_ref, expr_ref.get_type(ctx)))
         },
+        true,
     );
 }
 

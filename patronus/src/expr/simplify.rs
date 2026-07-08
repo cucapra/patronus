@@ -11,7 +11,6 @@ use crate::expr::meta::get_fixed_point;
 use crate::expr::transform::ExprTransformMode;
 use crate::smt::{CheckSatResponse, SolverContext};
 use baa::{BitVecOps, BitVecValue};
-use rustc_hash::FxHashSet;
 use smallvec::{SmallVec, smallvec};
 
 /// Applies simplifications to a single expression.

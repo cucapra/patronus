@@ -2,13 +2,50 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::expr::{Context, Expr, ExprRef, SerializableIrNode, TypeCheck, as_equality};
+use crate::expr::{
+    Context, Expr, ExprRef, ExprTransformMode, SerializableIrNode, TypeCheck, as_equality,
+};
 use crate::system::TransitionSystem;
-use rustc_hash::FxHashSet;
+use crate::system::transform::do_transform;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Turns simple constraints into hardware.
 pub fn remove_simple_constraints(ctx: &mut Context, sys: &mut TransitionSystem) {
-    todo!()
+    // collect equality constraints
+    split_constraints(ctx, sys);
+    let cs = collect_input_equality_constraints(ctx, sys);
+
+    // group by inputs
+    let mut constraints_per_input = FxHashMap::default();
+    for eq in cs {
+        constraints_per_input
+            .entry(eq.input)
+            .or_insert_with(Vec::new)
+            .push(eq);
+    }
+
+    // transform inputs
+    let mut replace_map = FxHashMap::default();
+    for (input, constraints) in constraints_per_input {
+        let mut expr = input;
+        for c in constraints {
+            debug_assert_eq!(c.input, input);
+            expr = ctx.ite(c.guard, c.rhs, expr);
+        }
+        replace_map.insert(input, expr);
+        println!(
+            "{} = {}",
+            input.serialize_to_str(ctx),
+            expr.serialize_to_str(ctx)
+        );
+    }
+    do_transform(
+        ctx,
+        sys,
+        ExprTransformMode::SingleStep,
+        |_ctx, expr, _children| replace_map.get(&expr).cloned(),
+        false,
+    );
 }
 
 pub fn split_constraints(ctx: &mut Context, sys: &mut TransitionSystem) {
@@ -142,8 +179,8 @@ mod tests {
 
     #[test]
     fn test_mann_fifo() {
-        let (mut ctx, mut sys) =
-            parse_file("../inputs/hwmcc/shift_register_top_w64_d16_e0.btor2").unwrap();
+        let filename = "../inputs/hwmcc/shift_register_top_w64_d16_e0.btor2";
+        let (mut ctx, mut sys) = parse_file(filename).unwrap();
         assert_eq!(sys.constraints.len(), 5);
         // recognition only works on a simplified system
         simplify_expressions(&mut ctx, &mut sys);
@@ -158,43 +195,41 @@ mod tests {
         dedup_constraints_and_bads(&mut sys);
         assert_eq!(sys.constraints.len(), 3);
         let cs = collect_input_equality_constraints(&mut ctx, &mut sys);
+        assert_eq!(cs.len(), 3);
         assert!(
             sys.constraints.is_empty(),
             "All three constraints are input equality constraints."
         );
-        for c in cs {
-            println!(
-                "{} == {} when {}",
-                c.input.serialize_to_str(&ctx),
-                c.rhs.serialize_to_str(&ctx),
-                c.guard.serialize_to_str(&ctx)
-            )
-        }
+
+        // actually apply the transformation
+        let (mut ctx, mut sys) = parse_file(filename).unwrap();
+        simplify_expressions(&mut ctx, &mut sys);
+        dedup_constraints_and_bads(&mut sys);
+        remove_simple_constraints(&mut ctx, &mut sys);
+        println!("{}", sys.serialize_to_str(&ctx));
     }
 
     #[test]
     fn test_chisel_constraints() {
-        let (mut ctx, mut sys) =
-            parse_file("../inputs/chiseltest/formal_backend_should_do_division_and_remainder_correctly_for_all_2bit_UInts_DivisionAndRemainderTest.btor").unwrap();
+        let filename = "../inputs/chiseltest/formal_backend_should_do_division_and_remainder_correctly_for_all_2bit_UInts_DivisionAndRemainderTest.btor";
+        let (mut ctx, mut sys) = parse_file(filename).unwrap();
         assert_eq!(sys.constraints.len(), 1);
         simplify_expressions(&mut ctx, &mut sys);
         assert_eq!(sys.constraints.len(), 1);
         split_constraints(&mut ctx, &mut sys);
         assert_eq!(sys.constraints.len(), 1);
-        println!("{}", sys.serialize_to_str(&ctx));
         let cs = collect_input_equality_constraints(&mut ctx, &mut sys);
+        assert_eq!(cs.len(), 1);
         assert!(
             sys.constraints.is_empty(),
-            // TODO: should we remove BVImplies in the simplifier or add another pattern here?
-            "TODO: deal with implies constraint!"
+            "The constraint is an input equality constraints."
         );
-        for c in cs {
-            println!(
-                "{} == {} when {}",
-                c.input.serialize_to_str(&ctx),
-                c.rhs.serialize_to_str(&ctx),
-                c.guard.serialize_to_str(&ctx)
-            )
-        }
+
+        // actually apply the transformation
+        let (mut ctx, mut sys) = parse_file(filename).unwrap();
+        simplify_expressions(&mut ctx, &mut sys);
+        dedup_constraints_and_bads(&mut sys);
+        remove_simple_constraints(&mut ctx, &mut sys);
+        println!("{}", sys.serialize_to_str(&ctx));
     }
 }

@@ -120,9 +120,15 @@ impl TransitionSystem {
 
     /// Update all output, input, assume, assert, state expressions.
     /// If `update` returns `None`, no update is performed.
-    pub fn update_expressions(&mut self, mut update: impl FnMut(ExprRef) -> Option<ExprRef>) {
-        for old in self.inputs.iter_mut() {
-            *old = update(*old).unwrap_or(*old);
+    pub fn update_expressions(
+        &mut self,
+        mut update: impl FnMut(ExprRef) -> Option<ExprRef>,
+        update_inputs_and_states: bool,
+    ) {
+        if update_inputs_and_states {
+            for old in self.inputs.iter_mut() {
+                *old = update(*old).unwrap_or(*old);
+            }
         }
         for old in self.constraints.iter_mut() {
             *old = update(*old).unwrap_or(*old);
@@ -134,7 +140,9 @@ impl TransitionSystem {
             output.expr = update(output.expr).unwrap_or(output.expr);
         }
         for state in self.states.iter_mut() {
-            state.symbol = update(state.symbol).unwrap_or(state.symbol);
+            if update_inputs_and_states {
+                state.symbol = update(state.symbol).unwrap_or(state.symbol);
+            }
             state.init = state.init.and_then(&mut update);
             state.next = state.next.and_then(&mut update);
         }
