@@ -10,7 +10,7 @@ use super::{
 use crate::expr::meta::get_fixed_point;
 use crate::expr::transform::ExprTransformMode;
 use crate::smt::{CheckSatResponse, SolverContext};
-use baa::BitVecOps;
+use baa::{BitVecOps, BitVecValue};
 use smallvec::{SmallVec, smallvec};
 
 /// Applies simplifications to a single expression.
@@ -115,7 +115,11 @@ pub(crate) fn simplify(ctx: &mut Context, expr: ExprRef, children: &[ExprRef]) -
         (Expr::BVAnd(..), [a, b]) => simplify_bv_and(ctx, *a, *b),
         (Expr::BVOr(..), [a, b]) => simplify_bv_or(ctx, *a, *b),
         (Expr::BVXor(..), [a, b]) => simplify_bv_xor(ctx, *a, *b),
-        (Expr::BVImplies(..), [a, b]) => simplify_bv_implies(ctx, *a, *b),
+        (Expr::BVImplies(..), [a, b]) => {
+            // canonicalize away bv implies
+            let not_a = ctx.not(*a);
+            Some(ctx.or(not_a, *b))
+        }
         (Expr::BVGreaterEqual(..), [a, b]) => simplify_bv_greater_equal(ctx, *a, *b),
         (Expr::BVAdd(..), [a, b]) => simplify_bv_add(ctx, *a, *b),
         (Expr::BVMul(..), [a, b]) => simplify_bv_mul(ctx, *a, *b),
@@ -423,17 +427,39 @@ fn simplify_bv_implies(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<Expr
 fn simplify_bv_greater_equal(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef> {
     // If both operands are literals, evaluate on the spot
     match (&ctx[a], &ctx[b]) {
-        (Expr::BVLiteral(va), Expr::BVLiteral(vb)) => {
-            let result = va.get(ctx).is_greater_or_equal(&vb.get(ctx));
+        (Expr::BVLiteral(a_val), Expr::BVLiteral(b_val)) => {
+            let result = a_val.get(ctx).is_greater_or_equal(&b_val.get(ctx));
             Some(ctx.bv_lit(&result.into()))
+        }
+        (Expr::BVLiteral(a_val), _) => {
+            // a_val >= b
+            let width = a.get_bv_type(ctx).unwrap();
+            let max_value = BitVecValue::ones(width);
+            if a_val.get(ctx).is_equal(&max_value) {
+                Some(ctx.get_true())
+            } else {
+                None
+            }
+        }
+        (_, Expr::BVLiteral(b_val)) => {
+            // a >= b_val
+            let width = a.get_bv_type(ctx).unwrap();
+            let max_value = BitVecValue::ones(width);
+            if b_val.get(ctx).is_zero() {
+                Some(ctx.get_true())
+            } else if b_val.get(ctx).is_equal(&max_value) {
+                Some(ctx.equal(a, b))
+            } else {
+                None
+            }
         }
         _ => None,
     }
 }
 
 fn simplify_bv_not(ctx: &mut Context, e: ExprRef) -> Option<ExprRef> {
-    match &ctx[e] {
-        Expr::BVNot(inner, _) => Some(*inner), // double negation
+    match ctx[e].clone() {
+        Expr::BVNot(inner, _) => Some(inner), // double negation
         Expr::BVLiteral(value) => Some(ctx.bv_lit(&value.get(ctx).not())),
         _ => None,
     }

@@ -1,4 +1,4 @@
-// Copyright 2024 Cornell University
+// Copyright 2024-26 Cornell University
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
@@ -286,6 +286,8 @@ fn test_simplify_implies() {
     ts("implies(true, a : bv<1>)", "a : bv<1>");
     ts("implies(true, true)", "true");
     ts("implies(true, false)", "false");
+    // implies gets canonicalized to its definition
+    ts("implies(a : bv<1>, b : bv<1>)", "or(not(a:bv<1>), b:bv<1>)");
 }
 
 #[test]
@@ -299,6 +301,13 @@ fn test_simplify_ugte() {
     ts("ugte(4'd7, 4'd7)", "true");
     ts("ugte(4'd15, 4'd10)", "true");
     ts("ugte(4'd5, 4'd10)", "false");
+    // simplify when we are at the limit
+    ts("ugte(a : bv<1>, 1'b1)", "a : bv<1>"); // here `a` is either 0 or 1
+    ts("ugte(a : bv<32>, 32'd0)", "true");
+    ts(
+        "ugte(a : bv<32>, 32'xffffffff)",
+        "eq(a : bv<32>, 32'xffffffff)",
+    );
 }
 
 // from maltese-smt:
