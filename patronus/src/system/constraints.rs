@@ -93,8 +93,18 @@ fn collect_input_equality_constraints(
                         sys.constraints.push(constraint);
                     }
                 }
-
-                // TODO: add support for ITE style constraints
+                Expr::BVOr(a, b, ..) => {
+                    // (a || b) <=> !a => b <=> !b => a
+                    if let Some(c) = is_input_equality(ctx, a, &inps) {
+                        let g = ctx.not(b);
+                        consts.push(c.with_guard(ctx, g));
+                    } else if let Some(c) = is_input_equality(ctx, b, &inps) {
+                        let g = ctx.not(a);
+                        consts.push(c.with_guard(ctx, g));
+                    } else {
+                        sys.constraints.push(constraint);
+                    }
+                }
                 _ => {
                     sys.constraints.push(constraint);
                 }
