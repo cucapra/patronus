@@ -11,6 +11,7 @@ use crate::expr::meta::get_fixed_point;
 use crate::expr::transform::ExprTransformMode;
 use crate::smt::{CheckSatResponse, SolverContext};
 use baa::{BitVecOps, BitVecValue};
+use rustc_hash::FxHashSet;
 use smallvec::{SmallVec, smallvec};
 
 /// Applies simplifications to a single expression.
@@ -100,6 +101,22 @@ impl<T: ExprMap<Option<ExprRef>>> Simplifier<T> {
         }
 
         Ok(incorrect)
+    }
+}
+
+/// Returns a symbol `S` and the value `V` if the given expression is equisatisfiable
+/// with `eq(S, V)
+pub fn as_equality(ctx: &Context, e: ExprRef) -> Option<(ExprRef, ExprRef)> {
+    if e.get_bv_type(ctx) != Some(1) {
+        return None;
+    }
+    match ctx[e].clone() {
+        // equality constraint in their different shapes
+        Expr::BVEqual(a, b) if let Expr::BVSymbol { .. } = &ctx[a] => Some((a, b)),
+        Expr::BVEqual(a, b) if let Expr::BVSymbol { .. } = &ctx[b] => Some((b, a)),
+        Expr::BVSymbol { .. } => Some((e, ctx.get_true())),
+        Expr::BVNot(e, ..) if let Expr::BVSymbol { .. } = &ctx[e] => Some((e, ctx.get_false())),
+        _ => None,
     }
 }
 

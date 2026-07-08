@@ -2,7 +2,7 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::expr::{Context, Expr, ExprRef, SerializableIrNode, TypeCheck};
+use crate::expr::{Context, Expr, ExprRef, SerializableIrNode, TypeCheck, as_equality};
 use crate::system::TransitionSystem;
 use rustc_hash::FxHashSet;
 
@@ -116,31 +116,13 @@ fn collect_input_equality_constraints(
 }
 
 fn is_input_equality(ctx: &Context, e: ExprRef, inps: &FxHashSet<ExprRef>) -> Option<InputEq> {
-    debug_assert_eq!(e.get_bv_type(ctx), Some(1));
-    match ctx[e].clone() {
-        // equality constraint in their different shapes
-        Expr::BVEqual(a, b) if inps.contains(&a) => Some(InputEq {
+    as_equality(ctx, e)
+        .filter(|(s, _)| inps.contains(s))
+        .map(|(input, rhs)| InputEq {
             guard: ctx.get_true(),
-            input: a,
-            rhs: b,
-        }),
-        Expr::BVEqual(a, b) if inps.contains(&b) => Some(InputEq {
-            guard: ctx.get_true(),
-            input: b,
-            rhs: a,
-        }),
-        Expr::BVSymbol { .. } if inps.contains(&e) => Some(InputEq {
-            guard: ctx.get_true(),
-            input: e,
-            rhs: ctx.get_true(),
-        }),
-        Expr::BVNot(e, ..) if inps.contains(&e) => Some(InputEq {
-            guard: ctx.get_true(),
-            input: e,
-            rhs: ctx.get_false(),
-        }),
-        _ => None,
-    }
+            input,
+            rhs,
+        })
 }
 
 /// Removes any exact duplicate constraints / bad states without changing the order.
