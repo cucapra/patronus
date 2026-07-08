@@ -13,7 +13,6 @@ use crate::smt::*;
 use crate::system::TransitionSystem;
 use baa::{BitVecOps, Value};
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::cell::RefCell;
 use std::collections::BinaryHeap;
 use std::num::NonZeroUsize;
 use std::ops::{Index, IndexMut};
@@ -33,7 +32,7 @@ const ACT_LIT_PREFIX: &str = "__pdr_act_";
 // Public PDR interface structures
 // -------------------------------------------------------------------------------------------------
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum PdrOption {
     /// Disable UNSAT core generalization
     DisableUnsatCores,
@@ -341,16 +340,6 @@ impl Frame {
     }
 }
 
-/// Boolean flags for set PDR options
-struct Opts {
-    unsat_cores_enabled: bool,
-}
-
-thread_local! {
-    /// Global PDR options
-    static GLOB_PDR_OPTS: RefCell<Opts> = const { RefCell::new(Opts { unsat_cores_enabled: false }) };
-}
-
 /// Frame trace maintained by vanilla PDR
 struct BasePdr {
     /// `TO_STEP` constraints
@@ -367,6 +356,9 @@ struct BasePdr {
 
     /// Incrementing counter for creating unique frame activation literal IDs
     next_act_id: u64,
+
+    /// Whether to enable UNSAT core generalization
+    unsat_cores_enabled: bool,
 }
 
 impl Index<FrameId> for BasePdr {
@@ -418,6 +410,7 @@ impl BasePdr {
         smt_ctx: &mut impl SolverContext,
         enc: &impl TransitionSystemEncoding,
         sys: &TransitionSystem,
+        use_unsat_cores: bool,
     ) -> Result<Self> {
         let mut init_cube = Cube::tru();
 
@@ -478,6 +471,7 @@ impl BasePdr {
             inf_frame,
             frames: vec![], // Index consistency taken care by indexing function
             next_act_id: 0,
+            unsat_cores_enabled: use_unsat_cores,
         })
     }
 
@@ -727,7 +721,7 @@ impl BasePdr {
             sys,
             enc,
             assumptions,
-            GLOB_PDR_OPTS.with_borrow(|opts| opts.unsat_cores_enabled),
+            self.unsat_cores_enabled,
         )?;
 
         // Extract candidate cube literals if generalized cube was created
@@ -1047,26 +1041,21 @@ pub fn pdr(
         (_, Some(enc)) => enc,
     };
 
-    let mut sel_opts = Opts {
-        unsat_cores_enabled: true,
-    };
-
-    // Parse options
-    for opt in opts {
-        match opt {
-            PdrOption::DisableUnsatCores => sel_opts.unsat_cores_enabled = false,
-        }
-    }
-
-    // Set global options
-    GLOB_PDR_OPTS.set(sel_opts);
+    // Collect all options
+    let sel_opts = opts.into_iter().collect::<FxHashSet<_>>();
 
     // Initialize two-step variables in solver
     enc.init_at(ctx, smt_ctx, FROM_STEP)?;
     enc.unroll(ctx, smt_ctx)?;
 
     // Initialize PDR
-    let mut state = BasePdr::init(ctx, smt_ctx, &enc, sys)?;
+    let mut state = BasePdr::init(
+        ctx,
+        smt_ctx,
+        &enc,
+        sys,
+        !sel_opts.contains(&PdrOption::DisableUnsatCores),
+    )?;
 
     let limit = FrameId::Finite(NonZeroUsize::new(MAX_FRAMES).unwrap());
 
