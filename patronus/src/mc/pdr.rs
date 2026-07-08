@@ -818,12 +818,12 @@ impl BasePdr {
             match query(ctx, smt_ctx, sys, enc, [init, neg_cons, cube_from], false)?.0 {
                 CheckSatResponse::Sat => return Ok(false),
                 CheckSatResponse::Unsat => (),
-                CheckSatResponse::Unknown => return Err(
-                    UnexpectedResponse(
+                CheckSatResponse::Unknown => {
+                    return Err(UnexpectedResponse(
                         "`get_bad_cube` in `BasePdr`".into(),
                         "unknown query".into(),
-                    )
-                ),
+                    ));
+                }
             }
 
             // Try to get counterexample relative to last frame
