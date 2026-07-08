@@ -6,7 +6,7 @@
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser, ValueEnum};
 use patronus::expr::*;
-use patronus::mc::{bmc, pdr};
+use patronus::mc::{bmc, pdr, PdrOption};
 use patronus::smt::*;
 use patronus::system::transform::simplify_expressions;
 use patronus::*;
@@ -35,6 +35,8 @@ struct Args {
     skip_simplify: bool,
     #[arg(short, long)]
     dump_smt: bool,
+    #[arg(long, help = "disable UNSAT core generalization (for PDR engine only)")]
+    disable_unsat_cores: bool,
     #[arg(value_name = "BTOR2", index = 1)]
     filename: String,
 }
@@ -65,6 +67,15 @@ fn main() {
             .exit();
     }
     let kmax = args.kmax.unwrap_or(25);
+
+    if args.disable_unsat_cores && args.engine != ModelCheckEngine::Pdr {
+        Args::command()
+            .error(
+                ErrorKind::ArgumentConflict,
+                "--disable-unsat-cores can only be used with the pdr engine (--engine pdr)",
+            )
+            .exit();
+    }
 
     let (mut ctx, mut sys) = btor2::parse_file(&args.filename).expect("Failed to load btor2 file!");
     if !args.skip_simplify {
@@ -117,8 +128,15 @@ fn main() {
             check_bad_states_individually,
             k_max,
         ),
-        // TODO: Parse PDR options
-        ModelCheckEngine::Pdr => pdr(&mut ctx, &mut smt_ctx, &sys, []),
+        ModelCheckEngine::Pdr => {
+            let mut opts = vec![];
+
+            if args.disable_unsat_cores {
+                opts.push(PdrOption::DisableUnsatCores);
+            }
+
+            pdr(&mut ctx, &mut smt_ctx, &sys, opts)
+        },
     }
     .unwrap();
     match res {
