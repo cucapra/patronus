@@ -689,38 +689,48 @@ fn simplify_bv_arithmetic_shift_right(
 }
 
 fn simplify_bv_add(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef> {
-    match find_lits_commutative(ctx, a, b) {
-        Lits::Two(va, vb) => Some(ctx.bv_lit(&va.get(ctx).add(&vb.get(ctx)))),
-        Lits::One((va, _), b) => {
-            if va.get(ctx).is_zero() {
-                Some(b)
-            } else {
-                None
+    // canonicalize 1-bit add to xor
+    if a.get_bv_type(ctx) == Some(1) {
+        Some(ctx.xor(a, b))
+    } else {
+        match find_lits_commutative(ctx, a, b) {
+            Lits::Two(va, vb) => Some(ctx.bv_lit(&va.get(ctx).add(&vb.get(ctx)))),
+            Lits::One((va, _), b) => {
+                if va.get(ctx).is_zero() {
+                    Some(b)
+                } else {
+                    None
+                }
             }
+            Lits::None => None,
         }
-        Lits::None => None,
     }
 }
 
 fn simplify_bv_mul(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef> {
-    match find_lits_commutative(ctx, a, b) {
-        Lits::Two(va, vb) => Some(ctx.bv_lit(&va.get(ctx).mul(&vb.get(ctx)))),
-        Lits::One((va, a), b) => {
-            let va = va.get(ctx);
-            if va.is_zero() {
-                // b * 0 -> 0
-                Some(a)
-            } else if va.is_one() {
-                // b * 1 -> b
-                Some(b)
-            } else if let Some(log_2) = va.is_pow_2() {
-                // b * 2**log_2 -> b
-                let log_2 = ctx.bit_vec_val(log_2, va.width());
-                Some(ctx.shift_left(b, log_2))
-            } else {
-                None
+    // canonicalize 1-bit mul to and
+    if a.get_bv_type(ctx) == Some(1) {
+        Some(ctx.and(a, b))
+    } else {
+        match find_lits_commutative(ctx, a, b) {
+            Lits::Two(va, vb) => Some(ctx.bv_lit(&va.get(ctx).mul(&vb.get(ctx)))),
+            Lits::One((va, a), b) => {
+                let va = va.get(ctx);
+                if va.is_zero() {
+                    // b * 0 -> 0
+                    Some(a)
+                } else if va.is_one() {
+                    // b * 1 -> b
+                    Some(b)
+                } else if let Some(log_2) = va.is_pow_2() {
+                    // b * 2**log_2 -> b
+                    let log_2 = ctx.bit_vec_val(log_2, va.width());
+                    Some(ctx.shift_left(b, log_2))
+                } else {
+                    None
+                }
             }
+            Lits::None => None,
         }
-        Lits::None => None,
     }
 }

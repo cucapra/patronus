@@ -119,6 +119,15 @@ fn test_simplify_ite() {
     ts("ite(c:bv<1>, a:bv<1>, true)", "or(not(c:bv<1>), a:bv<1>)");
 }
 
+/// inside an ITE we might already know some values
+#[test]
+#[ignore] // TODO
+fn test_conditional_simplification() {
+    // a = 0 -> a + 1 = 0 + 1 = 1
+    // a = 1 -> a     = 1
+    ts("ite(not(a:bv<1>), add(a, 1'b1), a)", "true");
+}
+
 #[test]
 fn test_simplify_slice() {
     // slice a constant
@@ -218,6 +227,11 @@ fn test_simplify_add() {
     // add zero
     ts("add(a : bv<4>, 4'd0)", "a : bv<4>");
     ts("add(4'd0, a : bv<4>)", "a : bv<4>");
+
+    // add 1-bit -> converted to bool
+    ts("add(a : bv<1>, b: bv<1>)", "xor(a : bv<1>, b: bv<1>)");
+    ts("add(a : bv<1>, 1'b1)", "not(a : bv<1>)");
+    ts("add(a : bv<1>, 1'b0)", "a : bv<1>");
 }
 
 #[test]
@@ -240,6 +254,13 @@ fn test_simplify_mul() {
     ts("mul(a : bv<4>, 4'd2)", "concat(a : bv<4>[2:0],  1'b0)");
     ts("mul(a : bv<4>, 4'd4)", "concat(a : bv<4>[1:0], 2'b00)");
     ts("mul(a : bv<4>, 4'd8)", "concat(a : bv<4>[0],  3'b000)");
+
+    // 1-bit multiply with constant is already covered
+    ts("mul(a : bv<1>, 1'b1)", "a : bv<1>");
+    ts("mul(a : bv<1>, 1'b0)", "1'b0");
+
+    // canonicalize multiply 1-bit
+    ts("mul(a : bv<1>, b: bv<1>)", "and(a : bv<1>, b: bv<1>)");
 }
 
 #[test]
