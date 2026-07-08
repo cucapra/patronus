@@ -579,9 +579,11 @@ impl BasePdr {
             }
         }
 
-        // Add all removed literals back to generalized cube
-        let mut test_cube = gen_cube.clone();
-        test_cube.literals.extend(rm_lits);
+        // Map between candidate literals at `FROM_STEP` to unstepped literals
+        let mut lit_map = rm_lits
+            .into_iter()
+            .map(|e| (expr_at_step(ctx, enc, e, FROM_STEP), e))
+            .collect::<FxHashMap<_, _>>();
 
         // Flag for first iteration
         let mut first_iter = true;
@@ -612,26 +614,27 @@ impl BasePdr {
                         ));
                     }
 
-                    // Removed literals are only in UNSAT core: SAT should never occur
+                    // Removed literals are not in UNSAT core: SAT should never occur
                     unreachable!()
                 }
                 CheckSatResponse::Unsat => {
-                    // Remove all literals not in the UNSAT core
-                    let gen_lits = smt_res
-                        .1
-                        .unwrap()
-                        .literals
-                        .iter()
-                        .filter(|e| lit_map.contains_key(e))
-                        .map(|e| lit_map[e])
-                        .collect::<Vec<_>>();
+                    // Store previous number of literals
+                    let prev_lits_num = lit_map.len();
 
-                    if gen_lits.len() == test_cube.literals.len() {
-                        // If no literals are removed, then fixpoint reached: return
-                        return Ok(Cube { literals: gen_lits });
+                    // Collect all literals in the UNSAT core
+                    let ex_cube = smt_res.1.unwrap();
+                    let gen_lits = ex_cube.literals.iter().collect::<FxHashSet<_>>();
+
+                    // Remove all candidate literals not in UNSAT core
+                    lit_map.retain(|e, _| gen_lits.contains(e));
+
+                    if lit_map.len() == prev_lits_num {
+                        // If no literals are removed, then fixpoint reached
+                        let mut fin_lits = gen_cube.literals.clone();
+                        fin_lits.extend(lit_map.values().copied());
+
+                        return Ok(Cube { literals: fin_lits });
                     }
-
-                    test_cube.literals = gen_lits;
                 }
                 CheckSatResponse::Unknown => {
                     return Err(Error::UnexpectedResponse(
@@ -701,17 +704,26 @@ impl BasePdr {
         if smt_res.0 == CheckSatResponse::Unsat
             && let Some(genr) = smt_res.1
         {
+            // Literals in UNSAT core
             let gen_lits = genr
                 .literals
                 .iter()
                 .filter(|e| lit_map.contains_key(e))
                 .map(|e| lit_map[e])
+                .collect::<FxHashSet<_>>();
+
+            // Literals not in UNSAT core
+            let rm_lits = lit_map
+                .values()
+                .copied()
+                .filter(|e| !gen_lits.contains(e))
                 .collect::<Vec<_>>();
 
             // Make generalized cube not intersect initial states
-            let gen_cube = Cube { literals: gen_lits };
-            let fixed =
-                self.fix_gen_cube(ctx, smt_ctx, sys, &gen_cube, lit_map.values().copied())?;
+            let gen_cube = Cube {
+                literals: gen_lits.into_iter().collect(),
+            };
+            let fixed = self.fix_gen_cube(ctx, smt_ctx, sys, enc, &gen_cube, rm_lits)?;
 
             Ok((CheckSatResponse::Unsat, Some(fixed)))
         } else {
@@ -837,9 +849,21 @@ impl BasePdr {
 
         // Try to solve all proof obligations
         while let Some(obj) = worklist.pop() {
-            // If initial frame reached, concrete counterexample trace found: fail
-            if obj.frame == FrameId::Init {
-                return Ok(false);
+            let init = self.frame_assumptions(ctx, FrameId::Init);
+            let neg_cons = ctx.not(self.to_step_constraints_active);
+            let cube_expr = obj.cube.to_expr(ctx);
+            let cube_from = expr_at_step(ctx, enc, cube_expr, FROM_STEP);
+
+            // Run query `SAT?[R_0 /\ c]`
+            match query(ctx, smt_ctx, sys, enc, [init, neg_cons, cube_from], false)?.0 {
+                CheckSatResponse::Sat => return Ok(false),
+                CheckSatResponse::Unsat => (),
+                CheckSatResponse::Unknown => return Err(
+                    UnexpectedResponse(
+                        "`get_bad_cube` in `BasePdr`".into(),
+                        "unknown query".into(),
+                    )
+                ),
             }
 
             // Try to get counterexample relative to last frame
