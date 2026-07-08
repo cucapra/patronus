@@ -6,7 +6,7 @@
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser, ValueEnum};
 use patronus::expr::*;
-use patronus::mc::{bmc, pdr, PdrOption};
+use patronus::mc::{PdrOption, bmc, pdr};
 use patronus::smt::*;
 use patronus::system::transform::simplify_expressions;
 use patronus::*;
@@ -136,7 +136,7 @@ fn main() {
             }
 
             pdr(&mut ctx, &mut smt_ctx, &sys, opts)
-        },
+        }
     }
     .unwrap();
     match res {
