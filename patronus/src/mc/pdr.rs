@@ -538,7 +538,7 @@ impl BasePdr {
     /// Returns [`Error::UnexpectedResponse`] if any SMT query returns `UNKNOWN` or original cube
     /// truly intersects the initial states
     fn fix_gen_cube(
-        &self,
+        &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
@@ -563,11 +563,20 @@ impl BasePdr {
             }
         }
 
-        // Map between candidate literals at `FROM_STEP` to unstepped literals
-        let mut lit_map = rm_lits
-            .into_iter()
-            .map(|e| (expr_at_step(ctx, enc, e, FROM_STEP), e))
-            .collect::<FxHashMap<_, _>>();
+        // Map between activation literal and original unstepped literal
+        let mut lit_map = FxHashMap::default();
+        for lit in rm_lits {
+            // Create activation literal implication
+            let act = self.create_act_lit(ctx, smt_ctx)?;
+            let expr_from = expr_at_step(ctx, enc, lit, FROM_STEP);
+            let imp = ctx.implies(act, expr_from);
+
+            // Assert in solver
+            smt_ctx.assert(ctx, imp)?;
+
+            // Add mapping
+            lit_map.insert(act, lit);
+        }
 
         // Flag for first iteration
         let mut first_iter = true;
@@ -596,7 +605,7 @@ impl BasePdr {
                 }
                 CheckSatResponse::Unsat => {
                     // Store previous number of literals
-                    let prev_lits_num = lit_map.len();
+                    let prev_acts = lit_map.keys().copied().collect::<Vec<_>>();
 
                     // Collect all literals in the UNSAT core
                     let ex_cube = smt_res.1.unwrap();
@@ -605,7 +614,15 @@ impl BasePdr {
                     // Remove all candidate literals not in UNSAT core
                     lit_map.retain(|e, _| gen_lits.contains(e));
 
-                    if lit_map.len() == prev_lits_num {
+                    // Permanently disable literals that were removed
+                    for &act in &prev_acts {
+                        if !lit_map.contains_key(&act) {
+                            let neg_act = ctx.not(act);
+                            smt_ctx.assert(ctx, neg_act)?;
+                        }
+                    }
+
+                    if lit_map.len() == prev_acts.len() {
                         // If no literals are removed, then fixpoint reached
                         let mut fin_lits = gen_cube.literals.clone();
                         fin_lits.extend(lit_map.values().copied());
@@ -632,7 +649,7 @@ impl BasePdr {
     /// Query result and possibly a model for `SAT` cases, or a generalized cube if
     /// `unsat_core_enabled` is set in [`GLOB_PDR_OPTS`]
     fn rel_ind(
-        &self,
+        &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
@@ -647,13 +664,20 @@ impl BasePdr {
         let frame_assumption = self.frame_assumptions(ctx, cube.frame.decrement());
         assumptions.push(frame_assumption);
 
-        // Mapping between `TO_STEP` cube literals to unstepped cube literals
-        let lit_map = cube
-            .cube
-            .literals
-            .iter()
-            .map(|&e| (expr_at_step(ctx, enc, e, TO_STEP), e))
-            .collect::<FxHashMap<_, _>>();
+        // Map between activation literal and original unstepped literal
+        let mut lit_map = FxHashMap::default();
+        for &lit in &cube.cube.literals {
+            // Activate `TO_STEP` literal
+            let act = self.create_act_lit(ctx, smt_ctx)?;
+            let expr_to = expr_at_step(ctx, enc, lit, TO_STEP);
+            let imp = ctx.implies(act, expr_to);
+
+            // Permanently assert in solver
+            smt_ctx.assert(ctx, imp)?;
+
+            // Add mapping
+            lit_map.insert(act, lit);
+        }
 
         // Next step cube (expressed as `TO_STEP` literals)
         assumptions.extend(lit_map.keys());
@@ -702,6 +726,12 @@ impl BasePdr {
                 literals: gen_lits.into_iter().collect(),
             };
             let fixed = self.fix_gen_cube(ctx, smt_ctx, sys, enc, &gen_cube, rm_lits)?;
+
+            // Disable all created activation literals
+            for &act in lit_map.keys() {
+                let neg_act = ctx.not(act);
+                smt_ctx.assert(ctx, neg_act)?;
+            }
 
             Ok((CheckSatResponse::Unsat, Some(fixed)))
         } else {
