@@ -342,6 +342,9 @@ impl Frame {
 
 /// Frame trace maintained by vanilla PDR
 struct BasePdr {
+    /// `FROM_STEP` bad states
+    from_step_bad_active: ExprRef,
+
     /// `TO_STEP` constraints
     to_step_constraints_active: ExprRef,
 
@@ -429,7 +432,23 @@ impl BasePdr {
             smt_ctx.assert(ctx, cons_from)?;
         }
 
-        // Next step constraint activation literal
+        // `FROM_STEP` bad state activation literal
+        let bad_act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}from_bad").as_str(), 1);
+
+        let bad_from_expr = sys
+            .bad_states
+            .iter()
+            .map(|&b| expr_at_step(ctx, enc, b, FROM_STEP))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .fold(ctx.get_false(), |acc, b| ctx.or(acc, b));
+        let bad_imp = ctx.implies(bad_act, bad_from_expr);
+
+        // Permanently assert in solver
+        smt_ctx.declare_const(ctx, bad_act)?;
+        smt_ctx.assert(ctx, bad_imp)?;
+
+        // `TO_STEP` constraint activation literal
         let cons_act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}to_cons").as_str(), 1);
 
         let cons_to_expr = sys
@@ -466,6 +485,7 @@ impl BasePdr {
         };
 
         Ok(Self {
+            from_step_bad_active: bad_act,
             to_step_constraints_active: cons_act,
             init_frame: init_act,
             inf_frame,
@@ -545,11 +565,14 @@ impl BasePdr {
         // Initial frame
         let init = self.frame_assumptions(ctx, FrameId::Init);
 
+        // Disable bad states for `FROM_STEP`
+        let neg_bad = ctx.not(self.from_step_bad_active);
+
         // Disable constraints for `TO_STEP`
         let neg_cons = ctx.not(self.to_step_constraints_active);
 
         // Complete assumptions
-        let mut fin_assumps = vec![init, neg_cons];
+        let mut fin_assumps = vec![init, neg_cons, neg_bad];
         fin_assumps.extend(assumptions);
 
         // Run query `SAT?[R_0 /\ c]`
@@ -714,6 +737,9 @@ impl BasePdr {
         // Assert constraints hold after transition
         assumptions.push(self.to_step_constraints_active);
 
+        // Disable `FROM_STEP` bad state assertion
+        assumptions.push(ctx.not(self.from_step_bad_active));
+
         // Run SMT query
         let smt_res = query(
             ctx,
@@ -749,7 +775,7 @@ impl BasePdr {
             };
             let fixed = self.fix_gen_cube(ctx, smt_ctx, sys, enc, gen_cube, rm_lits)?;
 
-            // Disable all created activation literals
+            // Disable all created activation literals as cleanup
             for &act in lit_map.keys() {
                 let neg_act = ctx.not(act);
                 smt_ctx.assert(ctx, neg_act)?;
@@ -788,18 +814,6 @@ impl BasePdr {
         // Get frontier frame identifier
         let front = self.frontier();
 
-        // Get from-state bad state literals
-        let bad_lits: Vec<ExprRef> = sys
-            .bad_states
-            .iter()
-            .map(|&b| expr_at_step(ctx, enc, b, FROM_STEP))
-            .collect();
-
-        // Disjunct all bad state literals
-        let bad_expr = bad_lits
-            .iter()
-            .fold(ctx.get_false(), |acc, &b| ctx.or(acc, b));
-
         // Get frame assumptions for frontier frame
         let front_assumption = self.frame_assumptions(ctx, front);
 
@@ -812,7 +826,7 @@ impl BasePdr {
             smt_ctx,
             sys,
             enc,
-            vec![front_assumption, bad_expr, neg_cons],
+            vec![front_assumption, self.from_step_bad_active, neg_cons], // Assert bad states at `FROM_STEP`
             false,
         )? {
             (CheckSatResponse::Sat, Some(cube)) => {
@@ -998,6 +1012,9 @@ impl BasePdr {
             let cube_expr = cube.to_expr(ctx);
             let cube_to = expr_at_step(ctx, enc, cube_expr, TO_STEP);
 
+            // Disable `FROM_STEP` bad states
+            let neg_bad = ctx.not(self.from_step_bad_active);
+
             // Run the query `SAT?[R_\infty /\ \neg c /\ T /\ c']`, asserting that the
             // constraints hold at `TO_STEP`
             let smt_res = query(
@@ -1010,6 +1027,7 @@ impl BasePdr {
                     clause_from,
                     cube_to,
                     self.to_step_constraints_active,
+                    neg_bad,
                 ],
                 false,
             )?
