@@ -608,7 +608,7 @@ impl BasePdr {
         // If generalized cube already doesn't intersect with initial states, just return
         let cube_expr = gen_cube.to_expr(ctx);
         let cube_from = expr_at_step(ctx, enc, cube_expr, FROM_STEP);
-        if self
+        if !self
             .intersects_init(ctx, smt_ctx, sys, enc, [cube_from], false)?
             .0
         {

@@ -102,11 +102,8 @@ fn run_pdr_file(
     (ctx, sys, res)
 }
 
-/// Tests that let PDR generalize blocked cubes rely on `(get-unsat-assumptions)`, which some
-/// solvers (e.g. yices2) don't support. Returns `true` (and logs a notice) when the given solver
-/// lacks that support, so the caller can skip the test instead of failing.
-///
-/// Tests that pass [`PdrOption::DisableUnsatCores`] don't need this guard.
+/// # Returns
+/// Whether solver supports `(get-unsat-assumptions)`, printing out message if it doesn't
 fn skip_if_no_unsat_assumptions(solver: &SmtLibSolver) -> bool {
     if solver.supports_get_unsat_assumptions() {
         false
