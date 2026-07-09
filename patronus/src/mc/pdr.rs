@@ -12,7 +12,6 @@ use crate::smt::*;
 use crate::system::TransitionSystem;
 use baa::{BitVecOps, Value};
 use rustc_hash::FxHashMap;
-use::std::cell::RefCell;
 use std::collections::BinaryHeap;
 use std::num::NonZeroUsize;
 use std::ops::{Index, IndexMut};
@@ -27,16 +26,6 @@ const MAX_FRAMES: usize = 1000;
 
 /// Activation literal prefix
 const ACT_LIT_PREFIX: &str = "__pdr_act_";
-
-// -------------------------------------------------------------------------------------------------
-// Public PDR interface structures
-// -------------------------------------------------------------------------------------------------
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum PdrOption {
-    /// Disable UNSAT core generalization
-    DisableUnsatCores,
-}
 
 // -------------------------------------------------------------------------------------------------
 // Core PDR data structures
@@ -343,6 +332,12 @@ impl<E: TransitionSystemEncoding> PdrEncodingWrapper<E> {
 // Core PDR
 // -------------------------------------------------------------------------------------------------
 
+#[derive(Debug, Default)]
+struct PdrOptions {
+    /// Disable UNSAT core generalization for blocked cubes
+    disable_unsat_cores: bool,
+}
+
 struct Frame {
     /// Frame activation literal
     act: ExprRef,
@@ -374,8 +369,8 @@ struct BasePdr {
     /// Incrementing counter for creating unique frame activation literal IDs
     next_act_id: u64,
 
-    /// Whether to enable UNSAT core generalization
-    unsat_cores_enabled: bool,
+    /// PDR runtime options
+    opts: PdrOptions,
 }
 
 impl Index<FrameId> for BasePdr {
@@ -427,7 +422,7 @@ impl BasePdr {
         smt_ctx: &mut impl SolverContext,
         enc: UnrollSmtEncoding,
         sys: &TransitionSystem,
-        use_unsat_cores: bool,
+        disable_unsat_cores: bool,
     ) -> Result<Self> {
         // Wrap transition system encoding
         let mut enc = PdrEncodingWrapper::new(ctx, smt_ctx, enc)?;
@@ -509,7 +504,9 @@ impl BasePdr {
             inf_frame,
             frames: vec![], // Index consistency taken care by indexing function
             next_act_id: 0,
-            unsat_cores_enabled: use_unsat_cores,
+            opts: PdrOptions {
+                disable_unsat_cores,
+            },
         })
     }
 
@@ -763,7 +760,7 @@ impl BasePdr {
             sys,
             &mut self.enc,
             assumptions,
-            self.unsat_cores_enabled,
+            !self.opts.disable_unsat_cores,
         )?;
 
         // Extract candidate cube literals if generalized cube was created
@@ -1104,28 +1101,19 @@ pub fn pdr(
     ctx: &mut Context,
     smt_ctx: &mut impl SolverContext,
     sys: &TransitionSystem,
-    opts: impl IntoIterator<Item = PdrOption>,
+    disable_unsat_cores: bool,
 ) -> Result<ModelCheckResult> {
     let mut enc = match start_bmc_or_pdr(ctx, smt_ctx, sys)? {
         (r, None) => return Ok(r),
         (_, Some(enc)) => enc,
     };
 
-    // Collect all options
-    let sel_opts = opts.into_iter().collect::<FxHashSet<_>>();
-
     // Initialize two-step variables in solver
     enc.init_at(ctx, smt_ctx, FROM_STEP)?;
     enc.unroll(ctx, smt_ctx)?;
 
     // Initialize PDR
-    let mut state = BasePdr::init(
-        ctx,
-        smt_ctx,
-        enc,
-        sys,
-        !sel_opts.contains(&PdrOption::DisableUnsatCores),
-    )?;
+    let mut state = BasePdr::init(ctx, smt_ctx, enc, sys, disable_unsat_cores)?;
 
     let limit = FrameId::Finite(NonZeroUsize::new(MAX_FRAMES).unwrap());
 
