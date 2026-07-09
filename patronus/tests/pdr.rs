@@ -5,6 +5,7 @@ use patronus::mc::{InitValue, ModelCheckResult, PdrOption, Witness, pdr};
 use patronus::sim::{InitKind, Interpreter, Simulator};
 use patronus::smt::{SmtLibSolver, Solver, SolverMetaData, solver_from_env};
 use patronus::system::TransitionSystem;
+use rustc_hash::FxHashSet;
 use std::path::Path;
 
 // SMT output directory
@@ -48,13 +49,22 @@ const COUNT_2: &str = r"
 11 bad 10
 ";
 
-/// Run PDR on a BTOR string and return the result
+/// Run PDR on a BTOR string and possibly return the result if solver is compatible with options
+/// (e.g. YICES2 cannot be run with UNSAT cores enabled)
 fn run_pdr_str(
     solver: &SmtLibSolver,
     btor: &str,
     out_file: Option<&str>,
     opts: impl IntoIterator<Item = PdrOption>,
-) -> (Context, TransitionSystem, ModelCheckResult) {
+) -> Option<(Context, TransitionSystem, ModelCheckResult)> {
+    // Collect options
+    let sel_opts = opts.into_iter().collect::<FxHashSet<_>>();
+
+    if !solver.supports_get_unsat_assumptions() && !sel_opts.contains(&PdrOption::DisableUnsatCores)
+    {
+        return None;
+    }
+
     // System initialization
     let mut ctx = Context::default();
     let sys = btor2::parse_str(&mut ctx, btor, Some("test_pdr")).expect("parse failed");
@@ -72,17 +82,26 @@ fn run_pdr_str(
         },
     );
 
-    let res = pdr(&mut ctx, &mut smt_ctx, &sys, opts).expect("pdr failed");
-    (ctx, sys, res)
+    let res = pdr(&mut ctx, &mut smt_ctx, &sys, sel_opts).expect("pdr failed");
+    Some((ctx, sys, res))
 }
 
-/// Run PDR on a BTOR file and return the result
+/// Run PDR on a BTOR file and possibly return the result if solver is compatible with options
+/// (e.g. YICES2 cannot be run with UNSAT cores enabled)
 fn run_pdr_file(
     solver: &SmtLibSolver,
     btor_file: &str,
     out_file: Option<&str>,
     opts: impl IntoIterator<Item = PdrOption>,
-) -> (Context, TransitionSystem, ModelCheckResult) {
+) -> Option<(Context, TransitionSystem, ModelCheckResult)> {
+    // Collect options
+    let sel_opts = opts.into_iter().collect::<FxHashSet<_>>();
+
+    if !solver.supports_get_unsat_assumptions() && !sel_opts.contains(&PdrOption::DisableUnsatCores)
+    {
+        return None;
+    }
+
     // System initialization
     let (mut ctx, sys) = btor2::parse_file(btor_file).expect("parse failed");
     let mut smt_ctx = out_file.map_or_else(
@@ -98,22 +117,8 @@ fn run_pdr_file(
         },
     );
 
-    let res = pdr(&mut ctx, &mut smt_ctx, &sys, opts).expect("pdr failed");
-    (ctx, sys, res)
-}
-
-/// # Returns
-/// Whether solver supports `(get-unsat-assumptions)`, printing out message if it doesn't
-fn skip_if_no_unsat_assumptions(solver: &SmtLibSolver) -> bool {
-    if solver.supports_get_unsat_assumptions() {
-        false
-    } else {
-        eprintln!(
-            "skipping test: solver `{}` does not support (get-unsat-assumptions)",
-            solver.name()
-        );
-        true
-    }
+    let res = pdr(&mut ctx, &mut smt_ctx, &sys, sel_opts).expect("pdr failed");
+    Some((ctx, sys, res))
 }
 
 /// Check that generated witness actually forms a concrete counterexample trace
@@ -170,10 +175,9 @@ fn validate_witness(ctx: &Context, sys: &TransitionSystem, wit: &Witness) {
 }
 
 fn case_trivial_fail(solver: &SmtLibSolver) {
-    if skip_if_no_unsat_assumptions(solver) {
+    let Some((ctx, sys, res)) = run_pdr_str(solver, TRIVIAL_FAIL, None, []) else {
         return;
-    }
-    let (ctx, sys, res) = run_pdr_str(solver, TRIVIAL_FAIL, None, []);
+    };
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -183,7 +187,8 @@ fn case_trivial_fail(solver: &SmtLibSolver) {
 }
 
 fn case_trivial_fail_no_gen(solver: &SmtLibSolver) {
-    let (ctx, sys, res) = run_pdr_str(solver, TRIVIAL_FAIL, None, [PdrOption::DisableUnsatCores]);
+    let (ctx, sys, res) =
+        run_pdr_str(solver, TRIVIAL_FAIL, None, [PdrOption::DisableUnsatCores]).unwrap();
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -193,10 +198,9 @@ fn case_trivial_fail_no_gen(solver: &SmtLibSolver) {
 }
 
 fn case_trivial_input_fail(solver: &SmtLibSolver) {
-    if skip_if_no_unsat_assumptions(solver) {
+    let Some((ctx, sys, res)) = run_pdr_str(solver, TRIGGER_BAD, None, []) else {
         return;
-    }
-    let (ctx, sys, res) = run_pdr_str(solver, TRIGGER_BAD, None, []);
+    };
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -206,7 +210,8 @@ fn case_trivial_input_fail(solver: &SmtLibSolver) {
 }
 
 fn case_trivial_input_fail_no_gen(solver: &SmtLibSolver) {
-    let (ctx, sys, res) = run_pdr_str(solver, TRIGGER_BAD, None, [PdrOption::DisableUnsatCores]);
+    let (ctx, sys, res) =
+        run_pdr_str(solver, TRIGGER_BAD, None, [PdrOption::DisableUnsatCores]).unwrap();
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -216,10 +221,11 @@ fn case_trivial_input_fail_no_gen(solver: &SmtLibSolver) {
 }
 
 fn case_overflow_fail(solver: &SmtLibSolver) {
-    if skip_if_no_unsat_assumptions(solver) {
+    let Some((ctx, sys, res)) =
+        run_pdr_file(solver, "../inputs/verilog_tests/Overflow.btor", None, [])
+    else {
         return;
-    }
-    let (ctx, sys, res) = run_pdr_file(solver, "../inputs/verilog_tests/Overflow.btor", None, []);
+    };
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -234,7 +240,8 @@ fn case_overflow_fail_no_gen(solver: &SmtLibSolver) {
         "../inputs/verilog_tests/Overflow.btor",
         None,
         [PdrOption::DisableUnsatCores],
-    );
+    )
+    .unwrap();
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -244,10 +251,9 @@ fn case_overflow_fail_no_gen(solver: &SmtLibSolver) {
 }
 
 fn case_simple_fail(solver: &SmtLibSolver) {
-    if skip_if_no_unsat_assumptions(solver) {
+    let Some((ctx, sys, res)) = run_pdr_str(solver, COUNT_2, None, []) else {
         return;
-    }
-    let (ctx, sys, res) = run_pdr_str(solver, COUNT_2, None, []);
+    };
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -257,7 +263,8 @@ fn case_simple_fail(solver: &SmtLibSolver) {
 }
 
 fn case_simple_fail_no_gen(solver: &SmtLibSolver) {
-    let (ctx, sys, res) = run_pdr_str(solver, COUNT_2, None, [PdrOption::DisableUnsatCores]);
+    let (ctx, sys, res) =
+        run_pdr_str(solver, COUNT_2, None, [PdrOption::DisableUnsatCores]).unwrap();
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -267,10 +274,10 @@ fn case_simple_fail_no_gen(solver: &SmtLibSolver) {
 }
 
 fn case_quiz1_sat(solver: &SmtLibSolver) {
-    if skip_if_no_unsat_assumptions(solver) {
+    let Some((ctx, sys, res)) = run_pdr_file(solver, "../inputs/chiseltest/Quiz1.btor", None, [])
+    else {
         return;
-    }
-    let (ctx, sys, res) = run_pdr_file(solver, "../inputs/chiseltest/Quiz1.btor", None, []);
+    };
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -280,10 +287,11 @@ fn case_quiz1_sat(solver: &SmtLibSolver) {
 }
 
 fn case_quiz2_sat(solver: &SmtLibSolver) {
-    if skip_if_no_unsat_assumptions(solver) {
+    let Some((ctx, sys, res)) =
+        run_pdr_file(solver, "../inputs/chiseltest/Quiz2.sat.btor", None, [])
+    else {
         return;
-    }
-    let (ctx, sys, res) = run_pdr_file(solver, "../inputs/chiseltest/Quiz2.sat.btor", None, []);
+    };
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -293,10 +301,11 @@ fn case_quiz2_sat(solver: &SmtLibSolver) {
 }
 
 fn case_quiz4_sat(solver: &SmtLibSolver) {
-    if skip_if_no_unsat_assumptions(solver) {
+    let Some((ctx, sys, res)) =
+        run_pdr_file(solver, "../inputs/chiseltest/Quiz4.sat.btor", None, [])
+    else {
         return;
-    }
-    let (ctx, sys, res) = run_pdr_file(solver, "../inputs/chiseltest/Quiz4.sat.btor", None, []);
+    };
 
     if let ModelCheckResult::Fail(wit) = res {
         validate_witness(&ctx, &sys, &wit);
@@ -306,10 +315,10 @@ fn case_quiz4_sat(solver: &SmtLibSolver) {
 }
 
 fn case_delay(solver: &SmtLibSolver) {
-    if skip_if_no_unsat_assumptions(solver) {
+    let Some((_, _, res)) = run_pdr_file(solver, "../inputs/verilog_tests/Delay.btor", None, [])
+    else {
         return;
-    }
-    let (_, _, res) = run_pdr_file(solver, "../inputs/verilog_tests/Delay.btor", None, []);
+    };
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
@@ -319,15 +328,16 @@ fn case_delay_no_gen(solver: &SmtLibSolver) {
         "../inputs/verilog_tests/Delay.btor",
         None,
         [PdrOption::DisableUnsatCores],
-    );
+    )
+    .unwrap();
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
 fn case_swap(solver: &SmtLibSolver) {
-    if skip_if_no_unsat_assumptions(solver) {
+    let Some((_, _, res)) = run_pdr_file(solver, "../inputs/verilog_tests/Swap.btor", None, [])
+    else {
         return;
-    }
-    let (_, _, res) = run_pdr_file(solver, "../inputs/verilog_tests/Swap.btor", None, []);
+    };
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
@@ -337,47 +347,50 @@ fn case_swap_no_gen(solver: &SmtLibSolver) {
         "../inputs/verilog_tests/Swap.btor",
         None,
         [PdrOption::DisableUnsatCores],
-    );
+    )
+    .unwrap();
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
 fn case_aman_goel_4bit(solver: &SmtLibSolver) {
-    if skip_if_no_unsat_assumptions(solver) {
+    let Some((_, _, res)) =
+        run_pdr_file(solver, "../inputs/unittest/aman_goel_4bit.btor", None, [])
+    else {
         return;
-    }
-    let (_, _, res) = run_pdr_file(solver, "../inputs/unittest/aman_goel_4bit.btor", None, []);
+    };
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
 fn case_aman_goel_16bit(solver: &SmtLibSolver) {
-    if skip_if_no_unsat_assumptions(solver) {
+    let Some((_, _, res)) =
+        run_pdr_file(solver, "../inputs/unittest/aman_goel_16bit.btor", None, [])
+    else {
         return;
-    }
-    let (_, _, res) = run_pdr_file(solver, "../inputs/unittest/aman_goel_16bit.btor", None, []);
+    };
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
 fn case_quiz1_unsat(solver: &SmtLibSolver) {
-    if skip_if_no_unsat_assumptions(solver) {
+    let Some((_, _, res)) = run_pdr_file(solver, "../inputs/chiseltest/Quiz1.unsat.btor", None, [])
+    else {
         return;
-    }
-    let (_, _, res) = run_pdr_file(solver, "../inputs/chiseltest/Quiz1.unsat.btor", None, []);
+    };
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
 fn case_quiz2_unsat(solver: &SmtLibSolver) {
-    if skip_if_no_unsat_assumptions(solver) {
+    let Some((_, _, res)) = run_pdr_file(solver, "../inputs/chiseltest/Quiz2.unsat.btor", None, [])
+    else {
         return;
-    }
-    let (_, _, res) = run_pdr_file(solver, "../inputs/chiseltest/Quiz2.unsat.btor", None, []);
+    };
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
 fn case_quiz4_unsat(solver: &SmtLibSolver) {
-    if skip_if_no_unsat_assumptions(solver) {
+    let Some((_, _, res)) = run_pdr_file(solver, "../inputs/chiseltest/Quiz4.unsat.btor", None, [])
+    else {
         return;
-    }
-    let (_, _, res) = run_pdr_file(solver, "../inputs/chiseltest/Quiz4.unsat.btor", None, []);
+    };
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
