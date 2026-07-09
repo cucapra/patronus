@@ -616,7 +616,8 @@ impl BasePdr {
             return Ok(gen_cube);
         }
 
-        // Map between activation literal and original unstepped literal
+        // Create activation literals for original cube literals (predicates) that were
+        // dropped during generalization
         let mut lit_map = FxHashMap::default();
         for lit in rm_lits {
             // Create activation literal implication
@@ -639,13 +640,13 @@ impl BasePdr {
         let cube_from = expr_at_step(ctx, enc, cube_expr, FROM_STEP);
 
         loop {
-            // Initial intersection assumptions
-            let mut fin_assumps = lit_map.keys().copied().collect::<Vec<_>>();
+            // Gather activation literals of original cube literals that could be dropped
+            let mut assumps = lit_map.keys().copied().collect::<Vec<_>>();
 
             // Add original generalized cube to assumption
-            fin_assumps.push(cube_from);
+            assumps.push(cube_from);
 
-            let check_res = self.intersects_init(ctx, smt_ctx, sys, enc, fin_assumps, true)?;
+            let check_res = self.intersects_init(ctx, smt_ctx, sys, enc, assumps, true)?;
 
             if check_res.0 && first_iter {
                 // If first iteration, original cube must truly intersect with init frame
