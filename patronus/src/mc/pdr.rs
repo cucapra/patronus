@@ -195,7 +195,7 @@ fn extract_state_values(
 
     // Extract exact SMT value for each system state
     for state in &sys.states {
-        let sym = enc.expr_at_step(ctx, state.symbol, step);
+        let sym = self.enc.expr_at_step(ctx, state.symbol, step);
         state_vals.push((state.symbol, get_smt_value(ctx, smt_ctx, sym)?));
     }
 
@@ -767,7 +767,7 @@ impl BasePdr {
         )?;
 
         // Extract candidate cube literals if generalized cube was created
-        if smt_res.0 == CheckSatResponse::Unsat
+        let res = if smt_res.0 == CheckSatResponse::Unsat
             && let Some(genr) = smt_res.1
         {
             // Literals in UNSAT core
@@ -791,16 +791,18 @@ impl BasePdr {
             };
             let fixed = self.fix_gen_cube(ctx, smt_ctx, sys, enc, gen_cube, rm_lits)?;
 
-            // Disable all created activation literals as cleanup
-            for &act in lit_map.keys() {
-                let neg_act = ctx.not(act);
-                smt_ctx.assert(ctx, neg_act)?;
-            }
-
             Ok((CheckSatResponse::Unsat, Some(fixed)))
         } else {
             Ok(smt_res)
+        };
+
+        // Disable all created activation literals as cleanup
+        for &act in lit_map.keys() {
+            let neg_act = ctx.not(act);
+            smt_ctx.assert(ctx, neg_act)?;
         }
+
+        res
     }
 
     /// Frame identifier for frontier frame
