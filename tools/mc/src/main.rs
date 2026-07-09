@@ -6,7 +6,7 @@
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser, ValueEnum};
 use patronus::expr::*;
-use patronus::mc::{PdrOption, bmc, pdr};
+use patronus::mc::{bmc, pdr};
 use patronus::smt::*;
 use patronus::system::transform::simplify_expressions;
 use patronus::*;
@@ -129,22 +129,18 @@ fn main() {
             k_max,
         ),
         ModelCheckEngine::Pdr => {
-            let mut opts = vec![];
+            // Automatically disable UNSAT core generalization if solver does not support `(get-unsat-assumptions)`
+            let disable_unsat_cores = args.disable_unsat_cores || !solver.supports_get_unsat_assumptions();
 
-            // Auto-disable UNSAT core generalization for solvers that don't support
-            // `(get-unsat-assumptions)` (e.g. YICES2), since the core path would otherwise
-            // error out.
-            if args.disable_unsat_cores || !solver.supports_get_unsat_assumptions() {
-                if args.verbose && !args.disable_unsat_cores {
-                    println!(
-                        "{} does not support (get-unsat-assumptions); disabling UNSAT core generalization.",
-                        solver.name()
-                    );
-                }
-                opts.push(PdrOption::DisableUnsatCores);
+            // Print out message in verbose mode to remind client
+            if args.verbose && !solver.supports_get_unsat_assumptions() {
+                eprintln!(
+                    "{} does not support `(get-unsat-assumptions)`; disabling UNSAT core generalization...",
+                    solver.name()
+                );
             }
 
-            pdr(&mut ctx, &mut smt_ctx, &sys, opts)
+            pdr(&mut ctx, &mut smt_ctx, &sys, disable_unsat_cores)
         }
     }
     .unwrap();
