@@ -471,7 +471,7 @@ impl BasePdr {
         let cons_to_expr = sys
             .constraints
             .iter()
-            .map(|&c| enc.expr_at_step(ctx, c, TO_STEP))
+            .map(|&c| self.enc.expr_at_step(ctx, c, TO_STEP))
             .collect::<Vec<_>>()
             .into_iter()
             .fold(ctx.get_true(), |acc, c| ctx.and(acc, c));
@@ -730,7 +730,7 @@ impl BasePdr {
         for &lit in &cube.cube.literals {
             // Activate `TO_STEP` literal
             let act = self.create_act_lit(ctx, smt_ctx)?;
-            let expr_to = enc.expr_at_step(ctx, lit, TO_STEP);
+            let expr_to = self.enc.expr_at_step(ctx, lit, TO_STEP);
             let imp = ctx.implies(act, expr_to);
 
             // Permanently assert in solver
