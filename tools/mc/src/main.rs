@@ -131,7 +131,16 @@ fn main() {
         ModelCheckEngine::Pdr => {
             let mut opts = vec![];
 
-            if args.disable_unsat_cores {
+            // Auto-disable UNSAT core generalization for solvers that don't support
+            // `(get-unsat-assumptions)` (e.g. YICES2), since the core path would otherwise
+            // error out.
+            if args.disable_unsat_cores || !solver.supports_get_unsat_assumptions() {
+                if args.verbose && !args.disable_unsat_cores {
+                    println!(
+                        "{} does not support (get-unsat-assumptions); disabling UNSAT core generalization.",
+                        solver.name()
+                    );
+                }
                 opts.push(PdrOption::DisableUnsatCores);
             }
 

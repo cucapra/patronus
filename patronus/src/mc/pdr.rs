@@ -325,6 +325,9 @@ impl Frame {
         enc: &impl TransitionSystemEncoding,
         cube: Cube,
     ) -> Result<()> {
+        // Sanity check: cube should not be empty
+        assert!(!cube.literals.is_empty());
+
         // Create implication act_i => \neg c, where c is the blocked cube stepped at current step
         let clause = cube.negate(ctx);
         let clause_expr = expr_at_step(ctx, enc, clause, FROM_STEP);
@@ -751,7 +754,7 @@ impl BasePdr {
         )?;
 
         // Extract candidate cube literals if generalized cube was created
-        if smt_res.0 == CheckSatResponse::Unsat
+        let res = if smt_res.0 == CheckSatResponse::Unsat
             && let Some(genr) = smt_res.1
         {
             // Literals in UNSAT core
@@ -775,16 +778,18 @@ impl BasePdr {
             };
             let fixed = self.fix_gen_cube(ctx, smt_ctx, sys, enc, gen_cube, rm_lits)?;
 
-            // Disable all created activation literals as cleanup
-            for &act in lit_map.keys() {
-                let neg_act = ctx.not(act);
-                smt_ctx.assert(ctx, neg_act)?;
-            }
-
             Ok((CheckSatResponse::Unsat, Some(fixed)))
         } else {
             Ok(smt_res)
+        };
+
+        // Disable all created activation literals as cleanup
+        for &act in lit_map.keys() {
+            let neg_act = ctx.not(act);
+            smt_ctx.assert(ctx, neg_act)?;
         }
+
+        res
     }
 
     /// Frame identifier for frontier frame
