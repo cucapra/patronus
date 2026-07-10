@@ -1,6 +1,6 @@
 // Copyright 2025-2026 Cornell University
 // released under BSD 3-Clause License
-// author: Michael Zhang <mxz6@cornell.edu>, Kevin Laeufer <laeufer@cornell.edu>
+// author: Michael Zhang <mxz6@cornell.edu>
 
 use crate::expr::*;
 use crate::mc::bmc::start_bmc_or_pdr;
@@ -300,7 +300,7 @@ fn query(
 // -------------------------------------------------------------------------------------------------
 
 #[derive(Debug, Default)]
-struct PdrOptions {
+pub struct PdrOptions {
     /// Disable UNSAT core generalization for blocked cubes
     disable_unsat_cores: bool,
 }
