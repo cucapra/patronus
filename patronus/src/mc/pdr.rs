@@ -671,12 +671,11 @@ impl BasePdr {
         let res = if smt_res.0 == CheckSatResponse::Unsat
             && let Some(genr) = smt_res.1
         {
-            // Get generalized cube
+            // Get literals from UNSAT core that are in the candidate cube
             let gen_lits = genr
                 .literals
                 .iter()
-                .filter(|e| lit_map.contains_key(e))
-                .map(|e| lit_map[e])
+                .filter_map(|lit| lit_map.get(lit).copied())
                 .collect::<Vec<_>>();
 
             let gen_cube = Cube { literals: gen_lits };
@@ -689,6 +688,9 @@ impl BasePdr {
                 .intersects_init(ctx, smt_ctx, sys, enc, [gen_from], false)?
                 .0
             {
+                // Generalized cube intersects with the initial states; adding it to the
+                // frame trace would be unsound
+                // Instead, return the original cube
                 Ok((CheckSatResponse::Unsat, Some(cube.cube.clone())))
             } else {
                 Ok((CheckSatResponse::Unsat, Some(gen_cube)))
@@ -813,51 +815,35 @@ impl BasePdr {
         // Try to solve all proof obligations
         while let Some(obj) = worklist.pop() {
             // If proof obligation intersects with initial states, blocking fails
-            let obj_expr = obj.cube.to_expr(ctx);
-            let obj_from = self.enc.expr_at_step(ctx, obj_expr, FROM_STEP);
-            if self
-                .intersects_init(ctx, smt_ctx, sys, enc, [obj_from], false)?
-                .0
-            {
+            if obj.frame == FrameId::Init {
                 return Ok(false);
             }
 
             // Try to get counterexample relative to last frame
-            let smt_res = self.rel_ind(ctx, smt_ctx, sys, &obj, RelIndType::Extended)?;
-            let ex_cube = match smt_res {
-                (CheckSatResponse::Sat, Some(cube)) => Some(cube), // Extract counterexample-to-induction
-                (CheckSatResponse::Unsat, Some(gen_cube)) => Some(gen_cube), // Extract UNSAT core generalized cube
-                (CheckSatResponse::Unsat, None) => None,                     // No generalized cube
-                (CheckSatResponse::Unknown, _) => {
-                    return Err(Error::UnexpectedResponse(
-                        "`block_cube` in `BasePdr`".into(),
-                        "unknown query".into(),
-                    ));
+            let smt_res = self.rel_ind(ctx, smt_ctx, sys, enc, &obj, RelIndType::Extended)?;
+
+            match smt_res {
+                (CheckSatResponse::Sat, Some(cube)) => {
+                    // Extract counterexample-to-induction and try to block predecessor
+                    // Counterexample found: try to block predecessor and current obligation
+                    worklist.push(TimedCube {
+                        cube,
+                        frame: obj.frame.decrement(),
+                    });
+                    worklist.push(obj);
                 }
-                _ => unreachable!(),
-            };
+                (CheckSatResponse::Unsat, poss_cube) => {
+                    // Extract generalized cube if there is one
+                    let cand_cube = if let Some(gen_cube) = poss_cube {
+                        gen_cube
+                    } else {
+                        obj.cube
+                    };
 
-            if smt_res.0 == CheckSatResponse::Sat
-                && let Some(wit) = ex_cube
-            {
-                // Counterexample found: try to block predecessor and current obligation
-                worklist.push(TimedCube {
-                    cube: wit,
-                    frame: obj.frame.decrement(),
-                });
-                worklist.push(obj);
-            } else {
-                // Extract generalized cube if there is one
-                let cand_cube = if let Some(gen_cube) = ex_cube {
-                    gen_cube
-                } else {
-                    obj.cube
-                };
-
-                let mut test_cube = TimedCube {
-                    cube: cand_cube,
-                    frame: obj.frame.increment(),
-                };
+                    let mut test_cube = TimedCube {
+                        cube: cand_cube,
+                        frame: obj.frame.increment(),
+                    };
 
                 // Push cube as far as possible in the frame trace
                 while test_cube.frame <= self.frontier()
@@ -869,11 +855,19 @@ impl BasePdr {
                     test_cube.frame = test_cube.frame.increment();
                 }
 
-                // Restore "working" frame
-                test_cube.frame = test_cube.frame.decrement();
+                    // Restore "working" frame
+                    test_cube.frame = test_cube.frame.decrement();
 
-                // Refine frame trace with cube
-                self.add_blocked_cube(ctx, smt_ctx, test_cube)?;
+                    // Refine frame trace with cube
+                    self.add_blocked_cube(ctx, smt_ctx, test_cube)?;
+                }
+                (CheckSatResponse::Unknown, _) => {
+                    return Err(UnexpectedResponse(
+                        "`block_cube` in `BasePdr`".into(),
+                        "unknown query".into(),
+                    ));
+                }
+                _ => unreachable!(),
             }
         }
 
