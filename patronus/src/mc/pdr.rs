@@ -12,7 +12,7 @@ use crate::smt::Error::UnexpectedResponse;
 use crate::smt::*;
 use crate::system::TransitionSystem;
 use baa::{BitVecOps, Value};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::collections::BinaryHeap;
 use std::num::NonZeroUsize;
 use std::ops::{Index, IndexMut};
@@ -591,104 +591,6 @@ impl BasePdr {
         }
     }
 
-    /// "Fix" generalized cube by restoring enough removed literals until non-intersection
-    /// with initial states
-    ///
-    /// # Errors
-    /// Returns [`UnexpectedResponse`] if any SMT query returns `UNKNOWN` or original cube
-    /// truly intersects the initial states
-    fn fix_gen_cube(
-        &mut self,
-        ctx: &mut Context,
-        smt_ctx: &mut impl SolverContext,
-        sys: &TransitionSystem,
-        enc: &impl TransitionSystemEncoding,
-        gen_cube: Cube,
-        rm_lits: impl IntoIterator<Item = ExprRef>,
-    ) -> Result<Cube> {
-        // If generalized cube already doesn't intersect with initial states, just return
-        let cube_expr = gen_cube.to_expr(ctx);
-        let cube_from = expr_at_step(ctx, enc, cube_expr, FROM_STEP);
-        if !self
-            .intersects_init(ctx, smt_ctx, sys, enc, [cube_from], false)?
-            .0
-        {
-            return Ok(gen_cube);
-        }
-
-        // Create activation literals for original cube literals (predicates) that were
-        // dropped during generalization
-        let mut lit_map = FxHashMap::default();
-        for lit in rm_lits {
-            // Create activation literal implication
-            let act = self.create_act_lit(ctx, smt_ctx)?;
-            let expr_from = expr_at_step(ctx, enc, lit, FROM_STEP);
-            let imp = ctx.implies(act, expr_from);
-
-            // Assert in solver
-            smt_ctx.assert(ctx, imp)?;
-
-            // Add mapping
-            lit_map.insert(act, lit);
-        }
-
-        // Flag for first iteration
-        let mut first_iter = true;
-
-        // Original generalized cube at `FROM_STEP`
-        let cube_expr = gen_cube.to_expr(ctx);
-        let cube_from = expr_at_step(ctx, enc, cube_expr, FROM_STEP);
-
-        loop {
-            // Gather activation literals of original cube literals that could be dropped
-            let mut assumps = lit_map.keys().copied().collect::<Vec<_>>();
-
-            // Add original generalized cube to assumption
-            assumps.push(cube_from);
-
-            let check_res = self.intersects_init(ctx, smt_ctx, sys, enc, assumps, true)?;
-
-            if check_res.0 && first_iter {
-                // If first iteration, original cube must truly intersect with init frame
-                return Err(UnexpectedResponse(
-                    "`fix_gen_cube` in `BasePdr`".into(),
-                    "original cube intersects with init".into(),
-                ));
-            }
-
-            // All removed literals should not be in UNSAT core
-            assert!(!check_res.0);
-
-            // Store previous number of literals
-            let prev_acts = lit_map.keys().copied().collect::<Vec<_>>();
-
-            // Collect all literals in the UNSAT core
-            let ex_cube = check_res.1.unwrap();
-            let gen_lits = ex_cube.literals.iter().collect::<FxHashSet<_>>();
-
-            // Remove all candidate literals not in UNSAT core
-            lit_map.retain(|e, _| gen_lits.contains(e));
-
-            // Permanently disable literals that were removed
-            for &act in &prev_acts {
-                if !lit_map.contains_key(&act) {
-                    let neg_act = ctx.not(act);
-                    smt_ctx.assert(ctx, neg_act)?;
-                }
-            }
-
-            if lit_map.len() == prev_acts.len() {
-                // If no literals are removed, then fixpoint reached
-                let mut fin_lits = gen_cube.literals;
-                fin_lits.extend(lit_map.values().copied());
-
-                return Ok(Cube { literals: fin_lits });
-            }
-
-            first_iter = false;
-        }
-    }
-
     /// Run relative inductiveness query
     /// (i.e. `SAT?[R_{i - 1} /\ \neg c /\ T c']`)
     ///
@@ -756,28 +658,28 @@ impl BasePdr {
         let res = if smt_res.0 == CheckSatResponse::Unsat
             && let Some(genr) = smt_res.1
         {
-            // Literals in UNSAT core
+            // Get generalized cube
             let gen_lits = genr
                 .literals
                 .iter()
                 .filter(|e| lit_map.contains_key(e))
                 .map(|e| lit_map[e])
-                .collect::<FxHashSet<_>>();
-
-            // Literals not in UNSAT core
-            let rm_lits = lit_map
-                .values()
-                .copied()
-                .filter(|e| !gen_lits.contains(e))
                 .collect::<Vec<_>>();
 
-            // Make generalized cube not intersect initial states
-            let gen_cube = Cube {
-                literals: gen_lits.into_iter().collect(),
-            };
-            let fixed = self.fix_gen_cube(ctx, smt_ctx, sys, enc, gen_cube, rm_lits)?;
+            let gen_cube = Cube { literals: gen_lits };
 
-            Ok((CheckSatResponse::Unsat, Some(fixed)))
+            // Step cube as expression at `FROM_STEP`
+            let gen_expr = gen_cube.to_expr(ctx);
+            let gen_from = expr_at_step(ctx, enc, gen_expr, FROM_STEP);
+
+            if self
+                .intersects_init(ctx, smt_ctx, sys, enc, [gen_from], false)?
+                .0
+            {
+                Ok((CheckSatResponse::Unsat, Some(cube.cube.clone())))
+            } else {
+                Ok((CheckSatResponse::Unsat, Some(gen_cube)))
+            }
         } else {
             Ok(smt_res)
         };
