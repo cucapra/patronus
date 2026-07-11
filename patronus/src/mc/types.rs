@@ -20,7 +20,7 @@ pub enum InitValue {
 impl TryFrom<InitValue> for Value {
     type Error = ();
 
-    fn try_from(value: InitValue) -> std::result::Result<baa::Value, ()> {
+    fn try_from(value: InitValue) -> std::result::Result<Self, ()> {
         match value {
             InitValue::BitVec(v) => Ok(Value::BitVec(v)),
             InitValue::Array(v, _) => Ok(Value::Array(v)),
