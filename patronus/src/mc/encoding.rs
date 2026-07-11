@@ -5,7 +5,8 @@ use crate::mc::types::Result;
 use crate::smt::SolverContext;
 use crate::system::analysis::{Uses, analyze_for_serialization};
 use crate::system::{State, TransitionSystem};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::cell::RefCell;
 
 pub type Step = u64;
 
@@ -34,6 +35,8 @@ pub struct UnrollSmtEncoding {
     states: Vec<State>,
     /// symbols of signals at every step
     symbols_at: Vec<Vec<ExprRef>>,
+    /// memo table for previously stepped expressions
+    expr_cache: RefCell<FxHashMap<(ExprRef, Step), ExprRef>>,
 }
 
 #[derive(Clone)]
@@ -117,6 +120,7 @@ impl UnrollSmtEncoding {
             signal_order,
             states,
             symbols_at: Vec::new(),
+            expr_cache: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -215,6 +219,9 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
         self.offset = Some(step);
         self.create_signal_symbols_in_step(ctx, step);
 
+        // Clear old stepped expression cache
+        self.expr_cache.borrow_mut().clear();
+
         if step == 0 {
             // define signals that are used to calculate init expressions
             self.define_signals(ctx, smt_ctx, 0, &|info: &SmtSignalInfo| info.uses.init > 0)?;
@@ -295,25 +302,35 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
     fn step_at(&self, ctx: &mut Context, expr: ExprRef, k: Step) -> ExprRef {
         assert!(k <= self.current_step.unwrap_or(0));
 
+        if let Some(&e) = self.expr_cache.borrow().get(&(expr, k)) {
+            // If stepped expression exists in cache, just return it
+            return e;
+        }
+
         self.signal_sym_in_step(expr, k).unwrap_or_else(|| {
             if ctx[expr].is_true() || ctx[expr].is_false() {
                 // If expression is a simple constant, return it
                 expr
             } else if ctx[expr].is_symbol() {
-                // If expression is itself an atomic symbol, it could not be found
+                // If expression is itself an atomic symbol and was not found, error out
                 panic!(
                     "Failed to find signal {} in step {k}",
                     expr.serialize_to_str(ctx)
                 );
             } else {
                 // `expr` must be compound expression: recursively step all symbols
-                simple_transform_expr(ctx, expr, |ctx, e, _| {
+                let stepped_expr = simple_transform_expr(ctx, expr, |ctx, e, _| {
                     if ctx[e].is_symbol() {
                         Some(self.step_at(ctx, e, k))
                     } else {
                         None
                     }
-                })
+                });
+
+                // Cache stepped expression
+                self.expr_cache.borrow_mut().insert((expr, k), stepped_expr);
+
+                stepped_expr
             }
         })
     }

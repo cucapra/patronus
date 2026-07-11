@@ -214,17 +214,15 @@ fn get_bit_level_cube(
                 // Get bitvector width
                 let width = bv.width();
 
-                // Iterate through all bits of the bitvector
-                // and assign bit-level equalities to concrete value
+                // Iterate through all bits of the bitvector and assert correct bit value
                 for idx in 0..width {
                     let bit = ctx.slice(sym, idx, idx);
-                    let bit_val = if bv.is_bit_set(idx) {
-                        ctx.get_true()
+                    let lit = if bv.is_bit_set(idx) {
+                        bit
                     } else {
-                        ctx.get_false()
+                        ctx.not(bit)
                     };
 
-                    let lit = ctx.equal(bit, bit_val);
                     literals.push(lit);
                 }
             }
