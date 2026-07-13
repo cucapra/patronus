@@ -5,6 +5,8 @@
 
 use baa::Value;
 
+pub type Result<T> = crate::smt::Result<T>;
+
 #[derive(Debug, Clone, Default)]
 pub enum InitValue {
     BitVec(baa::BitVecValue),
@@ -18,7 +20,7 @@ pub enum InitValue {
 impl TryFrom<InitValue> for Value {
     type Error = ();
 
-    fn try_from(value: InitValue) -> Result<Self, Self::Error> {
+    fn try_from(value: InitValue) -> std::result::Result<Self, ()> {
         match value {
             InitValue::BitVec(v) => Ok(Value::BitVec(v)),
             InitValue::Array(v, _) => Ok(Value::Array(v)),
@@ -40,4 +42,10 @@ pub struct Witness {
     pub input_names: Vec<Option<String>>,
     /// Index of all safety properties (bad state predicates) that are violated by this witness.
     pub failed_safety: Vec<u32>,
+}
+
+pub enum ModelCheckResult {
+    Success,
+    Unknown,
+    Fail(Witness),
 }
