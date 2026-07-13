@@ -20,13 +20,13 @@ pub trait TransitionSystemEncoding {
     ) -> Result<()>;
     fn unroll(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()>;
     /// Yield stepped version of unstepped [expr] (which may be an internal signal, state,
-    /// input, constraint, bad state, or output, or combinations thereof that may or may not
+    /// input, constraint, bad state, output, or combinations thereof that may or may not
     /// be registered with the [`TransitionSystemEncoding`])
     ///
     /// For registered signals, simply lookup stepped version from the corresponding
     /// [`TransitionSystemEncoding::unroll`]
     ///
-    /// For unregistered signals, recursively explore child signals and symbol leaves
+    /// For unregistered signals, recursively explore child signals and step symbol leaves
     ///
     /// # Panics
     /// * If [`TransitionSystemEncoding`] was not unrolled to step [k]
