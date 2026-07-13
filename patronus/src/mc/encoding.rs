@@ -16,7 +16,7 @@ pub trait TransitionSystemEncoding {
         step: u64,
     ) -> Result<()>;
     fn unroll(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()>;
-    /// Get stepped version of unstepped [expr] (which may be an internal signal, state,
+    /// Lookup stepped version of unstepped [expr] (which may be an internal signal, state,
     /// input, constraint, bad state, or output) that was [`TransitionSystemEncoding::unroll`]ed
     /// at step [k]
     ///
