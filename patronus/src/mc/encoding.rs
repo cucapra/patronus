@@ -19,8 +19,17 @@ pub trait TransitionSystemEncoding {
         step: Step,
     ) -> Result<()>;
     fn unroll(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()>;
-    /// Steps arbitrary SMT expression at step [k]
-    fn expr_at_step(&self, ctx: &mut Context, expr: ExprRef, k: Step) -> ExprRef;
+    /// Lookup stepped version of unstepped [expr] (which may be an internal signal, state,
+    /// input, constraint, bad state, or output) that was [`TransitionSystemEncoding::unroll`]ed
+    /// at step [k]
+    ///
+    /// # Panics
+    /// * If [`TransitionSystemEncoding`] was not unrolled to step [k]
+    /// * If [`TransitionSystemEncoding`] was not initialized (no prior
+    ///   [`TransitionSystemEncoding::init_at`] call)
+    /// * If [expr] is not registered at step [k] (can occur with compound SMT expressions)
+    ///   _and_ is not a Boolean constant TRUE/FALSE
+    fn expr_at_step(&self, ctx: &Context, expr: ExprRef, k: u64) -> ExprRef;
 }
 
 pub struct UnrollSmtEncoding {
@@ -186,7 +195,7 @@ impl UnrollSmtEncoding {
         }
     }
 
-    fn expr_in_step(&self, ctx: &mut Context, expr: ExprRef, step: Step) -> ExprRef {
+    fn expr_in_step(&self, ctx: &mut Context, expr: ExprRef, step: u64) -> ExprRef {
         let expr_is_symbol = ctx[expr].is_symbol();
         simple_transform_expr(ctx, expr, |_, e, _| {
             // If the expression we are trying to serialize is not a symbol, then wo
