@@ -16,7 +16,16 @@ pub trait TransitionSystemEncoding {
         step: u64,
     ) -> Result<()>;
     fn unroll(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()>;
-    /// Steps arbitrary SMT expression at step [k]
+    /// Get stepped version of unstepped [expr] (which may be an internal signal, state,
+    /// input, constraint, bad state, or output) that was [`TransitionSystemEncoding::unroll`]ed
+    /// at step [k]
+    ///
+    /// # Panics
+    /// * If [`TransitionSystemEncoding`] was not unrolled to step [k]
+    /// * If [`TransitionSystemEncoding`] was not initialized (no prior
+    ///   [`TransitionSystemEncoding::init_at`] call)
+    /// * If [expr] is not registered at step [k] (can occur with compound SMT expressions)
+    ///   _and_ is not a Boolean constant TRUE/FALSE
     fn expr_at_step(&self, ctx: &Context, expr: ExprRef, k: u64) -> ExprRef;
 }
 
