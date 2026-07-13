@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use crate::expr::{
     Context, ExprRef, SerializableIrNode, StringRef, TypeCheck, simple_transform_expr,
 };
@@ -5,7 +6,9 @@ use crate::mc::types::Result;
 use crate::smt::SolverContext;
 use crate::system::analysis::{Uses, analyze_for_serialization};
 use crate::system::{State, TransitionSystem};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
+
+pub type Step = u64;
 
 pub trait TransitionSystemEncoding {
     fn define_header(&self, smt_ctx: &mut impl SolverContext) -> Result<()>;
@@ -13,17 +16,17 @@ pub trait TransitionSystemEncoding {
         &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
-        step: u64,
+        step: Step,
     ) -> Result<()>;
     fn unroll(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()>;
     /// Steps arbitrary SMT expression at step [k]
-    fn step_at(&self, ctx: &Context, expr: ExprRef, k: u64) -> ExprRef;
+    fn step_at(&self, ctx: &Context, expr: ExprRef, k: Step) -> ExprRef;
 }
 
 pub struct UnrollSmtEncoding {
     /// the offset at which our encoding was initialized
-    offset: Option<u64>,
-    current_step: Option<u64>,
+    offset: Option<Step>,
+    current_step: Option<Step>,
     /// all signals that need to be serialized separately, in the correct order
     signal_order: Vec<ExprRef>,
     /// look up table to see if an expression is a reference
@@ -32,6 +35,8 @@ pub struct UnrollSmtEncoding {
     states: Vec<State>,
     /// symbols of signals at every step
     symbols_at: Vec<Vec<ExprRef>>,
+    /// stepped expression cache: (unstepped expression, step) |-> stepped expression @ step
+    expr_cache: RefCell<FxHashMap<(ExprRef, Step), ExprRef>>,
 }
 
 #[derive(Clone)]
@@ -115,6 +120,7 @@ impl UnrollSmtEncoding {
             signal_order,
             states,
             symbols_at: Vec::new(),
+            expr_cache: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -122,7 +128,7 @@ impl UnrollSmtEncoding {
         &self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
-        step: u64,
+        step: Step,
         filter: &impl Fn(&SmtSignalInfo) -> bool,
     ) -> Result<()> {
         for expr in self.signal_order.iter() {
@@ -146,7 +152,7 @@ impl UnrollSmtEncoding {
         Ok(())
     }
 
-    fn create_signal_symbols_in_step(&mut self, ctx: &mut Context, step: u64) {
+    fn create_signal_symbols_in_step(&mut self, ctx: &mut Context, step: Step) {
         let offset = self.offset.expect("Need to call init_at first!");
         let index = (step - offset) as usize;
         assert_eq!(self.symbols_at.len(), index, "Missing or duplicate step!");
@@ -170,7 +176,7 @@ impl UnrollSmtEncoding {
         self.symbols_at.push(syms);
     }
 
-    fn signal_sym_in_step(&self, expr: ExprRef, step: u64) -> Option<ExprRef> {
+    fn signal_sym_in_step(&self, expr: ExprRef, step: Step) -> Option<ExprRef> {
         if let Some(Some(info)) = self.signals.get(usize::from(expr)) {
             let offset = self.offset.expect("Need to call init_at first!");
             let index = (step - offset) as usize;
@@ -180,7 +186,7 @@ impl UnrollSmtEncoding {
         }
     }
 
-    fn expr_in_step(&self, ctx: &mut Context, expr: ExprRef, step: u64) -> ExprRef {
+    fn expr_in_step(&self, ctx: &mut Context, expr: ExprRef, step: Step) -> ExprRef {
         let expr_is_symbol = ctx[expr].is_symbol();
         simple_transform_expr(ctx, expr, |_, e, _| {
             // If the expression we are trying to serialize is not a symbol, then wo
@@ -204,7 +210,7 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
         &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
-        step: u64,
+        step: Step,
     ) -> Result<()> {
         // delete old mutable state
         self.symbols_at.clear();
@@ -290,21 +296,26 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
         Ok(())
     }
 
-    fn step_at(&self, ctx: &Context, expr: ExprRef, step: u64) -> ExprRef {
+    fn step_at(&self, ctx: &Context, expr: ExprRef, step: Step) -> ExprRef {
         assert!(step <= self.current_step.unwrap_or(0));
         self.signal_sym_in_step(expr, step).unwrap_or_else(|| {
             if ctx[expr].is_true() || ctx[expr].is_false() {
+                // If signal is a constant (i.e. TRUE/FALSE), just return constant
                 expr
-            } else {
+            } else if ctx[expr].is_symbol() {
+                // If
                 panic!(
                     "Failed to find signal {} in step {step}",
                     expr.serialize_to_str(ctx)
                 )
+            } else {
+                // TODO: take care of recursive case for compound SMT expressions
+                todo!()
             }
         })
     }
 }
 
-fn name_at(name: &str, step: u64) -> String {
+fn name_at(name: &str, step: Step) -> String {
     format!("{}@{}", name, step)
 }
