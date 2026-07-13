@@ -20,7 +20,7 @@ pub trait TransitionSystemEncoding {
     ) -> Result<()>;
     fn unroll(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()>;
     /// Steps arbitrary SMT expression at step [k]
-    fn step_at(&self, ctx: &Context, expr: ExprRef, k: Step) -> ExprRef;
+    fn step_at(&self, ctx: &mut Context, expr: ExprRef, k: Step) -> ExprRef;
 }
 
 pub struct UnrollSmtEncoding {
@@ -296,20 +296,20 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
         Ok(())
     }
 
-    fn step_at(&self, ctx: &Context, expr: ExprRef, step: Step) -> ExprRef {
-        assert!(step <= self.current_step.unwrap_or(0));
-        self.signal_sym_in_step(expr, step).unwrap_or_else(|| {
+    fn step_at(&self, ctx: &mut Context, expr: ExprRef, k: Step) -> ExprRef {
+        assert!(k <= self.current_step.unwrap_or(0));
+        self.signal_sym_in_step(expr, k).unwrap_or_else(|| {
             if ctx[expr].is_true() || ctx[expr].is_false() {
                 // If signal is a constant (i.e. TRUE/FALSE), just return constant
                 expr
             } else if ctx[expr].is_symbol() {
-                // If
+                // If expression itself is an atomic symbol and could not be found as signal, abort
                 panic!(
-                    "Failed to find signal {} in step {step}",
+                    "Failed to find signal {} in step {k}",
                     expr.serialize_to_str(ctx)
                 )
             } else {
-                // TODO: take care of recursive case for compound SMT expressions
+                // Compound SMT expression: recursively map symbols to stepped signals
                 todo!()
             }
         })
