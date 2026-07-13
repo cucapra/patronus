@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use crate::expr::{
     Context, ExprRef, SerializableIrNode, StringRef, TypeCheck, simple_transform_expr,
 };
@@ -20,7 +19,7 @@ pub trait TransitionSystemEncoding {
     ) -> Result<()>;
     fn unroll(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()>;
     /// Steps arbitrary SMT expression at step [k]
-    fn step_at(&self, ctx: &mut Context, expr: ExprRef, k: Step) -> ExprRef;
+    fn expr_at_step(&self, ctx: &Context, expr: ExprRef, k: u64) -> ExprRef;
 }
 
 pub struct UnrollSmtEncoding {
