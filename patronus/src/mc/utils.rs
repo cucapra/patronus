@@ -1,7 +1,7 @@
+use crate::expr::{Context, ExprRef, eval_expr};
+use crate::smt::{CheckSatResponse, SolverContext};
 use baa::Value;
 use rustc_hash::FxHashMap;
-use crate::expr::{eval_expr, Context, ExprRef};
-use crate::smt::{CheckSatResponse, SolverContext};
 
 #[inline]
 pub fn check_assuming(

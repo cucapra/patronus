@@ -3,13 +3,13 @@
 // author: Kevin Laeufer <laeufer@berkeley.edu>
 
 mod bmc;
+mod encoding;
 mod pdr;
 mod types;
-mod encoding;
 mod utils;
 
 pub use bmc::bmc;
-pub use pdr::pdr;
-pub use types::{InitValue, Witness, ModelCheckResult};
 pub use encoding::{TransitionSystemEncoding, UnrollSmtEncoding};
+pub use pdr::pdr;
+pub use types::{InitValue, ModelCheckResult, Witness};
 pub use utils::{check_assuming, check_assuming_end, get_smt_value};

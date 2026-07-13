@@ -5,12 +5,12 @@
 
 use crate::expr::*;
 use crate::mc::Witness;
-use crate::mc::types::{InitValue, Result, ModelCheckResult};
 use crate::mc::encoding::{TransitionSystemEncoding, UnrollSmtEncoding};
+use crate::mc::types::{InitValue, ModelCheckResult, Result};
 use crate::mc::utils::{check_assuming, check_assuming_end, get_smt_value};
 use crate::smt::*;
-use crate::system::analysis::count_system_expr_uses;
 use crate::system::TransitionSystem;
+use crate::system::analysis::count_system_expr_uses;
 use baa::*;
 
 /// Runs up to [k_max] steps of BMC.

@@ -1,9 +1,11 @@
-use rustc_hash::FxHashSet;
+use crate::expr::{
+    Context, ExprRef, SerializableIrNode, StringRef, TypeCheck, simple_transform_expr,
+};
 use crate::mc::types::Result;
-use crate::expr::{simple_transform_expr, Context, ExprRef, SerializableIrNode, StringRef, TypeCheck};
 use crate::smt::SolverContext;
-use crate::system::analysis::{analyze_for_serialization, Uses};
+use crate::system::analysis::{Uses, analyze_for_serialization};
 use crate::system::{State, TransitionSystem};
+use rustc_hash::FxHashSet;
 
 pub trait TransitionSystemEncoding {
     fn define_header(&self, smt_ctx: &mut impl SolverContext) -> Result<()>;
