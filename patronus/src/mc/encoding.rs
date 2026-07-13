@@ -17,7 +17,7 @@ pub trait TransitionSystemEncoding {
     ) -> Result<()>;
     fn unroll(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()>;
     /// Steps arbitrary SMT expression at step [k]
-    fn step_at(&self, ctx: &Context, expr: ExprRef, k: u64) -> ExprRef;
+    fn expr_at_step(&self, ctx: &Context, expr: ExprRef, k: u64) -> ExprRef;
 }
 
 pub struct UnrollSmtEncoding {
@@ -290,7 +290,7 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
         Ok(())
     }
 
-    fn step_at(&self, ctx: &Context, expr: ExprRef, step: u64) -> ExprRef {
+    fn expr_at_step(&self, ctx: &Context, expr: ExprRef, step: u64) -> ExprRef {
         assert!(step <= self.current_step.unwrap_or(0));
         self.signal_sym_in_step(expr, step).unwrap_or_else(|| {
             if ctx[expr].is_true() || ctx[expr].is_false() {

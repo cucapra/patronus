@@ -175,7 +175,7 @@ fn expr_at_step(
 ) -> ExprRef {
     simple_transform_expr(ctx, expr, |ctx, e, _| {
         if ctx[e].is_symbol() {
-            Some(enc.step_at(ctx, e, step))
+            Some(enc.expr_at_step(ctx, e, step))
         } else {
             None
         }
@@ -201,7 +201,7 @@ fn extract_state_values(
 
     // Extract exact SMT value for each system state
     for state in &sys.states {
-        let sym = enc.step_at(ctx, state.symbol, step);
+        let sym = enc.expr_at_step(ctx, state.symbol, step);
         state_vals.push((state.symbol, get_smt_value(ctx, smt_ctx, sym)?));
     }
 
