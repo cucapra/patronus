@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use crate::expr::{
     Context, ExprRef, SerializableIrNode, StringRef, TypeCheck, simple_transform_expr,
 };
@@ -295,7 +296,7 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
         Ok(())
     }
 
-    fn step_at(&self, ctx: &mut Context, expr: ExprRef, k: Step) -> ExprRef {
+    fn expr_at_step(&self, ctx: &Context, expr: ExprRef, k: u64) -> ExprRef {
         assert!(k <= self.current_step.unwrap_or(0));
         self.signal_sym_in_step(expr, k).unwrap_or_else(|| {
             if ctx[expr].is_true() || ctx[expr].is_false() {
