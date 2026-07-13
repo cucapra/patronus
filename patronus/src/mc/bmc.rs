@@ -48,7 +48,7 @@ pub fn bmc(
     for k in 0..=k_max {
         // assume all constraints hold in this step
         for expr_ref in constraints.iter() {
-            let expr = enc.get_at(ctx, *expr_ref, k);
+            let expr = enc.step_at(ctx, *expr_ref, k);
             smt_ctx.assert(ctx, expr)?;
         }
 
@@ -65,7 +65,7 @@ pub fn bmc(
 
         if check_bad_states_individually {
             for expr_ref in bad_states.iter() {
-                let expr = enc.get_at(ctx, *expr_ref, k);
+                let expr = enc.step_at(ctx, *expr_ref, k);
                 let res = check_assuming(ctx, smt_ctx, [expr])?;
 
                 // count expression uses
@@ -79,7 +79,7 @@ pub fn bmc(
         } else {
             let all_bads = bad_states
                 .iter()
-                .map(|expr_ref| enc.get_at(ctx, *expr_ref, k))
+                .map(|expr_ref| enc.step_at(ctx, *expr_ref, k))
                 .collect::<Vec<_>>();
             let any_bad = all_bads.into_iter().reduce(|a, b| ctx.or(a, b)).unwrap();
             let res = check_assuming(ctx, smt_ctx, [any_bad])?;
@@ -145,7 +145,7 @@ fn get_witness(
 
     // which bad states did we hit?
     for (bad_idx, expr) in bad_states.iter().enumerate() {
-        let sym_at = enc.get_at(ctx, *expr, k_max);
+        let sym_at = enc.step_at(ctx, *expr, k_max);
         let value = get_smt_value(ctx, smt_ctx, sym_at)?;
         let value = match value {
             Value::Array(_) => unreachable!("should always be a bitvector!"),
@@ -159,7 +159,7 @@ fn get_witness(
 
     // collect initial values
     for (state_cnt, state) in sys.states.iter().enumerate() {
-        let sym_at = enc.get_at(ctx, state.symbol, 0);
+        let sym_at = enc.step_at(ctx, state.symbol, 0);
         let value = get_smt_value(ctx, smt_ctx, sym_at)?;
         // we assume that state ids are monotonically increasing with +1
         assert_eq!(wit.init.len(), state_cnt);
@@ -189,7 +189,7 @@ fn get_witness(
     for k in 0..=k_max {
         let mut input_values = Vec::default();
         for input in sys.inputs.iter() {
-            let sym_at = enc.get_at(ctx, *input, k);
+            let sym_at = enc.step_at(ctx, *input, k);
             let value = get_smt_value(ctx, smt_ctx, sym_at)?;
             input_values.push(Some(value));
         }

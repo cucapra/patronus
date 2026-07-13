@@ -5,7 +5,8 @@
 use crate::expr::*;
 use crate::mc::bmc::start_bmc_or_pdr;
 use crate::mc::encoding::TransitionSystemEncoding;
-use crate::mc::{ModelCheckResult, bmc, check_assuming, check_assuming_end, get_smt_value};
+use crate::mc::utils::{check_assuming, check_assuming_end, get_smt_value};
+use crate::mc::{ModelCheckResult, bmc};
 use crate::smt::*;
 use crate::system::TransitionSystem;
 use baa::{BitVecOps, Value};
@@ -174,7 +175,7 @@ fn expr_at_step(
 ) -> ExprRef {
     simple_transform_expr(ctx, expr, |ctx, e, _| {
         if ctx[e].is_symbol() {
-            Some(enc.get_at(ctx, e, step))
+            Some(enc.step_at(ctx, e, step))
         } else {
             None
         }
@@ -200,7 +201,7 @@ fn extract_state_values(
 
     // Extract exact SMT value for each system state
     for state in &sys.states {
-        let sym = enc.get_at(ctx, state.symbol, step);
+        let sym = enc.step_at(ctx, state.symbol, step);
         state_vals.push((state.symbol, get_smt_value(ctx, smt_ctx, sym)?));
     }
 
