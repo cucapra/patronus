@@ -163,25 +163,6 @@ impl FrameId {
 // PDR helper functions
 // -------------------------------------------------------------------------------------------------
 
-/// Get the stepped version of an SMT expression
-///
-/// # Preconditions
-/// * `expr` must exist in `enc` at `step`
-fn expr_at_step(
-    ctx: &mut Context,
-    enc: &impl TransitionSystemEncoding,
-    expr: ExprRef,
-    step: Step,
-) -> ExprRef {
-    simple_transform_expr(ctx, expr, |ctx, e, _| {
-        if ctx[e].is_symbol() {
-            Some(enc.expr_at_step(ctx, e, step))
-        } else {
-            None
-        }
-    })
-}
-
 /// Extract states values from solver at a certain time step
 ///
 /// # Preconditions
@@ -305,7 +286,7 @@ impl Frame {
     ) -> Result<()> {
         // Create implication act_i => \neg c, where c is the blocked cube stepped at current step
         let clause = cube.negate(ctx);
-        let clause_expr = expr_at_step(ctx, enc, clause, FROM_STEP);
+        let clause_expr = enc.expr_at_step(ctx, clause, FROM_STEP);
         let imp = ctx.implies(self.act, clause_expr);
 
         // Permanently assert implication in solver
@@ -399,7 +380,7 @@ impl BasePdr {
 
         // Always assert constraints at current step
         for &cons in &sys.constraints {
-            let cons_cur = expr_at_step(ctx, enc, cons, FROM_STEP);
+            let cons_cur = enc.expr_at_step(ctx, cons, FROM_STEP);
             smt_ctx.assert(ctx, cons_cur)?;
         }
 
@@ -409,7 +390,7 @@ impl BasePdr {
         let cons_next_expr = sys
             .constraints
             .iter()
-            .map(|&c| expr_at_step(ctx, enc, c, TO_STEP))
+            .map(|&c| enc.expr_at_step(ctx, c, TO_STEP))
             .collect::<Vec<_>>()
             .into_iter()
             .fold(ctx.get_true(), |acc, c| ctx.and(acc, c));
@@ -424,7 +405,7 @@ impl BasePdr {
 
         // Create act_0 => init_cube, where init_cube is stepped to the before step
         let init_expr = init_cube.to_expr(ctx);
-        let init_expr = expr_at_step(ctx, enc, init_expr, FROM_STEP);
+        let init_expr = enc.expr_at_step(ctx, init_expr, FROM_STEP);
         let init_imp = ctx.implies(init_act, init_expr);
 
         // Permanently assert implication in solver
@@ -518,13 +499,13 @@ impl BasePdr {
 
         // Next step cube
         let cube_expr = cube.cube.to_expr(ctx);
-        let cube_next = expr_at_step(ctx, enc, cube_expr, TO_STEP);
+        let cube_next = enc.expr_at_step(ctx, cube_expr, TO_STEP);
         assumptions.push(cube_next);
 
         // Current step negation cube
         if query_type == RelIndType::Extended {
             let neg_cube_expr = cube.cube.negate(ctx);
-            let neg_cube_cur = expr_at_step(ctx, enc, neg_cube_expr, FROM_STEP);
+            let neg_cube_cur = enc.expr_at_step(ctx, neg_cube_expr, FROM_STEP);
             assumptions.push(neg_cube_cur);
         }
 
@@ -566,7 +547,7 @@ impl BasePdr {
         let bad_lits: Vec<ExprRef> = sys
             .bad_states
             .iter()
-            .map(|&b| expr_at_step(ctx, enc, b, FROM_STEP))
+            .map(|&b| enc.expr_at_step(ctx, b, FROM_STEP))
             .collect();
 
         // Disjunct all bad state literals
@@ -753,10 +734,10 @@ impl BasePdr {
             let inf_assumption = self.frame_assumptions(ctx, FrameId::Infinite);
 
             let clause_expr = cube.negate(ctx);
-            let clause_cur = expr_at_step(ctx, enc, clause_expr, FROM_STEP);
+            let clause_cur = enc.expr_at_step(ctx, clause_expr, FROM_STEP);
 
             let cube_expr = cube.to_expr(ctx);
-            let cube_next = expr_at_step(ctx, enc, cube_expr, TO_STEP);
+            let cube_next = enc.expr_at_step(ctx, cube_expr, TO_STEP);
 
             // Run the query `SAT?[R_\infty /\ \neg c /\ T /\ c']`, asserting that the
             // constraints hold at `TO_STEP`

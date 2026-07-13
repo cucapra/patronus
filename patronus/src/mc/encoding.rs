@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use crate::expr::{
     Context, ExprRef, SerializableIrNode, StringRef, TypeCheck, simple_transform_expr,
 };
@@ -7,6 +6,7 @@ use crate::smt::SolverContext;
 use crate::system::analysis::{Uses, analyze_for_serialization};
 use crate::system::{State, TransitionSystem};
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::cell::RefCell;
 
 pub type Step = u64;
 
@@ -20,7 +20,7 @@ pub trait TransitionSystemEncoding {
     ) -> Result<()>;
     fn unroll(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()>;
     /// Steps arbitrary SMT expression at step [k]
-    fn expr_at_step(&self, ctx: &Context, expr: ExprRef, k: u64) -> ExprRef;
+    fn expr_at_step(&self, ctx: &mut Context, expr: ExprRef, k: Step) -> ExprRef;
 }
 
 pub struct UnrollSmtEncoding {
@@ -214,6 +214,10 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
     ) -> Result<()> {
         // delete old mutable state
         self.symbols_at.clear();
+
+        // Clear old stepped expression cache
+        self.expr_cache.borrow_mut().clear();
+
         // remember current step and starting offset
         self.current_step = Some(step);
         self.offset = Some(step);
@@ -296,8 +300,14 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
         Ok(())
     }
 
-    fn expr_at_step(&self, ctx: &Context, expr: ExprRef, k: u64) -> ExprRef {
+    fn expr_at_step(&self, ctx: &mut Context, expr: ExprRef, k: Step) -> ExprRef {
         assert!(k <= self.current_step.unwrap_or(0));
+
+        // Check if stepped expression already exists in cache
+        if let Some(&sym) = self.expr_cache.borrow().get(&(expr, k)) {
+            return sym;
+        }
+
         self.signal_sym_in_step(expr, k).unwrap_or_else(|| {
             if ctx[expr].is_true() || ctx[expr].is_false() {
                 // If signal is a constant (i.e. TRUE/FALSE), just return constant
@@ -310,7 +320,17 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
                 )
             } else {
                 // Compound SMT expression: recursively map symbols to stepped signals
-                todo!()
+                let stepped = simple_transform_expr(ctx, expr, |ctx, e, _| {
+                    if ctx[e].is_symbol() {
+                        Some(self.expr_at_step(ctx, e, k))
+                    } else {
+                        None
+                    }
+                });
+
+                // Cache stepped compound expression
+                self.expr_cache.borrow_mut().insert((expr, k), stepped);
+                stepped
             }
         })
     }
