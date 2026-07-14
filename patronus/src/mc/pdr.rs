@@ -595,8 +595,8 @@ impl BasePdr {
     /// (i.e. `SAT?[R_{i - 1} /\ \neg c /\ T c']`)
     ///
     /// # Returns
-    /// Query result and possibly a model for `SAT` cases, or a generalized cube if
-    /// `unsat_core_enabled` is set in [`GLOB_PDR_OPTS`]
+    /// Query result and possibly a model for `SAT` cases, or a generalized cube if [opts]
+    /// has `disable_unsat_cores` set to [false]
     fn rel_ind(
         &mut self,
         ctx: &mut Context,
