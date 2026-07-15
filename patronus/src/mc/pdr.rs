@@ -237,13 +237,11 @@ fn get_bit_level_cube(
                 // and assign bit-level equalities to concrete value
                 for idx in 0..width {
                     let bit = ctx.slice(sym, idx, idx);
-                    let bit_val = if bv.is_bit_set(idx) {
-                        ctx.get_true()
+                    let lit = if bv.is_bit_set(idx) {
+                        bit
                     } else {
-                        ctx.get_false()
+                        ctx.not(bit)
                     };
-
-                    let lit = ctx.equal(bit, bit_val);
                     literals.push(lit);
                 }
             }
