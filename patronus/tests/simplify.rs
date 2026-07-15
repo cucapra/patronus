@@ -1,4 +1,4 @@
-// Copyright 2024 Cornell University
+// Copyright 2024-26 Cornell University
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
@@ -119,6 +119,15 @@ fn test_simplify_ite() {
     ts("ite(c:bv<1>, a:bv<1>, true)", "or(not(c:bv<1>), a:bv<1>)");
 }
 
+/// inside an ITE we might already know some values
+#[test]
+#[ignore] // TODO
+fn test_conditional_simplification() {
+    // a = 0 -> a + 1 = 0 + 1 = 1
+    // a = 1 -> a     = 1
+    ts("ite(not(a:bv<1>), add(a, 1'b1), a)", "true");
+}
+
 #[test]
 fn test_simplify_slice() {
     // slice a constant
@@ -218,6 +227,11 @@ fn test_simplify_add() {
     // add zero
     ts("add(a : bv<4>, 4'd0)", "a : bv<4>");
     ts("add(4'd0, a : bv<4>)", "a : bv<4>");
+
+    // add 1-bit -> converted to bool
+    ts("add(a : bv<1>, b: bv<1>)", "xor(a : bv<1>, b: bv<1>)");
+    ts("add(a : bv<1>, 1'b1)", "not(a : bv<1>)");
+    ts("add(a : bv<1>, 1'b0)", "a : bv<1>");
 }
 
 #[test]
@@ -240,6 +254,13 @@ fn test_simplify_mul() {
     ts("mul(a : bv<4>, 4'd2)", "concat(a : bv<4>[2:0],  1'b0)");
     ts("mul(a : bv<4>, 4'd4)", "concat(a : bv<4>[1:0], 2'b00)");
     ts("mul(a : bv<4>, 4'd8)", "concat(a : bv<4>[0],  3'b000)");
+
+    // 1-bit multiply with constant is already covered
+    ts("mul(a : bv<1>, 1'b1)", "a : bv<1>");
+    ts("mul(a : bv<1>, 1'b0)", "1'b0");
+
+    // canonicalize multiply 1-bit
+    ts("mul(a : bv<1>, b: bv<1>)", "and(a : bv<1>, b: bv<1>)");
 }
 
 #[test]
@@ -286,6 +307,8 @@ fn test_simplify_implies() {
     ts("implies(true, a : bv<1>)", "a : bv<1>");
     ts("implies(true, true)", "true");
     ts("implies(true, false)", "false");
+    // implies gets canonicalized to its definition
+    ts("implies(a : bv<1>, b : bv<1>)", "or(not(a:bv<1>), b:bv<1>)");
 }
 
 #[test]
@@ -299,6 +322,13 @@ fn test_simplify_ugte() {
     ts("ugte(4'd7, 4'd7)", "true");
     ts("ugte(4'd15, 4'd10)", "true");
     ts("ugte(4'd5, 4'd10)", "false");
+    // simplify when we are at the limit
+    ts("ugte(a : bv<1>, 1'b1)", "a : bv<1>"); // here `a` is either 0 or 1
+    ts("ugte(a : bv<32>, 32'd0)", "true");
+    ts(
+        "ugte(a : bv<32>, 32'xffffffff)",
+        "eq(a : bv<32>, 32'xffffffff)",
+    );
 }
 
 // from maltese-smt:
