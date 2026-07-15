@@ -9,6 +9,8 @@ use crate::mc::{ModelCheckResult, bmc, check_assuming, check_assuming_end, get_s
 use crate::smt::*;
 use crate::system::TransitionSystem;
 use baa::{BitVecOps, Value};
+use rustc_hash::FxHashMap;
+use std::cell::RefCell;
 use std::collections::BinaryHeap;
 use std::num::NonZeroUsize;
 use std::ops::{Index, IndexMut};
@@ -162,25 +164,6 @@ impl FrameId {
 // PDR helper functions
 // -------------------------------------------------------------------------------------------------
 
-/// Get the stepped version of an SMT expression
-///
-/// # Preconditions
-/// * `expr` must exist in `enc` at `step`
-fn expr_at_step(
-    ctx: &mut Context,
-    enc: &impl TransitionSystemEncoding,
-    expr: ExprRef,
-    step: Step,
-) -> ExprRef {
-    simple_transform_expr(ctx, expr, |ctx, e, _| {
-        if ctx[e].is_symbol() {
-            Some(enc.get_signal_at(ctx, e, step))
-        } else {
-            None
-        }
-    })
-}
-
 /// Extract states values from solver at a certain time step
 ///
 /// # Preconditions
@@ -281,6 +264,60 @@ fn query(
 }
 
 // -------------------------------------------------------------------------------------------------
+// PDR Transition System Encoding Wrapper
+// -------------------------------------------------------------------------------------------------
+
+/// Thin wrapper for [`TransitionSystemEncoding`] with stepped expression cache
+struct PdrEncodingWrapper<E: TransitionSystemEncoding> {
+    /// Stepped expression cache
+    /// `(unstepped_expr, step) |-> stepped_expr @ step`
+    expr_cache: RefCell<FxHashMap<(ExprRef, Step), ExprRef>>,
+
+    /// Contained transition system encoding
+    enc: E,
+}
+
+impl<E: TransitionSystemEncoding> PdrEncodingWrapper<E> {
+    /// Create new [`TransitionSystemEncoding`] wrapper
+    fn new(enc: E) -> Self {
+        Self {
+            expr_cache: RefCell::new(FxHashMap::default()),
+            enc,
+        }
+    }
+
+    /// Step all symbol leaves in SMT expressions
+    ///
+    /// # Precondition
+    /// All symbols in [expr] must be unrolled
+    fn expr_at_step(&self, ctx: &mut Context, expr: ExprRef, step: Step) -> ExprRef {
+        // If stepped expression already exists in cache, return cached version
+        if let Some(&sym) = self.expr_cache.borrow().get(&(expr, step)) {
+            return sym;
+        }
+
+        // Yield final stepped expression
+        let stepped = simple_transform_expr(ctx, expr, |ctx, e, _| {
+            if ctx[e].is_symbol() {
+                // Step expression
+                let stepped = self.enc.get_signal_at(ctx, e, step);
+
+                // Add stepped expression to cache
+                self.expr_cache.borrow_mut().insert((e, step), stepped);
+
+                Some(stepped)
+            } else {
+                None
+            }
+        });
+
+        // Add final stepped expression to cache
+        self.expr_cache.borrow_mut().insert((expr, step), stepped);
+        stepped
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
 // Core PDR
 // -------------------------------------------------------------------------------------------------
 
@@ -288,35 +325,14 @@ struct Frame {
     /// Frame activation literal
     act: ExprRef,
 
-    /// Blocked cubes in frame
     cubes: Vec<Cube>,
 }
 
-impl Frame {
-    fn add_blocked_cube(
-        &mut self,
-        ctx: &mut Context,
-        smt_ctx: &mut impl SolverContext,
-        enc: &impl TransitionSystemEncoding,
-        cube: Cube,
-    ) -> Result<()> {
-        // Create implication act_i => \neg c, where c is the blocked cube stepped at current step
-        let clause = cube.negate(ctx);
-        let clause_expr = expr_at_step(ctx, enc, clause, FROM_STEP);
-        let imp = ctx.implies(self.act, clause_expr);
-
-        // Permanently assert implication in solver
-        smt_ctx.assert(ctx, imp)?;
-
-        // Add blocked cube to frame
-        self.cubes.push(cube);
-
-        Ok(())
-    }
-}
-
 /// Frame trace maintained by vanilla PDR
-struct BasePdr {
+struct BasePdr<E: TransitionSystemEncoding> {
+    /// Transition system encoding
+    enc: PdrEncodingWrapper<E>,
+
     /// `TO_STEP` constraints
     to_step_constraints_active: ExprRef,
 
@@ -333,7 +349,7 @@ struct BasePdr {
     next_act_id: u64,
 }
 
-impl Index<FrameId> for BasePdr {
+impl<E: TransitionSystemEncoding> Index<FrameId> for BasePdr<E> {
     type Output = Frame;
 
     /// # Panics
@@ -347,7 +363,7 @@ impl Index<FrameId> for BasePdr {
     }
 }
 
-impl IndexMut<FrameId> for BasePdr {
+impl<E: TransitionSystemEncoding> IndexMut<FrameId> for BasePdr<E> {
     fn index_mut(&mut self, index: FrameId) -> &mut Self::Output {
         match index {
             FrameId::Init => panic!("Cannot index init frame"), // Init frame doesn't explicitly exist
@@ -358,7 +374,7 @@ impl IndexMut<FrameId> for BasePdr {
 }
 
 /// Iterator method for [`BasePdr`]
-impl BasePdr {
+impl<E: TransitionSystemEncoding> BasePdr<E> {
     fn iter(&'_ self) -> impl Iterator<Item = FrameId> + '_ {
         (1..=(self.frames.len() + 1)).map(|ii| {
             if ii <= self.frames.len() {
@@ -371,7 +387,7 @@ impl BasePdr {
     }
 }
 
-impl BasePdr {
+impl<E: TransitionSystemEncoding> BasePdr<E> {
     /// Initialize a PDR instance
     ///
     /// # Precondition
@@ -380,9 +396,12 @@ impl BasePdr {
     fn init(
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
-        enc: &impl TransitionSystemEncoding,
+        enc: E,
         sys: &TransitionSystem,
     ) -> Result<Self> {
+        // Wrap transition system encoding
+        let wrapped_enc = PdrEncodingWrapper::new(enc);
+
         let mut init_cube = Cube::tru();
 
         // Get all initial states from the system and create equalities between symbol
@@ -396,7 +415,7 @@ impl BasePdr {
 
         // Always assert constraints at current step
         for &cons in &sys.constraints {
-            let cons_cur = expr_at_step(ctx, enc, cons, FROM_STEP);
+            let cons_cur = wrapped_enc.expr_at_step(ctx, cons, FROM_STEP);
             smt_ctx.assert(ctx, cons_cur)?;
         }
 
@@ -406,7 +425,7 @@ impl BasePdr {
         let cons_next_expr = sys
             .constraints
             .iter()
-            .map(|&c| expr_at_step(ctx, enc, c, TO_STEP))
+            .map(|&c| wrapped_enc.expr_at_step(ctx, c, TO_STEP))
             .collect::<Vec<_>>()
             .into_iter()
             .fold(ctx.get_true(), |acc, c| ctx.and(acc, c));
@@ -421,7 +440,7 @@ impl BasePdr {
 
         // Create act_0 => init_cube, where init_cube is stepped to the before step
         let init_expr = init_cube.to_expr(ctx);
-        let init_expr = expr_at_step(ctx, enc, init_expr, FROM_STEP);
+        let init_expr = wrapped_enc.expr_at_step(ctx, init_expr, FROM_STEP);
         let init_imp = ctx.implies(init_act, init_expr);
 
         // Permanently assert implication in solver
@@ -437,6 +456,7 @@ impl BasePdr {
         };
 
         Ok(Self {
+            enc: wrapped_enc,
             to_step_constraints_active: cons_act,
             init_frame: init_act,
             inf_frame,
@@ -502,7 +522,6 @@ impl BasePdr {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
-        enc: &impl TransitionSystemEncoding,
         cube: &TimedCube,
         query_type: RelIndType,
     ) -> Result<(CheckSatResponse, Option<Cube>)> {
@@ -515,13 +534,13 @@ impl BasePdr {
 
         // Next step cube
         let cube_expr = cube.cube.to_expr(ctx);
-        let cube_next = expr_at_step(ctx, enc, cube_expr, TO_STEP);
+        let cube_next = self.enc.expr_at_step(ctx, cube_expr, TO_STEP);
         assumptions.push(cube_next);
 
         // Current step negation cube
         if query_type == RelIndType::Extended {
             let neg_cube_expr = cube.cube.negate(ctx);
-            let neg_cube_cur = expr_at_step(ctx, enc, neg_cube_expr, FROM_STEP);
+            let neg_cube_cur = self.enc.expr_at_step(ctx, neg_cube_expr, FROM_STEP);
             assumptions.push(neg_cube_cur);
         }
 
@@ -529,7 +548,7 @@ impl BasePdr {
         assumptions.push(self.to_step_constraints_active);
 
         // Run SMT query
-        query(ctx, smt_ctx, sys, enc, assumptions)
+        query(ctx, smt_ctx, sys, &self.enc.enc, assumptions)
     }
 
     /// Frame identifier for frontier frame
@@ -554,7 +573,6 @@ impl BasePdr {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
-        enc: &impl TransitionSystemEncoding,
     ) -> Result<Option<Cube>> {
         // Get frontier frame identifier
         let front = self.frontier();
@@ -563,7 +581,7 @@ impl BasePdr {
         let bad_lits: Vec<ExprRef> = sys
             .bad_states
             .iter()
-            .map(|&b| expr_at_step(ctx, enc, b, FROM_STEP))
+            .map(|&b| self.enc.expr_at_step(ctx, b, FROM_STEP))
             .collect();
 
         // Disjunct all bad state literals
@@ -582,7 +600,7 @@ impl BasePdr {
             ctx,
             smt_ctx,
             sys,
-            enc,
+            &self.enc.enc,
             vec![front_assumption, bad_expr, neg_cons],
         )? {
             (CheckSatResponse::Sat, Some(cube)) => {
@@ -611,6 +629,26 @@ impl BasePdr {
         Ok(())
     }
 
+    fn add_blocked_cube(
+        &mut self,
+        ctx: &mut Context,
+        smt_ctx: &mut impl SolverContext,
+        cube: TimedCube,
+    ) -> Result<()> {
+        // Create implication act_i => \neg c, where c is the blocked cube stepped at current step
+        let clause = cube.cube.negate(ctx);
+        let clause_expr = self.enc.expr_at_step(ctx, clause, FROM_STEP);
+        let imp = ctx.implies(self[cube.frame].act, clause_expr);
+
+        // Permanently assert implication in solver
+        smt_ctx.assert(ctx, imp)?;
+
+        // Add blocked cube to frame
+        self[cube.frame].cubes.push(cube.cube);
+
+        Ok(())
+    }
+
     /// Block cube in frame trace at certain frame
     ///
     /// # Returns
@@ -623,7 +661,6 @@ impl BasePdr {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
-        enc: &impl TransitionSystemEncoding,
         cube: TimedCube,
     ) -> Result<bool> {
         // Min-queue of proof obligations: start with initial proof obligation
@@ -637,7 +674,7 @@ impl BasePdr {
             }
 
             // Try to get counterexample relative to last frame
-            let res = match self.rel_ind(ctx, smt_ctx, sys, enc, &obj, RelIndType::Extended)? {
+            let res = match self.rel_ind(ctx, smt_ctx, sys, &obj, RelIndType::Extended)? {
                 (CheckSatResponse::Sat, Some(cube)) => Some(cube), // Extract counterexample-to-induction
                 (CheckSatResponse::Unsat, _) => None,
                 (CheckSatResponse::Unknown, _) => {
@@ -665,7 +702,7 @@ impl BasePdr {
                 // Push cube as far as possible in the frame trace
                 while test_cube.frame <= self.frontier()
                     && self
-                        .rel_ind(ctx, smt_ctx, sys, enc, &test_cube, RelIndType::Extended)?
+                        .rel_ind(ctx, smt_ctx, sys, &test_cube, RelIndType::Extended)?
                         .0
                         == CheckSatResponse::Unsat
                 {
@@ -676,7 +713,7 @@ impl BasePdr {
                 test_cube.frame = test_cube.frame.decrement();
 
                 // Refine frame trace with cube
-                self[test_cube.frame].add_blocked_cube(ctx, smt_ctx, enc, test_cube.cube)?;
+                self.add_blocked_cube(ctx, smt_ctx, test_cube)?;
             }
         }
 
@@ -693,7 +730,6 @@ impl BasePdr {
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
-        enc: &impl TransitionSystemEncoding,
     ) -> Result<bool> {
         let front = self.frontier();
 
@@ -713,13 +749,13 @@ impl BasePdr {
                 // Run query `SAT?[R_i /\ T /\ c]`, where `c` is the candidate cube
                 // for propagation
                 let smt_res = self
-                    .rel_ind(ctx, smt_ctx, sys, enc, &query_cube, RelIndType::Standard)?
+                    .rel_ind(ctx, smt_ctx, sys, &query_cube, RelIndType::Standard)?
                     .0;
 
                 // Check that cube is still blocked in next frame
                 if smt_res == CheckSatResponse::Unsat {
                     // Add blocked cube to next frame
-                    self[id.increment()].add_blocked_cube(ctx, smt_ctx, enc, query_cube.cube)?;
+                    self.add_blocked_cube(ctx, smt_ctx, query_cube)?;
                 } else {
                     // Query must have been SAT or UNKNOWN: do not propagate to ensure soundness
                     self[id].cubes.push(query_cube.cube);
@@ -737,7 +773,14 @@ impl BasePdr {
                 // Add all learned invariants to infinite frame
                 for iid in inv_ids {
                     for cube in std::mem::take(&mut self[iid].cubes) {
-                        self[FrameId::Infinite].add_blocked_cube(ctx, smt_ctx, enc, cube)?;
+                        self.add_blocked_cube(
+                            ctx,
+                            smt_ctx,
+                            TimedCube {
+                                cube,
+                                frame: FrameId::Infinite,
+                            },
+                        )?;
                     }
                 }
 
@@ -750,10 +793,10 @@ impl BasePdr {
             let inf_assumption = self.frame_assumptions(ctx, FrameId::Infinite);
 
             let clause_expr = cube.negate(ctx);
-            let clause_cur = expr_at_step(ctx, enc, clause_expr, FROM_STEP);
+            let clause_cur = self.enc.expr_at_step(ctx, clause_expr, FROM_STEP);
 
             let cube_expr = cube.to_expr(ctx);
-            let cube_next = expr_at_step(ctx, enc, cube_expr, TO_STEP);
+            let cube_next = self.enc.expr_at_step(ctx, cube_expr, TO_STEP);
 
             // Run the query `SAT?[R_\infty /\ \neg c /\ T /\ c']`, asserting that the
             // constraints hold at `TO_STEP`
@@ -761,7 +804,7 @@ impl BasePdr {
                 ctx,
                 smt_ctx,
                 sys,
-                enc,
+                &self.enc.enc,
                 vec![
                     inf_assumption,
                     clause_cur,
@@ -773,7 +816,14 @@ impl BasePdr {
 
             if smt_res == CheckSatResponse::Unsat {
                 // If UNSAT, blocked cube can also be propagated to infinite frame
-                self[FrameId::Infinite].add_blocked_cube(ctx, smt_ctx, enc, cube)?;
+                self.add_blocked_cube(
+                    ctx,
+                    smt_ctx,
+                    TimedCube {
+                        cube,
+                        frame: FrameId::Infinite,
+                    },
+                )?;
             } else {
                 // Else, blocked cube can only stay in finite frame
                 self[front].cubes.push(cube);
@@ -801,14 +851,14 @@ pub fn pdr(
     enc.unroll(ctx, smt_ctx)?;
 
     // Initialize PDR
-    let mut state = BasePdr::init(ctx, smt_ctx, &enc, sys)?;
+    let mut state = BasePdr::init(ctx, smt_ctx, enc, sys)?;
 
     let limit = FrameId::Finite(NonZeroUsize::new(MAX_FRAMES).unwrap());
 
     // PDR loop
     while state.frontier() <= limit {
         // Try to get bad cube
-        let bad_cube = state.get_bad_cube(ctx, smt_ctx, sys, &enc)?;
+        let bad_cube = state.get_bad_cube(ctx, smt_ctx, sys)?;
 
         if let Some(bad) = bad_cube {
             // Try to block cube
@@ -816,7 +866,6 @@ pub fn pdr(
                 ctx,
                 smt_ctx,
                 sys,
-                &enc,
                 TimedCube {
                     cube: bad,
                     frame: state.frontier(),
@@ -839,7 +888,7 @@ pub fn pdr(
             state.add_frame(ctx, smt_ctx)?;
 
             // Check if inductive invariant found
-            if state.propagate_blocked_cubes(ctx, smt_ctx, sys, &enc)? {
+            if state.propagate_blocked_cubes(ctx, smt_ctx, sys)? {
                 return Ok(ModelCheckResult::Success);
             }
         }
