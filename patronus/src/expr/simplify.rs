@@ -424,22 +424,6 @@ fn simplify_bv_xor(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef>
     }
 }
 
-fn simplify_bv_implies(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef> {
-    // implies(a, b) is equivalent to not(a) or b
-    // Check if premise (a) is a constant
-    if let Expr::BVLiteral(va) = ctx[a] {
-        if va.get(ctx).is_false() {
-            // implies(false, _) -> true
-            return Some(ctx.get_true());
-        } else {
-            // implies(true, b) -> b
-            return Some(b);
-        }
-    }
-
-    None
-}
-
 fn simplify_bv_greater_equal(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef> {
     // If both operands are literals, evaluate on the spot
     match (&ctx[a], &ctx[b]) {
