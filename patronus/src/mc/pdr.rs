@@ -289,7 +289,8 @@ impl<E: TransitionSystemEncoding> PdrEncodingWrapper<E> {
     /// Step all symbol leaves in SMT expressions
     ///
     /// # Precondition
-    /// All symbols in [expr] must be unrolled
+    /// All symbols in [expr] must be unstepped, and there must exist a stepped version of each
+    /// symbol at [step] (unrolled in the original [`TransitionSystemEncoding`])
     fn expr_at_step(&self, ctx: &mut Context, expr: ExprRef, step: Step) -> ExprRef {
         // If stepped expression already exists in cache, return cached version
         if let Some(&sym) = self.expr_cache.borrow().get(&(expr, step)) {
@@ -304,7 +305,6 @@ impl<E: TransitionSystemEncoding> PdrEncodingWrapper<E> {
 
                 // Add stepped expression to cache
                 self.expr_cache.borrow_mut().insert((e, step), stepped);
-
                 Some(stepped)
             } else {
                 None
