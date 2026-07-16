@@ -10,7 +10,7 @@ use super::{
 use crate::expr::meta::get_fixed_point;
 use crate::expr::transform::ExprTransformMode;
 use crate::smt::{CheckSatResponse, SolverContext};
-use baa::BitVecOps;
+use baa::{BitVecOps, BitVecValue};
 use smallvec::{SmallVec, smallvec};
 
 /// Applies simplifications to a single expression.
@@ -103,6 +103,22 @@ impl<T: ExprMap<Option<ExprRef>>> Simplifier<T> {
     }
 }
 
+/// Returns a symbol `S` and the value `V` if the given expression is equisatisfiable
+/// with `eq(S, V)
+pub fn as_equality(ctx: &Context, e: ExprRef) -> Option<(ExprRef, ExprRef)> {
+    if e.get_bv_type(ctx) != Some(1) {
+        return None;
+    }
+    match ctx[e].clone() {
+        // equality constraint in their different shapes
+        Expr::BVEqual(a, b) if let Expr::BVSymbol { .. } = &ctx[a] => Some((a, b)),
+        Expr::BVEqual(a, b) if let Expr::BVSymbol { .. } = &ctx[b] => Some((b, a)),
+        Expr::BVSymbol { .. } => Some((e, ctx.get_true())),
+        Expr::BVNot(e, ..) if let Expr::BVSymbol { .. } = &ctx[e] => Some((e, ctx.get_false())),
+        _ => None,
+    }
+}
+
 /// Simplifies one expression (not its children)
 pub(crate) fn simplify(ctx: &mut Context, expr: ExprRef, children: &[ExprRef]) -> Option<ExprRef> {
     match (ctx[expr].clone(), children) {
@@ -115,7 +131,11 @@ pub(crate) fn simplify(ctx: &mut Context, expr: ExprRef, children: &[ExprRef]) -
         (Expr::BVAnd(..), [a, b]) => simplify_bv_and(ctx, *a, *b),
         (Expr::BVOr(..), [a, b]) => simplify_bv_or(ctx, *a, *b),
         (Expr::BVXor(..), [a, b]) => simplify_bv_xor(ctx, *a, *b),
-        (Expr::BVImplies(..), [a, b]) => simplify_bv_implies(ctx, *a, *b),
+        (Expr::BVImplies(..), [a, b]) => {
+            // canonicalize away bv implies
+            let not_a = ctx.not(*a);
+            Some(ctx.or(not_a, *b))
+        }
         (Expr::BVGreaterEqual(..), [a, b]) => simplify_bv_greater_equal(ctx, *a, *b),
         (Expr::BVAdd(..), [a, b]) => simplify_bv_add(ctx, *a, *b),
         (Expr::BVMul(..), [a, b]) => simplify_bv_mul(ctx, *a, *b),
@@ -404,36 +424,42 @@ fn simplify_bv_xor(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef>
     }
 }
 
-fn simplify_bv_implies(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef> {
-    // implies(a, b) is equivalent to not(a) or b
-    // Check if premise (a) is a constant
-    if let Expr::BVLiteral(va) = ctx[a] {
-        if va.get(ctx).is_false() {
-            // implies(false, _) -> true
-            return Some(ctx.get_true());
-        } else {
-            // implies(true, b) -> b
-            return Some(b);
-        }
-    }
-
-    None
-}
-
 fn simplify_bv_greater_equal(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef> {
     // If both operands are literals, evaluate on the spot
     match (&ctx[a], &ctx[b]) {
-        (Expr::BVLiteral(va), Expr::BVLiteral(vb)) => {
-            let result = va.get(ctx).is_greater_or_equal(&vb.get(ctx));
+        (Expr::BVLiteral(a_val), Expr::BVLiteral(b_val)) => {
+            let result = a_val.get(ctx).is_greater_or_equal(&b_val.get(ctx));
             Some(ctx.bv_lit(&result.into()))
+        }
+        (Expr::BVLiteral(a_val), _) => {
+            // a_val >= b
+            let width = a.get_bv_type(ctx).unwrap();
+            let max_value = BitVecValue::ones(width);
+            if a_val.get(ctx).is_equal(&max_value) {
+                Some(ctx.get_true())
+            } else {
+                None
+            }
+        }
+        (_, Expr::BVLiteral(b_val)) => {
+            // a >= b_val
+            let width = a.get_bv_type(ctx).unwrap();
+            let max_value = BitVecValue::ones(width);
+            if b_val.get(ctx).is_zero() {
+                Some(ctx.get_true())
+            } else if b_val.get(ctx).is_equal(&max_value) {
+                Some(ctx.equal(a, b))
+            } else {
+                None
+            }
         }
         _ => None,
     }
 }
 
 fn simplify_bv_not(ctx: &mut Context, e: ExprRef) -> Option<ExprRef> {
-    match &ctx[e] {
-        Expr::BVNot(inner, _) => Some(*inner), // double negation
+    match ctx[e].clone() {
+        Expr::BVNot(inner, _) => Some(inner), // double negation
         Expr::BVLiteral(value) => Some(ctx.bv_lit(&value.get(ctx).not())),
         _ => None,
     }
@@ -663,38 +689,48 @@ fn simplify_bv_arithmetic_shift_right(
 }
 
 fn simplify_bv_add(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef> {
-    match find_lits_commutative(ctx, a, b) {
-        Lits::Two(va, vb) => Some(ctx.bv_lit(&va.get(ctx).add(&vb.get(ctx)))),
-        Lits::One((va, _), b) => {
-            if va.get(ctx).is_zero() {
-                Some(b)
-            } else {
-                None
+    // canonicalize 1-bit add to xor
+    if a.get_bv_type(ctx) == Some(1) {
+        Some(ctx.xor(a, b))
+    } else {
+        match find_lits_commutative(ctx, a, b) {
+            Lits::Two(va, vb) => Some(ctx.bv_lit(&va.get(ctx).add(&vb.get(ctx)))),
+            Lits::One((va, _), b) => {
+                if va.get(ctx).is_zero() {
+                    Some(b)
+                } else {
+                    None
+                }
             }
+            Lits::None => None,
         }
-        Lits::None => None,
     }
 }
 
 fn simplify_bv_mul(ctx: &mut Context, a: ExprRef, b: ExprRef) -> Option<ExprRef> {
-    match find_lits_commutative(ctx, a, b) {
-        Lits::Two(va, vb) => Some(ctx.bv_lit(&va.get(ctx).mul(&vb.get(ctx)))),
-        Lits::One((va, a), b) => {
-            let va = va.get(ctx);
-            if va.is_zero() {
-                // b * 0 -> 0
-                Some(a)
-            } else if va.is_one() {
-                // b * 1 -> b
-                Some(b)
-            } else if let Some(log_2) = va.is_pow_2() {
-                // b * 2**log_2 -> b
-                let log_2 = ctx.bit_vec_val(log_2, va.width());
-                Some(ctx.shift_left(b, log_2))
-            } else {
-                None
+    // canonicalize 1-bit mul to and
+    if a.get_bv_type(ctx) == Some(1) {
+        Some(ctx.and(a, b))
+    } else {
+        match find_lits_commutative(ctx, a, b) {
+            Lits::Two(va, vb) => Some(ctx.bv_lit(&va.get(ctx).mul(&vb.get(ctx)))),
+            Lits::One((va, a), b) => {
+                let va = va.get(ctx);
+                if va.is_zero() {
+                    // b * 0 -> 0
+                    Some(a)
+                } else if va.is_one() {
+                    // b * 1 -> b
+                    Some(b)
+                } else if let Some(log_2) = va.is_pow_2() {
+                    // b * 2**log_2 -> b
+                    let log_2 = ctx.bit_vec_val(log_2, va.width());
+                    Some(ctx.shift_left(b, log_2))
+                } else {
+                    None
+                }
             }
+            Lits::None => None,
         }
-        Lits::None => None,
     }
 }
