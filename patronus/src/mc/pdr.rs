@@ -569,11 +569,10 @@ impl BasePdr {
     /// # Errors
     /// Returns [`UnexpectedResponse`] if any SMT query returns `UNKNOWN`
     fn intersects_init(
-        &self,
+        &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
-        enc: &impl TransitionSystemEncoding,
         assumptions: impl IntoIterator<Item = ExprRef>,
         get_unsat_core: bool,
     ) -> Result<(bool, Option<Cube>)> {
@@ -591,7 +590,14 @@ impl BasePdr {
         fin_assumps.extend(assumptions);
 
         // Run query `SAT?[R_0 /\ c]`
-        let smt_res = query(ctx, smt_ctx, sys, enc, fin_assumps, get_unsat_core)?;
+        let smt_res = query(
+            ctx,
+            smt_ctx,
+            sys,
+            &mut self.enc,
+            fin_assumps,
+            get_unsat_core,
+        )?;
 
         if smt_res.0 == CheckSatResponse::Unknown {
             // Unknown query result: return error
@@ -1001,7 +1007,7 @@ pub fn pdr(
     sys: &TransitionSystem,
     disable_unsat_cores: bool,
 ) -> Result<ModelCheckResult> {
-    let mut enc = match start_bmc_or_pdr(ctx, smt_ctx, sys)? {
+    let enc = match start_bmc_or_pdr(ctx, smt_ctx, sys)? {
         (r, None) => return Ok(r),
         (_, Some(enc)) => enc,
     };
