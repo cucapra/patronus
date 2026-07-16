@@ -280,27 +280,15 @@ struct PdrEncodingWrapper<E: TransitionSystemEncoding> {
 
 impl<E: TransitionSystemEncoding> PdrEncodingWrapper<E> {
     /// Create new [`TransitionSystemEncoding`] wrapper
-    fn new(ctx: &mut Context, smt_ctx: &mut impl SolverContext, enc: E) -> Result<Self> {
-        // Create wrapper and initialize it
-        let mut wrapper = Self {
+    fn new(ctx: &mut Context, smt_ctx: &mut impl SolverContext, mut enc: E) -> Result<Self> {
+        // Initialize encoding
+        enc.init_at(ctx, smt_ctx, FROM_STEP)?;
+        enc.unroll(ctx, smt_ctx)?;
+
+        Ok(Self {
             expr_cache: FxHashMap::default(),
             enc,
-        };
-        wrapper.reset(ctx, smt_ctx)?;
-
-        Ok(wrapper)
-    }
-
-    /// Reset the encoding by re-unrolling all signals
-    fn reset(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()> {
-        // Reset encoding
-        self.enc.init_at(ctx, smt_ctx, FROM_STEP)?;
-        self.enc.unroll(ctx, smt_ctx)?;
-
-        // Clear stepped expression cache
-        self.expr_cache.clear();
-
-        Ok(())
+        })
     }
 
     /// Step all symbol leaves in SMT expressions
