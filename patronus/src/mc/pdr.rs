@@ -5,7 +5,9 @@
 use crate::expr::*;
 use crate::mc::bmc::start_bmc_or_pdr;
 use crate::mc::encoding::TransitionSystemEncoding;
-use crate::mc::{ModelCheckResult, bmc, check_assuming, check_assuming_end, get_smt_value};
+use crate::mc::{
+    ModelCheckResult, UnrollSmtEncoding, bmc, check_assuming, check_assuming_end, get_smt_value,
+};
 use crate::smt::*;
 use crate::system::TransitionSystem;
 use baa::{BitVecOps, Value};
@@ -341,9 +343,9 @@ struct Frame {
 }
 
 /// Frame trace maintained by vanilla PDR
-struct BasePdr<E: TransitionSystemEncoding> {
+struct BasePdr {
     /// Transition system encoding
-    enc: PdrEncodingWrapper<E>,
+    enc: PdrEncodingWrapper<UnrollSmtEncoding>,
 
     /// `TO_STEP` constraints
     to_step_constraints_active: ExprRef,
@@ -361,7 +363,7 @@ struct BasePdr<E: TransitionSystemEncoding> {
     next_act_id: u64,
 }
 
-impl<E: TransitionSystemEncoding> Index<FrameId> for BasePdr<E> {
+impl Index<FrameId> for BasePdr {
     type Output = Frame;
 
     /// # Panics
@@ -375,7 +377,7 @@ impl<E: TransitionSystemEncoding> Index<FrameId> for BasePdr<E> {
     }
 }
 
-impl<E: TransitionSystemEncoding> IndexMut<FrameId> for BasePdr<E> {
+impl IndexMut<FrameId> for BasePdr {
     fn index_mut(&mut self, index: FrameId) -> &mut Self::Output {
         match index {
             FrameId::Init => panic!("Cannot index init frame"), // Init frame doesn't explicitly exist
@@ -386,7 +388,7 @@ impl<E: TransitionSystemEncoding> IndexMut<FrameId> for BasePdr<E> {
 }
 
 /// Iterator method for [`BasePdr`]
-impl<E: TransitionSystemEncoding> BasePdr<E> {
+impl BasePdr {
     fn iter(&'_ self) -> impl Iterator<Item = FrameId> + '_ {
         (1..=(self.frames.len() + 1)).map(|ii| {
             if ii <= self.frames.len() {
@@ -399,7 +401,7 @@ impl<E: TransitionSystemEncoding> BasePdr<E> {
     }
 }
 
-impl<E: TransitionSystemEncoding> BasePdr<E> {
+impl BasePdr {
     /// Initialize a PDR instance
     ///
     /// # Precondition
@@ -408,7 +410,7 @@ impl<E: TransitionSystemEncoding> BasePdr<E> {
     fn init(
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
-        enc: E,
+        enc: UnrollSmtEncoding,
         sys: &TransitionSystem,
     ) -> Result<Self> {
         // Wrap transition system encoding
