@@ -5,12 +5,13 @@
 use crate::expr::*;
 use crate::mc::bmc::start_bmc_or_pdr;
 use crate::mc::encoding::TransitionSystemEncoding;
-use crate::mc::{ModelCheckResult, bmc, check_assuming, check_assuming_end, get_smt_value};
+use crate::mc::{
+    ModelCheckResult, bmc, check_assuming, check_assuming_end, get_smt_value,
+};
 use crate::smt::*;
 use crate::system::TransitionSystem;
 use baa::{BitVecOps, Value};
 use rustc_hash::FxHashMap;
-use std::cell::RefCell;
 use std::collections::BinaryHeap;
 use std::num::NonZeroUsize;
 use std::ops::{Index, IndexMut};
@@ -176,14 +177,14 @@ fn extract_state_values(
     ctx: &mut Context,
     smt_ctx: &mut impl SolverContext,
     sys: &TransitionSystem,
-    enc: &impl TransitionSystemEncoding,
+    enc: &mut PdrEncodingWrapper<impl TransitionSystemEncoding>,
     step: Step,
 ) -> Result<Vec<(ExprRef, Value)>> {
     let mut state_vals = Vec::with_capacity(sys.states.len());
 
     // Extract exact SMT value for each system state
     for state in &sys.states {
-        let sym = enc.get_signal_at(ctx, state.symbol, step);
+        let sym = enc.expr_at_step(ctx, state.symbol, step);
         state_vals.push((state.symbol, get_smt_value(ctx, smt_ctx, sym)?));
     }
 
@@ -199,7 +200,7 @@ fn get_bit_level_cube(
     ctx: &mut Context,
     smt_ctx: &mut impl SolverContext,
     sys: &TransitionSystem,
-    enc: &impl TransitionSystemEncoding,
+    enc: &mut PdrEncodingWrapper<impl TransitionSystemEncoding>,
     step: Step,
 ) -> Result<Cube> {
     let mut literals = Vec::new();
@@ -243,7 +244,7 @@ fn query(
     ctx: &mut Context,
     smt_ctx: &mut impl SolverContext,
     sys: &TransitionSystem,
-    enc: &impl TransitionSystemEncoding,
+    enc: &mut PdrEncodingWrapper<impl TransitionSystemEncoding>,
     assumptions: impl IntoIterator<Item = ExprRef>,
 ) -> Result<(CheckSatResponse, Option<Cube>)> {
     // Run SMT query and remove SMT frame
@@ -271,7 +272,7 @@ fn query(
 struct PdrEncodingWrapper<E: TransitionSystemEncoding> {
     /// Stepped expression cache
     /// `(unstepped_expr, step) |-> stepped_expr @ step`
-    expr_cache: RefCell<FxHashMap<(ExprRef, Step), ExprRef>>,
+    expr_cache: FxHashMap<(ExprRef, Step), ExprRef>,
 
     /// Contained transition system encoding
     enc: E,
@@ -279,11 +280,27 @@ struct PdrEncodingWrapper<E: TransitionSystemEncoding> {
 
 impl<E: TransitionSystemEncoding> PdrEncodingWrapper<E> {
     /// Create new [`TransitionSystemEncoding`] wrapper
-    fn new(enc: E) -> Self {
-        Self {
-            expr_cache: RefCell::new(FxHashMap::default()),
+    fn new(ctx: &mut Context, smt_ctx: &mut impl SolverContext, enc: E) -> Result<Self> {
+        // Create wrapper and initialize it
+        let mut wrapper = PdrEncodingWrapper {
+            expr_cache: FxHashMap::default(),
             enc,
-        }
+        };
+        wrapper.reset(ctx, smt_ctx)?;
+
+        Ok(wrapper)
+    }
+
+    /// Reset the encoding by re-unrolling all signals
+    fn reset(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()> {
+        // Reset encoding
+        self.enc.init_at(ctx, smt_ctx, FROM_STEP)?;
+        self.enc.unroll(ctx, smt_ctx)?;
+
+        // Clear stepped expression cache
+        self.expr_cache.clear();
+
+        Ok(())
     }
 
     /// Step all symbol leaves in SMT expressions
@@ -291,9 +308,9 @@ impl<E: TransitionSystemEncoding> PdrEncodingWrapper<E> {
     /// # Precondition
     /// All symbols in [expr] must be unstepped, and there must exist a stepped version of each
     /// symbol at [step] (unrolled in the original [`TransitionSystemEncoding`])
-    fn expr_at_step(&self, ctx: &mut Context, expr: ExprRef, step: Step) -> ExprRef {
-        // If stepped expression already exists in cache, return cached version
-        if let Some(&sym) = self.expr_cache.borrow().get(&(expr, step)) {
+    fn expr_at_step(&mut self, ctx: &mut Context, expr: ExprRef, step: Step) -> ExprRef {
+        if let Some(&sym) = self.expr_cache.get(&(expr, step)) {
+            // If stepped expression already exists in cache, return cached version
             return sym;
         }
 
@@ -302,9 +319,6 @@ impl<E: TransitionSystemEncoding> PdrEncodingWrapper<E> {
             if ctx[e].is_symbol() {
                 // Step expression
                 let stepped = self.enc.get_signal_at(ctx, e, step);
-
-                // Add stepped expression to cache
-                self.expr_cache.borrow_mut().insert((e, step), stepped);
                 Some(stepped)
             } else {
                 None
@@ -312,7 +326,7 @@ impl<E: TransitionSystemEncoding> PdrEncodingWrapper<E> {
         });
 
         // Add final stepped expression to cache
-        self.expr_cache.borrow_mut().insert((expr, step), stepped);
+        self.expr_cache.insert((expr, step), stepped);
         stepped
     }
 }
@@ -400,7 +414,7 @@ impl<E: TransitionSystemEncoding> BasePdr<E> {
         sys: &TransitionSystem,
     ) -> Result<Self> {
         // Wrap transition system encoding
-        let wrapped_enc = PdrEncodingWrapper::new(enc);
+        let mut enc = PdrEncodingWrapper::new(ctx, smt_ctx, enc)?;
 
         let mut init_cube = Cube::tru();
 
@@ -415,7 +429,7 @@ impl<E: TransitionSystemEncoding> BasePdr<E> {
 
         // Always assert constraints at current step
         for &cons in &sys.constraints {
-            let cons_cur = wrapped_enc.expr_at_step(ctx, cons, FROM_STEP);
+            let cons_cur = enc.expr_at_step(ctx, cons, FROM_STEP);
             smt_ctx.assert(ctx, cons_cur)?;
         }
 
@@ -425,7 +439,7 @@ impl<E: TransitionSystemEncoding> BasePdr<E> {
         let cons_next_expr = sys
             .constraints
             .iter()
-            .map(|&c| wrapped_enc.expr_at_step(ctx, c, TO_STEP))
+            .map(|&c| enc.expr_at_step(ctx, c, TO_STEP))
             .collect::<Vec<_>>()
             .into_iter()
             .fold(ctx.get_true(), |acc, c| ctx.and(acc, c));
@@ -440,7 +454,7 @@ impl<E: TransitionSystemEncoding> BasePdr<E> {
 
         // Create act_0 => init_cube, where init_cube is stepped to the before step
         let init_expr = init_cube.to_expr(ctx);
-        let init_expr = wrapped_enc.expr_at_step(ctx, init_expr, FROM_STEP);
+        let init_expr = enc.expr_at_step(ctx, init_expr, FROM_STEP);
         let init_imp = ctx.implies(init_act, init_expr);
 
         // Permanently assert implication in solver
@@ -456,7 +470,7 @@ impl<E: TransitionSystemEncoding> BasePdr<E> {
         };
 
         Ok(Self {
-            enc: wrapped_enc,
+            enc,
             to_step_constraints_active: cons_act,
             init_frame: init_act,
             inf_frame,
@@ -518,7 +532,7 @@ impl<E: TransitionSystemEncoding> BasePdr<E> {
     /// Run relative inductiveness query
     /// (i.e. `SAT?[R_{i - 1} /\ \neg c /\ T c']`)
     fn rel_ind(
-        &self,
+        &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
@@ -548,7 +562,7 @@ impl<E: TransitionSystemEncoding> BasePdr<E> {
         assumptions.push(self.to_step_constraints_active);
 
         // Run SMT query
-        query(ctx, smt_ctx, sys, &self.enc.enc, assumptions)
+        query(ctx, smt_ctx, sys, &mut self.enc, assumptions)
     }
 
     /// Frame identifier for frontier frame
@@ -569,7 +583,7 @@ impl<E: TransitionSystemEncoding> BasePdr<E> {
     /// # Errors
     /// In cases of `Unknown` SMT queries, return [`Error::UnexpectedResponse`]
     fn get_bad_cube(
-        &self,
+        &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
@@ -600,7 +614,7 @@ impl<E: TransitionSystemEncoding> BasePdr<E> {
             ctx,
             smt_ctx,
             sys,
-            &self.enc.enc,
+            &mut self.enc,
             vec![front_assumption, bad_expr, neg_cons],
         )? {
             (CheckSatResponse::Sat, Some(cube)) => {
@@ -804,7 +818,7 @@ impl<E: TransitionSystemEncoding> BasePdr<E> {
                 ctx,
                 smt_ctx,
                 sys,
-                &self.enc.enc,
+                &mut self.enc,
                 vec![
                     inf_assumption,
                     clause_cur,
@@ -845,10 +859,6 @@ pub fn pdr(
         (r, None) => return Ok(r),
         (_, Some(enc)) => enc,
     };
-
-    // Initialize two-step variables in solver
-    enc.init_at(ctx, smt_ctx, FROM_STEP)?;
-    enc.unroll(ctx, smt_ctx)?;
 
     // Initialize PDR
     let mut state = BasePdr::init(ctx, smt_ctx, enc, sys)?;
