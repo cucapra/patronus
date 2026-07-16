@@ -5,9 +5,7 @@
 use crate::expr::*;
 use crate::mc::bmc::start_bmc_or_pdr;
 use crate::mc::encoding::TransitionSystemEncoding;
-use crate::mc::{
-    ModelCheckResult, bmc, check_assuming, check_assuming_end, get_smt_value,
-};
+use crate::mc::{ModelCheckResult, bmc, check_assuming, check_assuming_end, get_smt_value};
 use crate::smt::*;
 use crate::system::TransitionSystem;
 use baa::{BitVecOps, Value};
