@@ -569,11 +569,10 @@ impl BasePdr {
     /// # Errors
     /// Returns [`UnexpectedResponse`] if any SMT query returns `UNKNOWN`
     fn intersects_init(
-        &self,
+        &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
         sys: &TransitionSystem,
-        enc: &impl TransitionSystemEncoding,
         assumptions: impl IntoIterator<Item = ExprRef>,
         get_unsat_core: bool,
     ) -> Result<(bool, Option<Cube>)> {
@@ -591,7 +590,14 @@ impl BasePdr {
         fin_assumps.extend(assumptions);
 
         // Run query `SAT?[R_0 /\ c]`
-        let smt_res = query(ctx, smt_ctx, sys, enc, fin_assumps, get_unsat_core)?;
+        let smt_res = query(
+            ctx,
+            smt_ctx,
+            sys,
+            &mut self.enc,
+            fin_assumps,
+            get_unsat_core,
+        )?;
 
         if smt_res.0 == CheckSatResponse::Unknown {
             // Unknown query result: return error
@@ -643,10 +649,6 @@ impl BasePdr {
 
         // Next step cube (expressed as `TO_STEP` literals)
         assumptions.extend(lit_map.keys());
-        // Next step cube
-        let cube_expr = cube.cube.to_expr(ctx);
-        let cube_next = self.enc.expr_at_step(ctx, cube_expr, TO_STEP);
-        assumptions.push(cube_next);
 
         // Current step negation cube
         if query_type == RelIndType::Extended {
@@ -737,18 +739,6 @@ impl BasePdr {
     ) -> Result<Option<Cube>> {
         // Get frontier frame identifier
         let front = self.frontier();
-
-        // Get next-state bad state literals
-        let bad_lits: Vec<ExprRef> = sys
-            .bad_states
-            .iter()
-            .map(|&b| self.enc.expr_at_step(ctx, b, FROM_STEP))
-            .collect();
-
-        // Disjunct all bad state literals
-        let bad_expr = bad_lits
-            .iter()
-            .fold(ctx.get_false(), |acc, &b| ctx.or(acc, b));
 
         // Get frame assumptions for frontier frame
         let front_assumption = self.frame_assumptions(ctx, front);
@@ -875,7 +865,7 @@ impl BasePdr {
                     test_cube.frame = test_cube.frame.decrement();
 
                     // Refine frame trace with cube
-                    self[test_cube.frame].add_blocked_cube(ctx, smt_ctx, enc, test_cube.cube)?;
+                    self.add_blocked_cube(ctx, smt_ctx, test_cube)?;
                 }
                 (CheckSatResponse::Unknown, _) => {
                     return Err(Error::UnexpectedResponse(
@@ -1017,13 +1007,13 @@ pub fn pdr(
     sys: &TransitionSystem,
     disable_unsat_cores: bool,
 ) -> Result<ModelCheckResult> {
-    let mut enc = match start_bmc_or_pdr(ctx, smt_ctx, sys)? {
+    let enc = match start_bmc_or_pdr(ctx, smt_ctx, sys)? {
         (r, None) => return Ok(r),
         (_, Some(enc)) => enc,
     };
 
     // Initialize PDR
-    let mut state = BasePdr::init(ctx, smt_ctx, enc, sys)?;
+    let mut state = BasePdr::init(ctx, smt_ctx, enc, sys, disable_unsat_cores)?;
 
     let limit = FrameId::Finite(NonZeroUsize::new(MAX_FRAMES).unwrap());
 
