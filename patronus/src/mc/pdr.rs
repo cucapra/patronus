@@ -280,7 +280,7 @@ impl<E: TransitionSystemEncoding> PdrEncodingWrapper<E> {
     /// Create new [`TransitionSystemEncoding`] wrapper
     fn new(ctx: &mut Context, smt_ctx: &mut impl SolverContext, enc: E) -> Result<Self> {
         // Create wrapper and initialize it
-        let mut wrapper = PdrEncodingWrapper {
+        let mut wrapper = Self {
             expr_cache: FxHashMap::default(),
             enc,
         };
