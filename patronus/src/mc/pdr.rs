@@ -576,7 +576,7 @@ impl BasePdr {
 
         if smt_res.0 == CheckSatResponse::Unknown {
             // Unknown query result: return error
-            Err(UnexpectedResponse(
+            Err(Error::UnexpectedResponse(
                 "`intersects_init` in `BasePdr`".into(),
                 "unknown query".into(),
             ))
@@ -739,7 +739,10 @@ impl BasePdr {
             (CheckSatResponse::Unsat, _) => Ok(None), // No safety property violation found
             (CheckSatResponse::Unknown, _) => Err(
                 // Unknown query result: return error for soundness
-                UnexpectedResponse("`get_bad_cube` in `BasePdr`".into(), "unknown query".into()),
+                Error::UnexpectedResponse(
+                    "`get_bad_cube` in `BasePdr`".into(),
+                    "unknown query".into(),
+                ),
             ),
             _ => unreachable!(),
         }
@@ -823,7 +826,7 @@ impl BasePdr {
                     self[test_cube.frame].add_blocked_cube(ctx, smt_ctx, enc, test_cube.cube)?;
                 }
                 (CheckSatResponse::Unknown, _) => {
-                    return Err(UnexpectedResponse(
+                    return Err(Error::UnexpectedResponse(
                         "`block_cube` in `BasePdr`".into(),
                         "unknown query".into(),
                     ));
