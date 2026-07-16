@@ -595,7 +595,7 @@ impl BasePdr {
 
         if smt_res.0 == CheckSatResponse::Unknown {
             // Unknown query result: return error
-            Err(UnexpectedResponse(
+            Err(Error::UnexpectedResponse(
                 "`intersects_init` in `BasePdr`".into(),
                 "unknown query".into(),
             ))
@@ -862,7 +862,7 @@ impl BasePdr {
                     self.add_blocked_cube(ctx, smt_ctx, test_cube)?;
                 }
                 (CheckSatResponse::Unknown, _) => {
-                    return Err(UnexpectedResponse(
+                    return Err(Error::UnexpectedResponse(
                         "`block_cube` in `BasePdr`".into(),
                         "unknown query".into(),
                     ));
