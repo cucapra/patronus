@@ -184,7 +184,7 @@ fn extract_state_values(
 
     // Extract exact SMT value for each system state
     for state in &sys.states {
-        let sym = self.enc.expr_at_step(ctx, state.symbol, step);
+        let sym = enc.expr_at_step(ctx, state.symbol, step);
         state_vals.push((state.symbol, get_smt_value(ctx, smt_ctx, sym)?));
     }
 
@@ -200,7 +200,7 @@ fn get_bit_level_cube(
     ctx: &mut Context,
     smt_ctx: &mut impl SolverContext,
     sys: &TransitionSystem,
-    enc: &impl TransitionSystemEncoding,
+    enc: &mut PdrEncodingWrapper<impl TransitionSystemEncoding>,
     step: Step,
 ) -> Result<Cube> {
     let mut literals = Vec::new();
@@ -450,7 +450,7 @@ impl BasePdr {
         let bad_from_expr = sys
             .bad_states
             .iter()
-            .map(|&b| self.enc.expr_at_step(ctx, b, FROM_STEP))
+            .map(|&b| enc.expr_at_step(ctx, b, FROM_STEP))
             .collect::<Vec<_>>()
             .into_iter()
             .fold(ctx.get_false(), |acc, b| ctx.or(acc, b));
@@ -466,7 +466,7 @@ impl BasePdr {
         let cons_to_expr = sys
             .constraints
             .iter()
-            .map(|&c| self.enc.expr_at_step(ctx, c, TO_STEP))
+            .map(|&c| enc.expr_at_step(ctx, c, TO_STEP))
             .collect::<Vec<_>>()
             .into_iter()
             .fold(ctx.get_true(), |acc, c| ctx.and(acc, c));
@@ -688,10 +688,10 @@ impl BasePdr {
 
             // Step cube as expression at `FROM_STEP`
             let gen_expr = gen_cube.to_expr(ctx);
-            let gen_from = expr_at_step(ctx, enc, gen_expr, FROM_STEP);
+            let gen_from = self.enc.expr_at_step(ctx, gen_expr, FROM_STEP);
 
             if self
-                .intersects_init(ctx, smt_ctx, sys, enc, [gen_from], false)?
+                .intersects_init(ctx, smt_ctx, sys, [gen_from], false)?
                 .0
             {
                 // Generalized cube intersects with the initial states; adding it to the
@@ -826,7 +826,7 @@ impl BasePdr {
             }
 
             // Try to get counterexample relative to last frame
-            let smt_res = self.rel_ind(ctx, smt_ctx, sys, enc, &obj, RelIndType::Extended)?;
+            let smt_res = self.rel_ind(ctx, smt_ctx, sys, &obj, RelIndType::Extended)?;
 
             match smt_res {
                 (CheckSatResponse::Sat, Some(cube)) => {
@@ -1011,10 +1011,6 @@ pub fn pdr(
         (r, None) => return Ok(r),
         (_, Some(enc)) => enc,
     };
-
-    // Initialize two-step variables in solver
-    enc.init_at(ctx, smt_ctx, FROM_STEP)?;
-    enc.unroll(ctx, smt_ctx)?;
 
     // Initialize PDR
     let mut state = BasePdr::init(ctx, smt_ctx, enc, sys, disable_unsat_cores)?;
