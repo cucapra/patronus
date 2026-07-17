@@ -851,15 +851,15 @@ impl BasePdr {
                         frame: obj.frame.increment(),
                     };
 
-                // Push cube as far as possible in the frame trace
-                while test_cube.frame <= self.frontier()
-                    && self
-                        .rel_ind(ctx, smt_ctx, sys, &test_cube, RelIndType::Extended)?
-                        .0
-                        == CheckSatResponse::Unsat
-                {
-                    test_cube.frame = test_cube.frame.increment();
-                }
+                    // Push cube as far as possible in the frame trace
+                    while test_cube.frame <= self.frontier()
+                        && self
+                            .rel_ind(ctx, smt_ctx, sys, &test_cube, RelIndType::Extended)?
+                            .0
+                            == CheckSatResponse::Unsat
+                    {
+                        test_cube.frame = test_cube.frame.increment();
+                    }
 
                     // Restore "working" frame
                     test_cube.frame = test_cube.frame.decrement();
