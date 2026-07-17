@@ -35,6 +35,8 @@ struct Args {
     skip_simplify: bool,
     #[arg(short, long)]
     dump_smt: bool,
+    #[arg(long, help = "disable UNSAT core generalization (for PDR engine only)")]
+    disable_unsat_cores: bool,
     #[arg(value_name = "BTOR2", index = 1)]
     filename: String,
 }
@@ -65,6 +67,15 @@ fn main() {
             .exit();
     }
     let kmax = args.kmax.unwrap_or(25);
+
+    if args.disable_unsat_cores && args.engine != ModelCheckEngine::Pdr {
+        Args::command()
+            .error(
+                ErrorKind::ArgumentConflict,
+                "--disable-unsat-cores can only be used with the pdr engine (--engine pdr)",
+            )
+            .exit();
+    }
 
     let (mut ctx, mut sys) = btor2::parse_file(&args.filename).expect("Failed to load btor2 file!");
     if !args.skip_simplify {
@@ -117,7 +128,20 @@ fn main() {
             check_bad_states_individually,
             k_max,
         ),
-        ModelCheckEngine::Pdr => pdr(&mut ctx, &mut smt_ctx, &sys),
+        ModelCheckEngine::Pdr => {
+            // Automatically disable UNSAT core generalization if solver does not support `(get-unsat-assumptions)`
+            let disable_unsat_cores = args.disable_unsat_cores || !solver.supports_get_unsat_assumptions();
+
+            // Print out message in verbose mode to remind client
+            if args.verbose && !solver.supports_get_unsat_assumptions() {
+                eprintln!(
+                    "{} does not support `(get-unsat-assumptions)`; disabling UNSAT core generalization...",
+                    solver.name()
+                );
+            }
+
+            pdr(&mut ctx, &mut smt_ctx, &sys, disable_unsat_cores)
+        }
     }
     .unwrap();
     match res {

@@ -489,7 +489,12 @@ pub const YICES2: SmtLibSolver = SmtLibSolver {
 
 pub const Z3: SmtLibSolver = SmtLibSolver {
     name: "z3",
-    args: &["-in"],
+    // `pp.min_alias_size`/`pp.max_depth` disable Z3's pretty-printer
+    args: &[
+        "-in",
+        "pp.min_alias_size=4294967295",
+        "pp.max_depth=4294967295",
+    ],
     options: &["produce-unsat-assumptions"],
     supports_uf: true,
     supports_check_assuming: true,
