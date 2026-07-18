@@ -930,7 +930,13 @@ impl BasePdr {
         // Try to solve all proof obligations
         while let Some(obj) = worklist.pop() {
             // If proof obligation intersects with initial states, blocking fails
-            if obj.frame == FrameId::Init {
+            let cube_expr = obj.cube.to_expr(ctx);
+            let cube_from = self.enc.expr_at_step(ctx, cube_expr, FROM_STEP);
+            if obj.frame == FrameId::Init
+                || self
+                    .intersects_init(ctx, smt_ctx, sys, [cube_from], false)?
+                    .0
+            {
                 return Ok(false);
             }
 
