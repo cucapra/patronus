@@ -614,6 +614,9 @@ impl BasePdr {
     /// "Fix" generalized cube by restoring enough removed literals until non-intersection
     /// with initial states
     ///
+    /// Follows implementation by Stanford Pono (<https://github.com/stanford-centaur/pono/blob/main/engines/ic3base.cpp#L929>)
+    /// and SMT-Switch (<https://github.com/stanford-centaur/smt-switch/blob/main/src/utils.cpp#L993>)
+    ///
     /// # Errors
     /// Returns [`Error::UnexpectedResponse`] if any SMT query returns `UNKNOWN` or original cube
     /// truly intersects the initial states
@@ -790,8 +793,7 @@ impl BasePdr {
             let gen_lits = genr
                 .literals
                 .iter()
-                .filter(|e| lit_map.contains_key(e))
-                .map(|e| lit_map[e])
+                .filter_map(|&lit| lit_map.get(&lit).copied())
                 .collect::<FxHashSet<_>>();
 
             // Literals not in UNSAT core
