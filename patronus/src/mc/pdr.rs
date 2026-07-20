@@ -10,8 +10,8 @@ use crate::mc::{
 };
 use crate::smt::*;
 use crate::system::TransitionSystem;
-use baa::{ArrayOps, BitVecOps, BitVecValue, Value};
 use rustc_hash::{FxHashMap, FxHashSet};
+use baa::{ArrayOps, BitVecOps, BitVecValue, Value};
 use std::collections::BinaryHeap;
 use std::num::NonZeroUsize;
 use std::ops::{Index, IndexMut};
