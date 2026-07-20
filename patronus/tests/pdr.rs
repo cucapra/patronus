@@ -299,9 +299,12 @@ fn case_quiz4_sat(solver: &SmtLibSolver) {
 }
 
 fn case_const_array(solver: &SmtLibSolver) {
-    let Some((ctx, sys, res)) =
-        run_pdr_file(solver, "../inputs/chiseltest/const_array_example.btor", None, false)
-    else {
+    let Some((ctx, sys, res)) = run_pdr_file(
+        solver,
+        "../inputs/chiseltest/const_array_example.btor",
+        None,
+        false,
+    ) else {
         return;
     };
 
