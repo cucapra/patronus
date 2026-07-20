@@ -232,6 +232,9 @@ fn get_bit_level_cube(
                 let iw = av.index_width();
                 let dw = av.data_width();
 
+                // Make sure that no overflow occurs in iteration
+                assert!(iw < 64);
+
                 // Iterate over all array elements
                 for idx in 0u64..(1 << iw) {
                     // Read bit-vector value
