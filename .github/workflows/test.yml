@@ -58,8 +58,86 @@ jobs:
       env:
         PATRONUS_TEST_SOLVER: ${{ matrix.solver }}
 
-  mc:
-    name: Test MC Tool
+  pdr:
+    name: Test MC Tool with PDR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        toolchain:
+          - stable
+        solver:
+          - bitwuzla
+          - cvc5
+          - z3
+        engine:
+          - pdr
+
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set Up Z3
+        if: ${{ matrix.solver == 'z3' }}
+        uses: ./.github/workflows/setup-z3
+        with:
+          version: ${{ env.Z3_VERSION }}
+      - name: Set Up CVC5
+        if: ${{ matrix.solver == 'cvc5' }}
+        uses: ./.github/workflows/setup-cvc5
+        with:
+          version: ${{ env.CVC5_VERSION }}
+      - name: Set Up Yices
+        if: ${{ matrix.solver == 'yices2' }}
+        uses: ./.github/workflows/setup-yices
+        with:
+          version: ${{ env.YICES_VERSION }}
+      - name: Set Up Bitwuzla
+        if: ${{ matrix.solver == 'bitwuzla' }}
+        uses: ./.github/workflows/setup-bitwuzla
+        with:
+          version: ${{ env.BITWUZLA_VERSION }}
+      - name: Install btor sim
+        run: |
+          mkdir /tmp/btor
+          cd /tmp/btor
+          git clone https://github.com/hwmcc/btor2tools.git
+          cd btor2tools
+          ./configure.sh
+          cd build
+          make
+          echo "/tmp/btor/btor2tools/build/bin/" >> "$GITHUB_PATH"
+      - name: Update Rust to ${{ matrix.toolchain }}
+        run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
+      - name: Build
+        run: cargo build --verbose --release -p mc
+      - name: mc Quiz1
+        run: |
+          cargo run --release -p mc -- --engine=${{ matrix.engine }} --solver=${{ matrix.solver }} inputs/chiseltest/Quiz1.btor > Quiz1.wit
+          btorsim inputs/chiseltest/Quiz1.btor Quiz1.wit
+      - name: mc Quiz1 (with additional assumption)
+        run: |
+          cargo run --release -p mc -- --engine=${{ matrix.engine }} --solver=${{ matrix.solver }} inputs/chiseltest/Quiz1.unsat.btor
+      - name: mc const array example
+        if: ${{ matrix.solver != 'yices2' }} # yices2 returns memory values that cannot be parsed
+        run: |
+          cargo run --release -p mc -- --engine=${{ matrix.engine }} --solver=${{ matrix.solver }} inputs/chiseltest/const_array_example.btor > const_array_example.wit
+          btorsim inputs/chiseltest/const_array_example.btor const_array_example.wit
+      - name: mc Quiz2
+        run: |
+          cargo run --release -p mc -- --engine=${{ matrix.engine }} --solver=${{ matrix.solver }} inputs/chiseltest/Quiz2.sat.btor > Quiz2.sat.wit
+          btorsim inputs/chiseltest/Quiz2.sat.btor Quiz2.sat.wit
+      - name: mc Quiz2 (with counter reset value)
+        run: |
+          cargo run --release -p mc -- --engine=${{ matrix.engine }} --solver=${{ matrix.solver }} inputs/chiseltest/Quiz2.unsat.btor
+      - name: mc Quiz4
+        run: |
+          cargo run --release -p mc -- --engine=${{ matrix.engine }} --solver=${{ matrix.solver }} inputs/chiseltest/Quiz4.sat.btor > Quiz4.sat.wit
+          btorsim inputs/chiseltest/Quiz4.sat.btor Quiz4.sat.wit
+      - name: mc Quiz4 (with counter reset value)
+        run: |
+          cargo run --release -p mc -- --engine=${{ matrix.engine }} --solver=${{ matrix.solver }} inputs/chiseltest/Quiz4.unsat.btor
+
+  bmc:
+    name: Test MC Tool with BMC
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -73,7 +151,6 @@ jobs:
           - z3
         engine:
           - bmc
-          - pdr
 
     steps:
       - uses: actions/checkout@v5
