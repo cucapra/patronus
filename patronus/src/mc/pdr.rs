@@ -638,41 +638,38 @@ impl BasePdr {
             return Ok(gen_cube);
         }
 
-        // Create activation literals for original cube literals (predicates) that were
-        // dropped during generalization
-        let mut lit_map = FxHashMap::default();
-        for lit in rm_lits {
-            // Create activation literal implication
-            let act = self.create_act_lit(ctx, smt_ctx)?;
-            let expr_from = self.enc.expr_at_step(ctx, lit, FROM_STEP);
-            let imp = ctx.implies(act, expr_from);
+        // activation literals for literals that were originally dropped during UNSAT core generalization
+        let mut literals: Vec<_> = rm_lits
+            .into_iter()
+            .map(|lit| {
+                // Create activation literal implication
+                let act = self.create_act_lit(ctx, smt_ctx)?;
+                let expr_from = self.enc.expr_at_step(ctx, lit, FROM_STEP);
+                let imp = ctx.implies(act, expr_from);
 
-            // Assert in solver
-            smt_ctx.assert(ctx, imp)?;
+                // Assert in solver
+                smt_ctx.assert(ctx, imp)?;
 
-            // Add mapping
-            lit_map.insert(act, lit);
-        }
+                Ok((act, lit))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         // Flag for first iteration
         let mut first_iter = true;
 
-        // Original generalized cube at `FROM_STEP`
-        let cube_expr = gen_cube.to_expr(ctx);
-        let cube_from = self.enc.expr_at_step(ctx, cube_expr, FROM_STEP);
-
         loop {
             // Gather activation literals of original cube literals that could be dropped
-            let mut assumps = lit_map.keys().copied().collect::<Vec<_>>();
+            let mut assumps: Vec<_> = literals.iter().map(|(act, _)| *act).collect();
 
             // Add original generalized cube to assumption
             assumps.push(cube_from);
 
-            let check_res = self.intersects_init(ctx, smt_ctx, sys, assumps, true)?;
+            let (cube_intersects_init, maybe_cube) =
+                self.intersects_init(ctx, smt_ctx, sys, assumps, true)?;
 
-            if check_res.0 && first_iter {
+            if cube_intersects_init && first_iter {
                 // Clean up activation literals
-                for &act in lit_map.keys() {
+                for &(act, _) in literals.iter() {
                     let neg_act = ctx.not(act);
                     smt_ctx.assert(ctx, neg_act)?;
                 }
@@ -685,33 +682,35 @@ impl BasePdr {
             }
 
             // All removed literals should not be in UNSAT core
-            assert!(!check_res.0);
+            assert!(!cube_intersects_init, "we should never remove too much");
 
-            // Store previous number of literals
-            let prev_acts = lit_map.keys().copied().collect::<Vec<_>>();
+            // remember length to check whether anything was removed
+            let prev_literals_len = literals.len();
 
             // Collect all literals in the UNSAT core
-            let ex_cube = check_res.1.unwrap();
-            let gen_lits = ex_cube.literals.iter().collect::<FxHashSet<_>>();
+            let gen_lits = maybe_cube
+                .unwrap()
+                .literals
+                .into_iter()
+                .collect::<FxHashSet<_>>();
 
-            // Remove all candidate literals not in UNSAT core
-            lit_map.retain(|e, _| gen_lits.contains(e));
-
-            // Permanently disable literals that were removed
-            for &act in &prev_acts {
-                if !lit_map.contains_key(&act) {
-                    let neg_act = ctx.not(act);
-                    smt_ctx.assert(ctx, neg_act)?;
+            // remove anything not in the UNSAT core; this maintains non-intersection
+            literals.retain(|(act, _)| {
+                let retain = gen_lits.contains(act);
+                // remove from SMT solver
+                if !retain {
+                    let neg_act = ctx.not(*act);
+                    smt_ctx.assert(ctx, neg_act).unwrap();
                 }
-            }
+                retain
+            });
 
-            if lit_map.len() == prev_acts.len() {
+            if literals.len() == prev_literals_len {
                 // If no literals are removed, then fixpoint reached
                 let mut fin_lits = gen_cube.literals;
-                fin_lits.extend(lit_map.values().copied());
-
-                // Clean up activation literals
-                for &act in lit_map.keys() {
+                for (act, lit) in literals {
+                    fin_lits.push(lit);
+                    // Clean up activation literals
                     let neg_act = ctx.not(act);
                     smt_ctx.assert(ctx, neg_act)?;
                 }
