@@ -10,8 +10,8 @@ use crate::mc::{
 };
 use crate::smt::*;
 use crate::system::TransitionSystem;
+use rustc_hash::{FxHashMap, FxHashSet};
 use baa::{ArrayOps, BitVecOps, BitVecValue, Value};
-use rustc_hash::FxHashMap;
 use std::collections::BinaryHeap;
 use std::num::NonZeroUsize;
 use std::ops::{Index, IndexMut};
@@ -203,7 +203,7 @@ fn get_bit_level_cube(
     enc: &mut PdrEncodingWrapper<impl TransitionSystemEncoding>,
     step: Step,
 ) -> Result<Cube> {
-    let mut literals = vec![];
+    let mut literals = Vec::new();
 
     // Get state values
     let vals = extract_state_values(ctx, smt_ctx, sys, enc, step)?;
