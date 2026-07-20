@@ -59,7 +59,7 @@ jobs:
         PATRONUS_TEST_SOLVER: ${{ matrix.solver }}
 
   mc:
-    name: Test MC Tool with BMC
+    name: Test MC Tool
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -73,6 +73,7 @@ jobs:
           - z3
         engine:
           - bmc
+          - pdr
 
     steps:
       - uses: actions/checkout@v5
