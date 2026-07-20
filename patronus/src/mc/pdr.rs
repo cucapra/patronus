@@ -10,7 +10,7 @@ use crate::mc::{
 };
 use crate::smt::*;
 use crate::system::TransitionSystem;
-use baa::{BitVecOps, Value};
+use baa::{ArrayOps, BitVecOps, BitVecValue, Value};
 use rustc_hash::FxHashMap;
 use std::collections::BinaryHeap;
 use std::num::NonZeroUsize;
@@ -203,7 +203,7 @@ fn get_bit_level_cube(
     enc: &mut PdrEncodingWrapper<impl TransitionSystemEncoding>,
     step: Step,
 ) -> Result<Cube> {
-    let mut literals = Vec::new();
+    let mut literals = vec![];
 
     // Get state values
     let vals = extract_state_values(ctx, smt_ctx, sys, enc, step)?;
@@ -217,8 +217,7 @@ fn get_bit_level_cube(
                 // Get bitvector width
                 let width = bv.width();
 
-                // Iterate through all bits of the bitvector
-                // and assign bit-level equalities to concrete value
+                // Push all bit-vector bits
                 for idx in 0..width {
                     let bit = ctx.slice(sym, idx, idx);
                     let lit = if bv.is_bit_set(idx) {
@@ -229,7 +228,32 @@ fn get_bit_level_cube(
                     literals.push(lit);
                 }
             }
-            Value::Array(_av) => todo!("Add array support"),
+            Value::Array(av) => {
+                let iw = av.index_width();
+                let dw = av.data_width();
+
+                // Iterate over all array elements
+                for idx in 0u64..(1 << iw) {
+                    // Read bit-vector value
+                    let idx_val = BitVecValue::from_u64(idx, iw);
+                    let bv = av.select(&idx_val);
+
+                    // Read bit-vector symbol
+                    let idx_expr = ctx.bit_vec_val(idx, iw);
+                    let bv_expr = ctx.array_read(sym, idx_expr);
+
+                    // Push all bit-vector bits
+                    for idx in 0..dw {
+                        let bit = ctx.slice(bv_expr, idx, idx);
+                        let lit = if bv.is_bit_set(idx) {
+                            bit
+                        } else {
+                            ctx.not(bit)
+                        };
+                        literals.push(lit);
+                    }
+                }
+            }
         }
     }
 
