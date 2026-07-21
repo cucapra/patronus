@@ -203,8 +203,7 @@ const NEG_LINES: &str = r"
 #[test]
 fn parse_neg_nodes() {
     let mut ctx = Context::default();
-    let sys =
-        btor2::parse_str(&mut ctx, NEG_LINES, Some("neg_lines")).unwrap();
+    let sys = btor2::parse_str(&mut ctx, NEG_LINES, Some("neg_lines")).unwrap();
 
     insta::assert_snapshot!(sys.serialize_to_str(&ctx));
 }
@@ -224,8 +223,7 @@ const LARGE_LINES: &str = r"
 #[test]
 fn parse_large_line() {
     let mut ctx = Context::default();
-    let sys =
-        btor2::parse_str(&mut ctx, LARGE_LINES, Some("large_lines")).unwrap();
+    let sys = btor2::parse_str(&mut ctx, LARGE_LINES, Some("large_lines")).unwrap();
 
     insta::assert_snapshot!(sys.serialize_to_str(&ctx));
 }
@@ -252,8 +250,7 @@ const COMPLEX_NEG_LINES: &str = r"
 #[test]
 fn complex_parse_neg_nodes() {
     let mut ctx = Context::default();
-    let sys =
-        btor2::parse_str(&mut ctx, COMPLEX_NEG_LINES, Some("complex_neg_lines")).unwrap();
+    let sys = btor2::parse_str(&mut ctx, COMPLEX_NEG_LINES, Some("complex_neg_lines")).unwrap();
 
     insta::assert_snapshot!(sys.serialize_to_str(&ctx));
 }
@@ -320,7 +317,13 @@ const OVERFLOW_LINE_NUM_NEG: &str = r"
 
 #[test]
 fn parse_neg_nodes_errors() {
-    for test in [NON_BOOL_NEG_LINE, NEG_LINE_TYPE, NEG_LINE_NUM, OVERFLOW_LINE_NUM, OVERFLOW_LINE_NUM_NEG] {
+    for test in [
+        NON_BOOL_NEG_LINE,
+        NEG_LINE_TYPE,
+        NEG_LINE_NUM,
+        OVERFLOW_LINE_NUM,
+        OVERFLOW_LINE_NUM_NEG,
+    ] {
         let mut ctx = Context::default();
         assert!(btor2::parse_str(&mut ctx, test, Some("error_test")).is_none());
     }

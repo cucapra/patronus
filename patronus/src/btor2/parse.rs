@@ -155,7 +155,11 @@ impl<'a> Parser<'a> {
         // the first token should be an _non-negative integer_ ID
         let (line_id, not) = self.parse_line_id(line, tokens[0])?;
         if not {
-            return self.add_error(line, tokens[0], "Line numbers must be non-negative integers.".to_owned());
+            return self.add_error(
+                line,
+                tokens[0],
+                "Line numbers must be non-negative integers.".to_owned(),
+            );
         }
 
         // make sure that there is a second token following the id
@@ -569,15 +573,15 @@ impl<'a> Parser<'a> {
                 Err(())
             }
             Some(id) => {
-               if id > i64::from(LineId::MAX) || id < -i64::from(LineId::MAX) {
-                   // If line ID is overflows in [`LineId`], return parse error
-                   let _ = self.add_error(
-                       line,
-                       token,
-                       "Expected non-negative integer ID or negated ID".to_owned(),
-                   );
-                   return Err(());
-               }
+                if id > i64::from(LineId::MAX) || id < -i64::from(LineId::MAX) {
+                    // If line ID is overflows in [`LineId`], return parse error
+                    let _ = self.add_error(
+                        line,
+                        token,
+                        "Expected non-negative integer ID or negated ID".to_owned(),
+                    );
+                    return Err(());
+                }
 
                 Ok((id.abs() as LineId, id.is_negative()))
             }
@@ -691,7 +695,7 @@ impl<'a> Parser<'a> {
         if let Some(signal) = self.signal_map.get(&signal_id)
             && !(not && signal.get_type(self.ctx) != Type::BV(1))
         {
-            Ok(if not { self.ctx.not(*signal) } else { *signal } )
+            Ok(if not { self.ctx.not(*signal) } else { *signal })
         } else {
             let _ = self.add_error(
                 line,
