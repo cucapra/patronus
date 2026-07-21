@@ -26,6 +26,9 @@ pub trait Simulator {
     /// Change the value or an expression in the simulator.
     fn set<'a>(&mut self, expr: ExprRef, value: impl Into<BitVecValueRef<'a>>);
 
+    /// Change the value of an array expression in the simulator.
+    fn set_array(&mut self, expr: ExprRef, value: ArrayValue);
+
     /// Inspect the value of any expression in the circuit
     fn get(&self, expr: ExprRef) -> Value;
 
