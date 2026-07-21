@@ -1,0 +1,10 @@
+---
+source: patronus/tests/btor2_test.rs
+expression: sys.serialize_to_str(&ctx)
+---
+neg_lines
+output out : bv<1> = and(not(first), sec)
+state first : bv<1>
+  [init] 1'b0
+state sec : bv<1>
+  [init] 1'b0

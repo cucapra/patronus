@@ -2,6 +2,7 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@berkeley.edu>
 
+use crate::expr::Type::BV;
 use crate::expr::*;
 use crate::system::transform::do_transform;
 use crate::system::*;
@@ -152,8 +153,11 @@ impl<'a> Parser<'a> {
             return Ok(());
         }
 
-        // the first token should be an ID
-        let line_id = self.parse_line_id(line, tokens[0])?;
+        // the first token should be an _non-negative integer_ ID
+        let (line_id, not) = self.parse_line_id(line, tokens[0])?;
+        if not {
+            return self.add_error(line, tokens[0], "Line numbers must be non-negative integers.".to_owned());
+        }
 
         // make sure that there is a second token following the id
         let op: &str = match tokens.get(1) {
@@ -553,18 +557,20 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn parse_line_id(&mut self, line: &str, token: &str) -> ParseLineResult<LineId> {
-        match token.parse::<LineId>().ok() {
-            None => {
+    /// # Returns
+    /// (Parse line id, whether line ID was negated)
+    fn parse_line_id(&mut self, line: &str, token: &str) -> ParseLineResult<(LineId, bool)> {
+        token.parse::<i64>().map_or_else(
+            |_| {
                 let _ = self.add_error(
                     line,
                     token,
-                    "Expected valid non-negative integer ID.".to_owned(),
+                    "Expected non-negative integer ID or negated ID".to_owned(),
                 );
                 Err(())
-            }
-            Some(id) => Ok(id),
-        }
+            },
+            |id| Ok((id.abs() as LineId, id < 0)),
+        )
     }
 
     fn parse_ones(&mut self, line: &str, tokens: &[&str]) -> ParseLineResult<(ExprRef, usize)> {
@@ -635,49 +641,54 @@ impl<'a> Parser<'a> {
     }
 
     fn get_tpe_from_id(&mut self, line: &str, token: &str) -> ParseLineResult<Type> {
-        let tpe_id = self.parse_line_id(line, token)?;
-        match self.type_map.get(&tpe_id) {
-            None => {
-                let _ = self.add_error(
-                    line,
-                    token,
-                    format!("ID `{tpe_id}` does not point to a valid type!"),
-                );
-                Err(())
-            }
-            Some(tpe) => Ok(*tpe),
+        let (tpe_id, not) = self.parse_line_id(line, token)?;
+
+        // Make sure that types are never negated
+        if !not && let Some(tpe) = self.type_map.get(&tpe_id) {
+            Ok(*tpe)
+        } else {
+            let _ = self.add_error(
+                line,
+                token,
+                format!("ID `{tpe_id}` does not point to a valid type!"),
+            );
+            Err(())
         }
     }
 
     fn get_state_from_id(&mut self, line: &str, token: &str) -> ParseLineResult<StateRef> {
-        let state_id = self.parse_line_id(line, token)?;
-        match self.state_map.get(&state_id) {
-            None => {
-                let _ = self.add_error(
-                    line,
-                    token,
-                    format!("ID `{state_id}` does not point to a valid state!"),
-                );
-                Err(())
-            }
-            Some(state) => Ok(*state),
+        let (state_id, not) = self.parse_line_id(line, token)?;
+
+        // Make sure that states definitions are never negated
+        if !not && let Some(state) = self.state_map.get(&state_id) {
+            Ok(*state)
+        } else {
+            let _ = self.add_error(
+                line,
+                token,
+                format!("ID `{state_id}` does not point to a valid state!"),
+            );
+            Err(())
         }
     }
 
     fn get_expr_from_line_id(&mut self, line: &str, token: &str) -> ParseLineResult<ExprRef> {
-        let signal_id = self.parse_line_id(line, token)?;
-        let expr_ref = match self.signal_map.get(&signal_id) {
-            None => {
-                let _ = self.add_error(
-                    line,
-                    token,
-                    format!("ID `{signal_id}` does not point to a valid signal!"),
-                );
-                Err(())
-            }
-            Some(signal) => Ok(*signal),
-        }?;
-        Ok(expr_ref)
+        let (signal_id, not) = self.parse_line_id(line, token)?;
+
+        // Reject non-existent signals or negated signals who reference
+        // non-Boolean (more than one bit) signals
+        if let Some(signal) = self.signal_map.get(&signal_id)
+            && !(not && signal.get_type(self.ctx) != BV(1))
+        {
+            Ok(if not { self.ctx.not(*signal) } else { *signal } )
+        } else {
+            let _ = self.add_error(
+                line,
+                token,
+                format!("ID `{signal_id}` does not point to a valid signal!"),
+            );
+            Err(())
+        }
     }
 
     fn parse_sort(&mut self, line: &str, tokens: &[&str], line_id: LineId) -> ParseLineResult {

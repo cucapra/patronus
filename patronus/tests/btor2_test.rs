@@ -188,6 +188,100 @@ fn parse_llsdspi_bug_c1_instrumented() {
     println!("{}", sys.serialize_to_str(&ctx));
 }
 
+// Small circuit with negated line IDs
+const NEG_LINES: &str = r"
+        1 sort bitvec 1
+        2 zero 1
+        3 state 1 first
+        4 state 1 sec
+        5 init 1 3 2
+        6 init 1 4 2
+        7 and 1 -3 4
+        8 output 7 out
+        ";
+#[test]
+fn parse_neg_nodes() {
+    let mut ctx = Context::default();
+    let sys =
+        btor2::parse_str(&mut ctx, NEG_LINES, Some("neg_lines")).unwrap();
+
+    insta::assert_snapshot!(sys.serialize_to_str(&ctx));
+}
+
+/// More complex circuit with negated line IDs
+const COMPLEX_NEG_LINES: &str = r"
+        1 sort bitvec 1
+        2 zero 1
+        3 ones 1
+        4 state 1 first
+        5 state 1 sec
+        6 state 1 third
+        7 init 1 4 3
+        8 init 1 5 2
+        9 init 1 6 3
+        10 and 1 4 -6
+        11 or 1 -10 6
+        12 xor 1 4 -11
+        13 input 1 act
+        14 implies 1 13 12
+        15 output 14 out
+        ";
+
+#[test]
+fn complex_parse_neg_nodes() {
+    let mut ctx = Context::default();
+    let sys =
+        btor2::parse_str(&mut ctx, COMPLEX_NEG_LINES, Some("complex_neg_lines")).unwrap();
+
+    insta::assert_snapshot!(sys.serialize_to_str(&ctx));
+}
+
+/// Circuit with non-Boolean (i.e. not length-1) bitvectors
+const NON_BOOL_NEG_LINE: &str = r"
+       1 sort bitvec 3
+       2 zero 1
+       3 state 1 first
+       4 state 1 sec
+       5 init 1 3 2
+       6 init 1 4 2
+       7 and 1 -3 4
+       8 output 7 out
+       ";
+
+/// Circuit with negated type references
+const NEG_LINE_TYPE: &str = r"
+       1 sort bitvec 1
+       2 zero 1
+       3 state 1 first
+       4 state -1 sec
+       5 init 1 3 2
+       6 init 1 4 2
+       7 and 1 -3 4
+       8 output 7 out
+       ";
+
+/// Circuit with negated line numbers
+const NEG_LINE_NUM: &str = r"
+       1 sort bitvec 1
+       2 zero 1
+       -3 state 1 first
+       4 state 1 sec
+       5 init 1 3 2
+       6 init 1 4 2
+       7 and 1 -3 4
+       8 output 7 out
+       ";
+
+#[test]
+fn parse_neg_nodes_errors() {
+    for test in [NON_BOOL_NEG_LINE, NEG_LINE_TYPE, NEG_LINE_NUM] {
+        eprintln!("{test}");
+
+        let mut ctx = Context::default();
+        assert!(btor2::parse_str(&mut ctx, test, Some("error_test")).is_none());
+    }
+}
+
 /// Serialize → parse → serialize, then require the two serializations match.
 /// This is the strongest check we can make without comparing IR directly: any
 /// information the serializer drops or mangles will show up as a text diff on
