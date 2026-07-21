@@ -2,7 +2,6 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@berkeley.edu>
 
-use crate::expr::Type::BV;
 use crate::expr::*;
 use crate::system::transform::do_transform;
 use crate::system::*;
@@ -560,17 +559,29 @@ impl<'a> Parser<'a> {
     /// # Returns
     /// (Parse line id, whether line ID was negated)
     fn parse_line_id(&mut self, line: &str, token: &str) -> ParseLineResult<(LineId, bool)> {
-        token.parse::<i64>().map_or_else(
-            |_| {
+        match token.parse::<i64>().ok() {
+            None => {
                 let _ = self.add_error(
                     line,
                     token,
                     "Expected non-negative integer ID or negated ID".to_owned(),
                 );
                 Err(())
-            },
-            |id| Ok((id.abs() as LineId, id < 0)),
-        )
+            }
+            Some(id) => {
+               if id > i64::from(LineId::MAX) || id < -i64::from(LineId::MAX) {
+                   // If line ID is overflows in [`LineId`], return parse error
+                   let _ = self.add_error(
+                       line,
+                       token,
+                       "Expected non-negative integer ID or negated ID".to_owned(),
+                   );
+                   return Err(());
+               }
+
+                Ok((id.abs() as LineId, id.is_negative()))
+            }
+        }
     }
 
     fn parse_ones(&mut self, line: &str, tokens: &[&str]) -> ParseLineResult<(ExprRef, usize)> {
@@ -678,7 +689,7 @@ impl<'a> Parser<'a> {
         // Reject non-existent signals or negated signals who reference
         // non-Boolean (more than one bit) signals
         if let Some(signal) = self.signal_map.get(&signal_id)
-            && !(not && signal.get_type(self.ctx) != BV(1))
+            && !(not && signal.get_type(self.ctx) != Type::BV(1))
         {
             Ok(if not { self.ctx.not(*signal) } else { *signal } )
         } else {

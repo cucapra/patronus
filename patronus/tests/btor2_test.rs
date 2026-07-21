@@ -199,11 +199,33 @@ const NEG_LINES: &str = r"
         7 and 1 -3 4
         8 output 7 out
         ";
+
 #[test]
 fn parse_neg_nodes() {
     let mut ctx = Context::default();
     let sys =
         btor2::parse_str(&mut ctx, NEG_LINES, Some("neg_lines")).unwrap();
+
+    insta::assert_snapshot!(sys.serialize_to_str(&ctx));
+}
+
+/// Small circuit with large line numbers
+const LARGE_LINES: &str = r"
+        1 sort bitvec 1
+        2 zero 1
+        3 state 1 first
+        4 state 1 sec
+        5 init 1 3 2
+        6 init 1 4 2
+        4294967295 and 1 -3 4
+        8 output 4294967295 out
+        ";
+
+#[test]
+fn parse_large_line() {
+    let mut ctx = Context::default();
+    let sys =
+        btor2::parse_str(&mut ctx, LARGE_LINES, Some("large_lines")).unwrap();
 
     insta::assert_snapshot!(sys.serialize_to_str(&ctx));
 }
@@ -272,11 +294,33 @@ const NEG_LINE_NUM: &str = r"
        8 output 7 out
        ";
 
+/// Circuit with overflowed line numbers
+const OVERFLOW_LINE_NUM: &str = r"
+       1 sort bitvec 1
+       2 zero 1
+       -3 state 1 first
+       4 state 1 sec
+       5 init 1 3 2
+       6 init 1 4 2
+       4294967296 and 1 -3 4
+       8 output 4294967296 out
+       ";
+
+/// Circuit with overflowed line numbers (negative wrap-around)
+const OVERFLOW_LINE_NUM_NEG: &str = r"
+       1 sort bitvec 1
+       2 zero 1
+       -3 state 1 first
+       4 state 1 sec
+       5 init 1 3 2
+       6 init 1 4 2
+       -9223372036854775808 and 1 -3 4
+       8 output -9223372036854775808 out
+       ";
+
 #[test]
 fn parse_neg_nodes_errors() {
-    for test in [NON_BOOL_NEG_LINE, NEG_LINE_TYPE, NEG_LINE_NUM] {
-        eprintln!("{test}");
-
+    for test in [NON_BOOL_NEG_LINE, NEG_LINE_TYPE, NEG_LINE_NUM, OVERFLOW_LINE_NUM, OVERFLOW_LINE_NUM_NEG] {
         let mut ctx = Context::default();
         assert!(btor2::parse_str(&mut ctx, test, Some("error_test")).is_none());
     }
