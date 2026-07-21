@@ -690,12 +690,19 @@ impl<'a> Parser<'a> {
     fn get_expr_from_line_id(&mut self, line: &str, token: &str) -> ParseLineResult<ExprRef> {
         let (signal_id, not) = self.parse_line_id(line, token)?;
 
-        // Reject non-existent signals or negated signals who reference
-        // non-Boolean (more than one bit) signals
-        if let Some(signal) = self.signal_map.get(&signal_id)
-            && !(not && signal.get_type(self.ctx) != Type::BV(1))
-        {
-            Ok(if not { self.ctx.not(*signal) } else { *signal })
+        // Check if signal exists
+        if let Some(signal) = self.signal_map.get(&signal_id) {
+            // Make sure that only length-1 bitvectors (Boolean signals) are negated
+            if not && signal.get_type(self.ctx) != Type::BV(1) {
+                let _ = self.add_error(
+                    line,
+                    token,
+                    "Only length-1 bitvectors can be negated".to_owned(),
+                );
+                Err(())
+            } else {
+                Ok(if not { self.ctx.not(*signal) } else { *signal })
+            }
         } else {
             let _ = self.add_error(
                 line,
