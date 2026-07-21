@@ -1,0 +1,13 @@
+---
+source: patronus/tests/btor2_test.rs
+expression: sys.serialize_to_str(&ctx)
+---
+complex_neg_lines
+input act : bv<1>
+output out : bv<1> = implies(act, xor(first, not(or(not(and(first, not(third))), third))))
+state first : bv<1>
+  [init] 1'b1
+state sec : bv<1>
+  [init] 1'b0
+state third : bv<1>
+  [init] 1'b1
