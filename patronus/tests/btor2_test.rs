@@ -256,7 +256,7 @@ fn complex_parse_neg_nodes() {
 }
 
 /// Circuit with non-Boolean (i.e. not length-1) bitvectors
-const NON_BOOL_NEG_LINE: &str = r"
+const NON_BOOL_NEG_LINES: &str = r"
        1 sort bitvec 3
        2 zero 1
        3 state 1 first
@@ -266,6 +266,14 @@ const NON_BOOL_NEG_LINE: &str = r"
        7 and 1 -3 4
        8 output 7 out
        ";
+
+#[test]
+fn non_bool_parse_neg_nodes() {
+    let mut ctx = Context::default();
+    let sys = btor2::parse_str(&mut ctx, NON_BOOL_NEG_LINES, Some("non_bool_neg_lines")).unwrap();
+
+    insta::assert_snapshot!(sys.serialize_to_str(&ctx));
+}
 
 /// Circuit with negated type references
 const NEG_LINE_TYPE: &str = r"
@@ -318,7 +326,6 @@ const OVERFLOW_LINE_NUM_NEG: &str = r"
 #[test]
 fn parse_neg_nodes_errors() {
     for test in [
-        NON_BOOL_NEG_LINE,
         NEG_LINE_TYPE,
         NEG_LINE_NUM,
         OVERFLOW_LINE_NUM,

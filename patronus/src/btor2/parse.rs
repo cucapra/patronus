@@ -692,17 +692,7 @@ impl<'a> Parser<'a> {
 
         // Check if signal exists
         if let Some(signal) = self.signal_map.get(&signal_id) {
-            // Make sure that only length-1 bitvectors (Boolean signals) are negated
-            if not && signal.get_type(self.ctx) != Type::BV(1) {
-                let _ = self.add_error(
-                    line,
-                    token,
-                    "Only length-1 bitvectors can be negated".to_owned(),
-                );
-                Err(())
-            } else {
-                Ok(if not { self.ctx.not(*signal) } else { *signal })
-            }
+            Ok(if not { self.ctx.not(*signal) } else { *signal })
         } else {
             let _ = self.add_error(
                 line,
