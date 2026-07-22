@@ -54,7 +54,7 @@ pub fn do_transform(
     do_transform_expr(ctx, mode, &mut transformed, todo, tran);
 
     // update transition system signals to point to updated expressions
-    sys.update_expressions(|old_expr| {
+    sys.update_expressions(ctx, |old_expr| {
         if mode == ExprTransformMode::FixedPoint {
             get_fixed_point(&mut transformed, old_expr)
         } else {
