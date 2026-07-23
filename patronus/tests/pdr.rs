@@ -377,6 +377,42 @@ fn case_quiz4_unsat(solver: &SmtLibSolver) {
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
+fn case_simple_mac(solver: &SmtLibSolver) {
+    let Some((_, _, res)) = run_pdr_file(
+        solver,
+        "../inputs/unittest/simple_MAC_no_stall.btor2",
+        None,
+        false,
+    ) else {
+        return;
+    };
+    assert!(matches!(res, ModelCheckResult::Success));
+}
+
+fn case_pipe(solver: &SmtLibSolver) {
+    let Some((_, _, res)) = run_pdr_file(
+        solver,
+        "../inputs/unittest/pipe-no-stall.btor2",
+        None,
+        false,
+    ) else {
+        return;
+    };
+    assert!(matches!(res, ModelCheckResult::Success));
+}
+
+fn case_zipversa_p11(solver: &SmtLibSolver) {
+    let Some((_, _, res)) = run_pdr_file(
+        solver,
+        "../inputs/unittest/zipversa_composecrc_prf-p11.btor",
+        None,
+        false,
+    ) else {
+        return;
+    };
+    assert!(matches!(res, ModelCheckResult::Success));
+}
+
 #[cfg(test)]
 mod pdr {
     use super::*;
@@ -480,5 +516,20 @@ mod pdr {
     #[test]
     fn test_quiz4_unsat() {
         case_quiz4_unsat(&solver_from_env());
+    }
+
+    #[test]
+    fn test_simple_mac() {
+        case_simple_mac(&solver_from_env());
+    }
+
+    #[test]
+    fn test_pipe() {
+        case_pipe(&solver_from_env());
+    }
+
+    #[test]
+    fn test_zipversa_p11() {
+        case_zipversa_p11(&solver_from_env());
     }
 }

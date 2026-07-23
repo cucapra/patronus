@@ -5,7 +5,7 @@
 
 use crate::expr::*;
 use crate::mc::Witness;
-use crate::mc::encoding::{TransitionSystemEncoding, UnrollSmtEncoding, Step};
+use crate::mc::encoding::{Step, TransitionSystemEncoding, UnrollSmtEncoding};
 use crate::mc::types::{InitValue, ModelCheckResult, Result};
 use crate::mc::utils::{check_assuming, check_assuming_end, get_smt_value};
 use crate::smt::*;

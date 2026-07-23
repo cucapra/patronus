@@ -120,7 +120,11 @@ impl TransitionSystem {
 
     /// Update all output, input, assume, assert, state expressions.
     /// If `update` returns `None`, no update is performed.
-    pub fn update_expressions(&mut self, ctx: &Context, mut update: impl FnMut(ExprRef) -> Option<ExprRef>) {
+    pub fn update_expressions(
+        &mut self,
+        ctx: &Context,
+        mut update: impl FnMut(ExprRef) -> Option<ExprRef>,
+    ) {
         for old in self.inputs.iter_mut() {
             *old = update(*old).unwrap_or(*old);
         }
