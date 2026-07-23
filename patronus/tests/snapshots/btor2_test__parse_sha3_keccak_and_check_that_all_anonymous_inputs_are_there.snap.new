@@ -1,0 +1,489 @@
+---
+source: patronus/tests/btor2_test.rs
+assertion_line: 124
+expression: sys.serialize_to_str(&ctx)
+---
+sha3_keccak.w2.replace_variables
+input byte_num : bv<2>
+input is_last : bv<1>
+input in_ready : bv<1>
+input in : bv<32>
+input reset : bv<1>
+input clk : bv<1>
+input _input_0 : bv<1>
+input _input_1 : bv<1>
+input _input_2 : bv<1>
+input _input_3 : bv<1>
+input _input_4 : bv<576>
+input _input_5 : bv<576>
+input _input_6 : bv<1>
+input _input_7 : bv<1>
+input _input_8 : bv<32>
+input _input_9 : bv<7>
+input _input_10 : bv<1>
+input _input_11 : bv<24>
+output out_ready : bv<1> = i[22]
+output out : bv<512> = concat(f_out[1543:1536], concat(f_out[1551:1544], concat(f_out[1559:1552], concat(f_out[1567:1560], concat(f_out[1575:1568], concat(f_out[1583:1576], concat(f_out[1591:1584], concat(f_out[1599:1592], concat(f_out[1479:1472], concat(f_out[1487:1480], concat(f_out[1495:1488], concat(f_out[1503:1496], concat(f_out[1511:1504], concat(f_out[1519:1512], concat(f_out[1527:1520], concat(f_out[1535:1528], concat(f_out[1415:1408], concat(f_out[1423:1416], concat(f_out[1431:1424], concat(f_out[1439:1432], concat(f_out[1447:1440], concat(f_out[1455:1448], concat(f_out[1463:1456], concat(f_out[1471:1464], concat(f_out[1351:1344], concat(f_out[1359:1352], concat(f_out[1367:1360], concat(f_out[1375:1368], concat(f_out[1383:1376], concat(f_out[1391:1384], concat(f_out[1399:1392], concat(f_out[1407:1400], concat(f_out[1287:1280], concat(f_out[1295:1288], concat(f_out[1303:1296], concat(f_out[1311:1304], concat(f_out[1319:1312], concat(f_out[1327:1320], concat(f_out[1335:1328], concat(f_out[1343:1336], concat(f_out[1223:1216], concat(f_out[1231:1224], concat(f_out[1239:1232], concat(f_out[1247:1240], concat(f_out[1255:1248], concat(f_out[1263:1256], concat(f_out[1271:1264], concat(f_out[1279:1272], concat(f_out[1159:1152], concat(f_out[1167:1160], concat(f_out[1175:1168], concat(f_out[1183:1176], concat(f_out[1191:1184], concat(f_out[1199:1192], concat(f_out[1207:1200], concat(f_out[1215:1208], concat(f_out[1095:1088], concat(f_out[1103:1096], concat(f_out[1111:1104], concat(f_out[1119:1112], concat(f_out[1127:1120], concat(f_out[1135:1128], concat(f_out[1143:1136], f_out[1151:1144])))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+node f_permutation_.accept : bv<1> = ite(__synth_change_variable_19, ite(__synth_variable_135, _input_3, ite(__synth_variable_134, _input_1, ite(__synth_variable_133, state, ite(__synth_variable_132, out_ready, ite(__synth_variable_131, _input_0, ite(__synth_variable_130, is_last, ite(__synth_variable_129, in_ready, ite(__synth_variable_128, reset, clk)))))))), _input_2)
+node f_permutation_.round_.in : bv<1600> = ite(f_permutation_.accept, concat(xor(ite(__synth_change_variable_17, _input_5, _input_4), f_out[1599:1024]), f_out[1023:0]), f_out)
+node f_permutation_.round_.a[24] : bv<64> = f_permutation_.round_.in[63:0]
+node f_permutation_.round_.a[23] : bv<64> = f_permutation_.round_.in[383:320]
+node f_permutation_.round_.a[22] : bv<64> = f_permutation_.round_.in[703:640]
+node f_permutation_.round_.a[21] : bv<64> = f_permutation_.round_.in[1023:960]
+node f_permutation_.round_.a[20] : bv<64> = f_permutation_.round_.in[1343:1280]
+node f_permutation_.round_.b[4] : bv<64> = xor(xor(xor(xor(f_permutation_.round_.a[20], f_permutation_.round_.a[21]), f_permutation_.round_.a[22]), f_permutation_.round_.a[23]), f_permutation_.round_.a[24])
+node %1318 : bv<64> = concat(f_permutation_.round_.b[4][62:0], f_permutation_.round_.b[4][63])
+node f_permutation_.round_.a[14] : bv<64> = f_permutation_.round_.in[191:128]
+node f_permutation_.round_.a[13] : bv<64> = f_permutation_.round_.in[511:448]
+node f_permutation_.round_.a[12] : bv<64> = f_permutation_.round_.in[831:768]
+node f_permutation_.round_.a[11] : bv<64> = f_permutation_.round_.in[1151:1088]
+node f_permutation_.round_.a[10] : bv<64> = f_permutation_.round_.in[1471:1408]
+node f_permutation_.round_.b[2] : bv<64> = xor(xor(xor(xor(f_permutation_.round_.a[10], f_permutation_.round_.a[11]), f_permutation_.round_.a[12]), f_permutation_.round_.a[13]), f_permutation_.round_.a[14])
+node f_permutation_.round_.a[16] : bv<64> = f_permutation_.round_.in[1087:1024]
+node f_permutation_.round_.c[16] : bv<64> = xor(xor(f_permutation_.round_.a[16], f_permutation_.round_.b[2]), %1318)
+node f_permutation_.round_.d[16] : bv<64> = concat(f_permutation_.round_.c[16][8:0], f_permutation_.round_.c[16][63:9])
+node f_permutation_.round_.a[19] : bv<64> = f_permutation_.round_.in[127:64]
+node f_permutation_.round_.a[18] : bv<64> = f_permutation_.round_.in[447:384]
+node f_permutation_.round_.a[17] : bv<64> = f_permutation_.round_.in[767:704]
+node f_permutation_.round_.a[15] : bv<64> = f_permutation_.round_.in[1407:1344]
+node f_permutation_.round_.b[3] : bv<64> = xor(xor(xor(xor(f_permutation_.round_.a[15], f_permutation_.round_.a[16]), f_permutation_.round_.a[17]), f_permutation_.round_.a[18]), f_permutation_.round_.a[19])
+node %1344 : bv<64> = concat(f_permutation_.round_.b[3][62:0], f_permutation_.round_.b[3][63])
+node f_permutation_.round_.a[9] : bv<64> = f_permutation_.round_.in[255:192]
+node f_permutation_.round_.a[8] : bv<64> = f_permutation_.round_.in[575:512]
+node f_permutation_.round_.a[7] : bv<64> = f_permutation_.round_.in[895:832]
+node f_permutation_.round_.a[6] : bv<64> = f_permutation_.round_.in[1215:1152]
+node f_permutation_.round_.a[5] : bv<64> = f_permutation_.round_.in[1535:1472]
+node f_permutation_.round_.b[1] : bv<64> = xor(xor(xor(xor(f_permutation_.round_.a[5], f_permutation_.round_.a[6]), f_permutation_.round_.a[7]), f_permutation_.round_.a[8]), f_permutation_.round_.a[9])
+node f_permutation_.round_.c[10] : bv<64> = xor(xor(f_permutation_.round_.a[10], f_permutation_.round_.b[1]), %1344)
+node f_permutation_.round_.d[10] : bv<64> = concat(f_permutation_.round_.c[10][1:0], f_permutation_.round_.c[10][63:2])
+node %1363 : bv<64> = concat(f_permutation_.round_.b[2][62:0], f_permutation_.round_.b[2][63])
+node f_permutation_.round_.a[4] : bv<64> = f_permutation_.round_.in[319:256]
+node f_permutation_.round_.a[3] : bv<64> = f_permutation_.round_.in[639:576]
+node f_permutation_.round_.a[2] : bv<64> = f_permutation_.round_.in[959:896]
+node f_permutation_.round_.a[1] : bv<64> = f_permutation_.round_.in[1279:1216]
+node f_permutation_.round_.a[0] : bv<64> = f_permutation_.round_.in[1599:1536]
+node f_permutation_.round_.b[0] : bv<64> = xor(xor(xor(xor(f_permutation_.round_.a[0], f_permutation_.round_.a[1]), f_permutation_.round_.a[2]), f_permutation_.round_.a[3]), f_permutation_.round_.a[4])
+node f_permutation_.round_.c[9] : bv<64> = xor(xor(f_permutation_.round_.a[9], f_permutation_.round_.b[0]), %1363)
+node f_permutation_.round_.d[9] : bv<64> = concat(f_permutation_.round_.c[9][61:0], f_permutation_.round_.c[9][63:62])
+node %1383 : bv<64> = concat(f_permutation_.round_.b[1][62:0], f_permutation_.round_.b[1][63])
+node f_permutation_.round_.c[3] : bv<64> = xor(xor(f_permutation_.round_.a[3], f_permutation_.round_.b[4]), %1383)
+node f_permutation_.round_.d[3] : bv<64> = concat(f_permutation_.round_.c[3][22:0], f_permutation_.round_.c[3][63:23])
+node %1395 : bv<64> = concat(f_permutation_.round_.b[0][62:0], f_permutation_.round_.b[0][63])
+node f_permutation_.round_.c[22] : bv<64> = xor(xor(f_permutation_.round_.a[22], f_permutation_.round_.b[3]), %1395)
+node f_permutation_.round_.d[22] : bv<64> = concat(f_permutation_.round_.c[22][24:0], f_permutation_.round_.c[22][63:25])
+node f_permutation_.round_.c[1] : bv<64> = xor(xor(f_permutation_.round_.a[1], f_permutation_.round_.b[4]), %1383)
+node f_permutation_.round_.d[1] : bv<64> = concat(f_permutation_.round_.c[1][27:0], f_permutation_.round_.c[1][63:28])
+node f_permutation_.round_.c[20] : bv<64> = xor(xor(f_permutation_.round_.a[20], f_permutation_.round_.b[3]), %1395)
+node f_permutation_.round_.d[20] : bv<64> = concat(f_permutation_.round_.c[20][36:0], f_permutation_.round_.c[20][63:37])
+node f_permutation_.round_.c[19] : bv<64> = xor(xor(f_permutation_.round_.a[19], f_permutation_.round_.b[2]), %1318)
+node f_permutation_.round_.d[19] : bv<64> = concat(f_permutation_.round_.c[19][7:0], f_permutation_.round_.c[19][63:8])
+node f_permutation_.round_.c[13] : bv<64> = xor(xor(f_permutation_.round_.a[13], f_permutation_.round_.b[1]), %1344)
+node f_permutation_.round_.d[13] : bv<64> = concat(f_permutation_.round_.c[13][48:0], f_permutation_.round_.c[13][63:49])
+node f_permutation_.round_.c[7] : bv<64> = xor(xor(f_permutation_.round_.a[7], f_permutation_.round_.b[0]), %1363)
+node f_permutation_.round_.d[7] : bv<64> = concat(f_permutation_.round_.c[7][53:0], f_permutation_.round_.c[7][63:54])
+node f_permutation_.round_.c[11] : bv<64> = xor(xor(f_permutation_.round_.a[11], f_permutation_.round_.b[1]), %1344)
+node f_permutation_.round_.d[11] : bv<64> = concat(f_permutation_.round_.c[11][57:0], f_permutation_.round_.c[11][63:58])
+node f_permutation_.round_.c[5] : bv<64> = xor(xor(f_permutation_.round_.a[5], f_permutation_.round_.b[0]), %1363)
+node f_permutation_.round_.d[5] : bv<64> = concat(f_permutation_.round_.c[5][62:0], f_permutation_.round_.c[5][63])
+node f_permutation_.round_.c[4] : bv<64> = xor(xor(f_permutation_.round_.a[4], f_permutation_.round_.b[4]), %1383)
+node f_permutation_.round_.d[4] : bv<64> = concat(f_permutation_.round_.c[4][45:0], f_permutation_.round_.c[4][63:46])
+node f_permutation_.round_.c[23] : bv<64> = xor(xor(f_permutation_.round_.a[23], f_permutation_.round_.b[3]), %1395)
+node f_permutation_.round_.d[23] : bv<64> = concat(f_permutation_.round_.c[23][55:0], f_permutation_.round_.c[23][63:56])
+node f_permutation_.round_.c[17] : bv<64> = xor(xor(f_permutation_.round_.a[17], f_permutation_.round_.b[2]), %1318)
+node f_permutation_.round_.d[17] : bv<64> = concat(f_permutation_.round_.c[17][38:0], f_permutation_.round_.c[17][63:39])
+node f_permutation_.round_.c[21] : bv<64> = xor(xor(f_permutation_.round_.a[21], f_permutation_.round_.b[3]), %1395)
+node f_permutation_.round_.d[21] : bv<64> = concat(f_permutation_.round_.c[21][43:0], f_permutation_.round_.c[21][63:44])
+node f_permutation_.round_.c[15] : bv<64> = xor(xor(f_permutation_.round_.a[15], f_permutation_.round_.b[2]), %1318)
+node f_permutation_.round_.d[15] : bv<64> = concat(f_permutation_.round_.c[15][35:0], f_permutation_.round_.c[15][63:36])
+node f_permutation_.round_.c[14] : bv<64> = xor(xor(f_permutation_.round_.a[14], f_permutation_.round_.b[1]), %1344)
+node f_permutation_.round_.d[14] : bv<64> = concat(f_permutation_.round_.c[14][2:0], f_permutation_.round_.c[14][63:3])
+node f_permutation_.round_.c[8] : bv<64> = xor(xor(f_permutation_.round_.a[8], f_permutation_.round_.b[0]), %1363)
+node f_permutation_.round_.d[8] : bv<64> = concat(f_permutation_.round_.c[8][18:0], f_permutation_.round_.c[8][63:19])
+node f_permutation_.round_.c[2] : bv<64> = xor(xor(f_permutation_.round_.a[2], f_permutation_.round_.b[4]), %1383)
+node f_permutation_.round_.d[2] : bv<64> = concat(f_permutation_.round_.c[2][60:0], f_permutation_.round_.c[2][63:61])
+node f_permutation_.round_.c[6] : bv<64> = xor(xor(f_permutation_.round_.a[6], f_permutation_.round_.b[0]), %1363)
+node f_permutation_.round_.d[6] : bv<64> = concat(f_permutation_.round_.c[6][19:0], f_permutation_.round_.c[6][63:20])
+node f_permutation_.round_.c[0] : bv<64> = xor(xor(f_permutation_.round_.a[0], f_permutation_.round_.b[4]), %1383)
+node f_permutation_.round_.c[24] : bv<64> = xor(xor(f_permutation_.round_.a[24], f_permutation_.round_.b[3]), %1395)
+node f_permutation_.round_.d[24] : bv<64> = concat(f_permutation_.round_.c[24][49:0], f_permutation_.round_.c[24][63:50])
+node f_permutation_.round_.c[18] : bv<64> = xor(xor(f_permutation_.round_.a[18], f_permutation_.round_.b[2]), %1318)
+node f_permutation_.round_.d[18] : bv<64> = concat(f_permutation_.round_.c[18][42:0], f_permutation_.round_.c[18][63:43])
+node f_permutation_.round_.c[12] : bv<64> = xor(xor(f_permutation_.round_.a[12], f_permutation_.round_.b[1]), %1344)
+node f_permutation_.round_.d[12] : bv<64> = concat(f_permutation_.round_.c[12][20:0], f_permutation_.round_.c[12][63:21])
+node %521 : bv<1> = f_permutation_.i[21]
+node %519 : bv<1> = f_permutation_.i[19]
+node %517 : bv<1> = f_permutation_.i[14]
+node %515 : bv<1> = f_permutation_.i[13]
+node %513 : bv<1> = f_permutation_.i[12]
+node %511 : bv<1> = f_permutation_.i[11]
+node %509 : bv<1> = f_permutation_.i[9]
+node %507 : bv<1> = f_permutation_.i[6]
+node %505 : bv<1> = f_permutation_.i[5]
+node %503 : bv<1> = f_permutation_.i[4]
+node %501 : bv<1> = f_permutation_.i[3]
+node f_permutation_.round_.f[0] : bv<64> = xor(f_permutation_.round_.c[0], and(not(f_permutation_.round_.d[6]), f_permutation_.round_.d[12]))
+node %540 : bv<1> = f_permutation_.i[18]
+node %538 : bv<1> = f_permutation_.i[17]
+node %536 : bv<1> = f_permutation_.i[15]
+node %531 : bv<1> = f_permutation_.i[10]
+node %529 : bv<1> = f_permutation_.i[7]
+node %526 : bv<1> = f_permutation_.i[1]
+node %527 : bv<1> = or(f_permutation_.i[0], %526)
+node %528 : bv<1> = or(%527, %501)
+node %556 : bv<1> = f_permutation_.i[22]
+node %547 : bv<1> = f_permutation_.i[8]
+node %569 : bv<1> = f_permutation_.i[20]
+node %566 : bv<1> = f_permutation_.i[16]
+node %573 : bv<1> = f_permutation_.i[2]
+node f_permutation_.reset : bv<1> = ite(__synth_change_variable_16, ite(__synth_variable_119, _input_3, ite(__synth_variable_118, _input_2, ite(__synth_variable_117, _input_1, ite(__synth_variable_116, state, ite(__synth_variable_115, out_ready, ite(__synth_variable_114, _input_0, ite(__synth_variable_113, is_last, ite(__synth_variable_112, in_ready, clk)))))))), reset)
+node padder_.reset : bv<1> = ite(__synth_change_variable_7, ite(__synth_variable_62, _input_3, ite(__synth_variable_61, _input_2, ite(__synth_variable_60, _input_1, ite(__synth_variable_59, state, ite(__synth_variable_58, out_ready, ite(__synth_variable_57, _input_0, ite(__synth_variable_56, is_last, ite(__synth_variable_55, in_ready, clk)))))))), reset)
+node padder_.out_ready : bv<1> = ite(__synth_change_variable_11, ite(__synth_variable_87, _input_3, ite(__synth_variable_86, _input_2, ite(__synth_variable_85, _input_1, ite(__synth_variable_84, state, ite(__synth_variable_83, out_ready, ite(__synth_variable_82, is_last, ite(__synth_variable_81, in_ready, ite(__synth_variable_80, reset, clk)))))))), _input_0)
+node padder_.f_ack : bv<1> = ite(__synth_change_variable_14, ite(__synth_variable_103, _input_3, ite(__synth_variable_102, _input_1, ite(__synth_variable_101, state, ite(__synth_variable_100, out_ready, ite(__synth_variable_99, _input_0, ite(__synth_variable_98, is_last, ite(__synth_variable_97, in_ready, ite(__synth_variable_96, reset, clk)))))))), _input_2)
+node %1095 : bv<1> = not(padder_.f_ack)
+node %1132 : bv<1> = not(padder_.out_ready)
+state i : bv<23>
+  [next] ite(ite(__synth_change_variable_0, ite(__synth_variable_7, _input_3, ite(__synth_variable_6, _input_2, ite(__synth_variable_5, _input_1, ite(__synth_variable_4, state, ite(__synth_variable_3, out_ready, ite(__synth_variable_2, _input_0, ite(__synth_variable_1, is_last, ite(__synth_variable_0, in_ready, clk)))))))), reset), 23'x000000, concat(i[21:0], and(ite(__synth_change_variable_1, ite(__synth_variable_15, _input_3, ite(__synth_variable_14, _input_2, ite(__synth_variable_13, _input_1, ite(__synth_variable_12, out_ready, ite(__synth_variable_11, _input_0, ite(__synth_variable_10, is_last, ite(__synth_variable_9, in_ready, ite(__synth_variable_8, reset, clk)))))))), state), ite(__synth_change_variable_2, ite(__synth_variable_23, _input_3, ite(__synth_variable_22, _input_1, ite(__synth_variable_21, state, ite(__synth_variable_20, out_ready, ite(__synth_variable_19, _input_0, ite(__synth_variable_18, is_last, ite(__synth_variable_17, in_ready, ite(__synth_variable_16, reset, clk)))))))), _input_2))))
+state f_out : bv<1600>
+  [next] ite(f_permutation_.reset, 1600'x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, ite(or(f_permutation_.calc, f_permutation_.accept), concat(xor(f_permutation_.round_.f[0][63], or(or(or(or(or(or(or(or(or(or(or(or(%526, %573), %505), %507), %513), %515), %517), %536), %566), %540), %519), %569), %556)), concat(f_permutation_.round_.f[0][62:32], concat(xor(f_permutation_.round_.f[0][31], or(or(or(or(or(or(or(or(or(%573, %503), %505), %509), %531), %511), %540), %519), %521), %556)), concat(f_permutation_.round_.f[0][30:16], concat(xor(f_permutation_.round_.f[0][15], or(or(or(or(or(or(or(or(or(or(or(or(or(%527, %573), %501), %505), %507), %509), %511), %515), %517), %536), %538), %519), %569), %556)), concat(f_permutation_.round_.f[0][14:8], concat(xor(f_permutation_.round_.f[0][7], or(or(or(or(or(or(or(or(or(%528, %505), %529), %547), %511), %513), %515), %566), %519), %569)), concat(f_permutation_.round_.f[0][6:4], concat(xor(f_permutation_.round_.f[0][3], or(or(or(or(or(or(or(or(or(or(or(or(%526, %501), %507), %529), %547), %509), %531), %511), %513), %515), %538), %540), %556)), concat(f_permutation_.round_.f[0][2], concat(xor(f_permutation_.round_.f[0][1], or(or(or(or(or(or(or(or(%528, %529), %531), %511), %513), %517), %536), %538), %540)), concat(xor(f_permutation_.round_.f[0][0], or(or(or(or(or(or(or(or(or(or(or(f_permutation_.accept, %501), %503), %505), %507), %509), %511), %513), %515), %517), %519), %521)), concat(xor(f_permutation_.round_.d[6], and(not(f_permutation_.round_.d[12]), f_permutation_.round_.d[18])), concat(xor(f_permutation_.round_.d[12], and(not(f_permutation_.round_.d[18]), f_permutation_.round_.d[24])), concat(xor(f_permutation_.round_.d[18], and(not(f_permutation_.round_.d[24]), f_permutation_.round_.c[0])), concat(xor(f_permutation_.round_.d[24], and(not(f_permutation_.round_.c[0]), f_permutation_.round_.d[6])), concat(xor(f_permutation_.round_.d[15], and(not(f_permutation_.round_.d[21]), f_permutation_.round_.d[2])), concat(xor(f_permutation_.round_.d[21], and(not(f_permutation_.round_.d[2]), f_permutation_.round_.d[8])), concat(xor(f_permutation_.round_.d[2], and(not(f_permutation_.round_.d[8]), f_permutation_.round_.d[14])), concat(xor(f_permutation_.round_.d[8], and(not(f_permutation_.round_.d[14]), f_permutation_.round_.d[15])), concat(xor(f_permutation_.round_.d[14], and(not(f_permutation_.round_.d[15]), f_permutation_.round_.d[21])), concat(xor(f_permutation_.round_.d[5], and(not(f_permutation_.round_.d[11]), f_permutation_.round_.d[17])), concat(xor(f_permutation_.round_.d[11], and(not(f_permutation_.round_.d[17]), f_permutation_.round_.d[23])), concat(xor(f_permutation_.round_.d[17], and(not(f_permutation_.round_.d[23]), f_permutation_.round_.d[4])), concat(xor(f_permutation_.round_.d[23], and(not(f_permutation_.round_.d[4]), f_permutation_.round_.d[5])), concat(xor(f_permutation_.round_.d[4], and(not(f_permutation_.round_.d[5]), f_permutation_.round_.d[11])), concat(xor(f_permutation_.round_.d[20], and(not(f_permutation_.round_.d[1]), f_permutation_.round_.d[7])), concat(xor(f_permutation_.round_.d[1], and(not(f_permutation_.round_.d[7]), f_permutation_.round_.d[13])), concat(xor(f_permutation_.round_.d[7], and(not(f_permutation_.round_.d[13]), f_permutation_.round_.d[19])), concat(xor(f_permutation_.round_.d[13], and(not(f_permutation_.round_.d[19]), f_permutation_.round_.d[20])), concat(xor(f_permutation_.round_.d[19], and(not(f_permutation_.round_.d[20]), f_permutation_.round_.d[1])), concat(xor(f_permutation_.round_.d[10], and(not(f_permutation_.round_.d[16]), f_permutation_.round_.d[22])), concat(xor(f_permutation_.round_.d[16], and(not(f_permutation_.round_.d[22]), f_permutation_.round_.d[3])), concat(xor(f_permutation_.round_.d[22], and(not(f_permutation_.round_.d[3]), f_permutation_.round_.d[9])), concat(xor(f_permutation_.round_.d[3], and(not(f_permutation_.round_.d[9]), f_permutation_.round_.d[10])), xor(f_permutation_.round_.d[9], and(not(f_permutation_.round_.d[10]), f_permutation_.round_.d[16]))))))))))))))))))))))))))))))))))))), f_out))
+state __synth_variable_104 : bv<1>
+  [next] __synth_variable_104
+state __synth_variable_105 : bv<1>
+  [next] __synth_variable_105
+state __synth_variable_106 : bv<1>
+  [next] __synth_variable_106
+state __synth_variable_107 : bv<1>
+  [next] __synth_variable_107
+state state : bv<1>
+  [next] ite(ite(__synth_change_variable_3, ite(__synth_variable_31, _input_3, ite(__synth_variable_30, _input_2, ite(__synth_variable_29, _input_1, ite(__synth_variable_28, state, ite(__synth_variable_27, out_ready, ite(__synth_variable_26, _input_0, ite(__synth_variable_25, is_last, ite(__synth_variable_24, in_ready, clk)))))))), reset), 1'b0, ite(ite(__synth_change_variable_4, ite(__synth_variable_39, _input_3, ite(__synth_variable_38, _input_2, ite(__synth_variable_37, _input_1, ite(__synth_variable_36, state, ite(__synth_variable_35, out_ready, ite(__synth_variable_34, _input_0, ite(__synth_variable_33, in_ready, ite(__synth_variable_32, reset, clk)))))))), is_last), 1'b1, state))
+state __synth_variable_108 : bv<1>
+  [next] __synth_variable_108
+state __synth_variable_109 : bv<1>
+  [next] __synth_variable_109
+state __synth_variable_110 : bv<1>
+  [next] __synth_variable_110
+state __synth_variable_111 : bv<1>
+  [next] __synth_variable_111
+state __synth_change_variable_15 : bv<1>
+  [next] __synth_change_variable_15
+state __synth_variable_112 : bv<1>
+  [next] __synth_variable_112
+state __synth_variable_113 : bv<1>
+  [next] __synth_variable_113
+state __synth_variable_114 : bv<1>
+  [next] __synth_variable_114
+state __synth_variable_115 : bv<1>
+  [next] __synth_variable_115
+state __synth_variable_116 : bv<1>
+  [next] __synth_variable_116
+state __synth_variable_117 : bv<1>
+  [next] __synth_variable_117
+state __synth_variable_118 : bv<1>
+  [next] __synth_variable_118
+state __synth_variable_119 : bv<1>
+  [next] __synth_variable_119
+state __synth_change_variable_16 : bv<1>
+  [next] __synth_change_variable_16
+state __synth_change_variable_17 : bv<1>
+  [next] __synth_change_variable_17
+state __synth_variable_120 : bv<1>
+  [next] __synth_variable_120
+state __synth_variable_121 : bv<1>
+  [next] __synth_variable_121
+state __synth_variable_122 : bv<1>
+  [next] __synth_variable_122
+state __synth_variable_123 : bv<1>
+  [next] __synth_variable_123
+state __synth_variable_124 : bv<1>
+  [next] __synth_variable_124
+state __synth_variable_125 : bv<1>
+  [next] __synth_variable_125
+state __synth_variable_126 : bv<1>
+  [next] __synth_variable_126
+state __synth_variable_127 : bv<1>
+  [next] __synth_variable_127
+state __synth_change_variable_18 : bv<1>
+  [next] __synth_change_variable_18
+state __synth_variable_128 : bv<1>
+  [next] __synth_variable_128
+state __synth_variable_129 : bv<1>
+  [next] __synth_variable_129
+state __synth_variable_130 : bv<1>
+  [next] __synth_variable_130
+state __synth_variable_131 : bv<1>
+  [next] __synth_variable_131
+state __synth_variable_132 : bv<1>
+  [next] __synth_variable_132
+state __synth_variable_133 : bv<1>
+  [next] __synth_variable_133
+state __synth_variable_134 : bv<1>
+  [next] __synth_variable_134
+state __synth_variable_135 : bv<1>
+  [next] __synth_variable_135
+state __synth_change_variable_19 : bv<1>
+  [next] __synth_change_variable_19
+state __synth_variable_136 : bv<1>
+  [next] __synth_variable_136
+state __synth_variable_137 : bv<1>
+  [next] __synth_variable_137
+state __synth_variable_138 : bv<1>
+  [next] __synth_variable_138
+state __synth_variable_139 : bv<1>
+  [next] __synth_variable_139
+state __synth_variable_140 : bv<1>
+  [next] __synth_variable_140
+state __synth_variable_141 : bv<1>
+  [next] __synth_variable_141
+state __synth_variable_142 : bv<1>
+  [next] __synth_variable_142
+state __synth_variable_143 : bv<1>
+  [next] __synth_variable_143
+state __synth_change_variable_20 : bv<1>
+  [next] __synth_change_variable_20
+state f_permutation_.i : bv<23>
+  [next] ite(f_permutation_.reset, 23'x000000, concat(f_permutation_.i[21:0], f_permutation_.accept))
+state f_permutation_.calc : bv<1>
+  [next] ite(f_permutation_.reset, 1'b0, or(and(f_permutation_.calc, not(%556)), f_permutation_.accept))
+state __synth_variable_47 : bv<1>
+  [next] __synth_variable_47
+state __synth_variable_48 : bv<1>
+  [next] __synth_variable_48
+state __synth_variable_49 : bv<1>
+  [next] __synth_variable_49
+state __synth_variable_50 : bv<1>
+  [next] __synth_variable_50
+state __synth_variable_51 : bv<1>
+  [next] __synth_variable_51
+state __synth_variable_52 : bv<1>
+  [next] __synth_variable_52
+state __synth_variable_53 : bv<1>
+  [next] __synth_variable_53
+state __synth_variable_54 : bv<1>
+  [next] __synth_variable_54
+state __synth_change_variable_6 : bv<1>
+  [next] __synth_change_variable_6
+state __synth_variable_55 : bv<1>
+  [next] __synth_variable_55
+state __synth_variable_56 : bv<1>
+  [next] __synth_variable_56
+state __synth_variable_57 : bv<1>
+  [next] __synth_variable_57
+state __synth_variable_58 : bv<1>
+  [next] __synth_variable_58
+state __synth_variable_59 : bv<1>
+  [next] __synth_variable_59
+state __synth_variable_60 : bv<1>
+  [next] __synth_variable_60
+state __synth_variable_61 : bv<1>
+  [next] __synth_variable_61
+state __synth_variable_62 : bv<1>
+  [next] __synth_variable_62
+state __synth_change_variable_7 : bv<1>
+  [next] __synth_change_variable_7
+state __synth_variable_63 : bv<1>
+  [next] __synth_variable_63
+state __synth_change_variable_8 : bv<1>
+  [next] __synth_change_variable_8
+state __synth_variable_64 : bv<1>
+  [next] __synth_variable_64
+state __synth_variable_65 : bv<1>
+  [next] __synth_variable_65
+state __synth_variable_66 : bv<1>
+  [next] __synth_variable_66
+state __synth_variable_67 : bv<1>
+  [next] __synth_variable_67
+state __synth_variable_68 : bv<1>
+  [next] __synth_variable_68
+state __synth_variable_69 : bv<1>
+  [next] __synth_variable_69
+state __synth_variable_70 : bv<1>
+  [next] __synth_variable_70
+state __synth_variable_71 : bv<1>
+  [next] __synth_variable_71
+state __synth_change_variable_9 : bv<1>
+  [next] __synth_change_variable_9
+state __synth_variable_72 : bv<1>
+  [next] __synth_variable_72
+state __synth_variable_73 : bv<1>
+  [next] __synth_variable_73
+state __synth_variable_74 : bv<1>
+  [next] __synth_variable_74
+state __synth_variable_75 : bv<1>
+  [next] __synth_variable_75
+state __synth_variable_76 : bv<1>
+  [next] __synth_variable_76
+state __synth_variable_77 : bv<1>
+  [next] __synth_variable_77
+state __synth_variable_78 : bv<1>
+  [next] __synth_variable_78
+state __synth_variable_79 : bv<1>
+  [next] __synth_variable_79
+state __synth_change_variable_10 : bv<1>
+  [next] __synth_change_variable_10
+state __synth_variable_80 : bv<1>
+  [next] __synth_variable_80
+state __synth_variable_81 : bv<1>
+  [next] __synth_variable_81
+state __synth_variable_82 : bv<1>
+  [next] __synth_variable_82
+state __synth_variable_83 : bv<1>
+  [next] __synth_variable_83
+state __synth_variable_84 : bv<1>
+  [next] __synth_variable_84
+state __synth_variable_85 : bv<1>
+  [next] __synth_variable_85
+state __synth_variable_86 : bv<1>
+  [next] __synth_variable_86
+state __synth_variable_87 : bv<1>
+  [next] __synth_variable_87
+state __synth_change_variable_11 : bv<1>
+  [next] __synth_change_variable_11
+state __synth_change_variable_12 : bv<1>
+  [next] __synth_change_variable_12
+state __synth_variable_96 : bv<1>
+  [next] __synth_variable_96
+state __synth_variable_97 : bv<1>
+  [next] __synth_variable_97
+state __synth_variable_98 : bv<1>
+  [next] __synth_variable_98
+state __synth_variable_99 : bv<1>
+  [next] __synth_variable_99
+state __synth_variable_100 : bv<1>
+  [next] __synth_variable_100
+state __synth_variable_101 : bv<1>
+  [next] __synth_variable_101
+state __synth_variable_102 : bv<1>
+  [next] __synth_variable_102
+state __synth_variable_103 : bv<1>
+  [next] __synth_variable_103
+state __synth_change_variable_14 : bv<1>
+  [next] __synth_change_variable_14
+state padder_.state : bv<1>
+  [next] ite(padder_.reset, 1'b0, ite(ite(__synth_change_variable_10, ite(__synth_variable_79, _input_3, ite(__synth_variable_78, _input_2, ite(__synth_variable_77, _input_1, ite(__synth_variable_76, state, ite(__synth_variable_75, out_ready, ite(__synth_variable_74, _input_0, ite(__synth_variable_73, in_ready, ite(__synth_variable_72, reset, clk)))))))), is_last), 1'b1, padder_.state))
+state padder_.done : bv<1>
+  [next] ite(padder_.reset, 1'b0, ite(and(padder_.state, padder_.out_ready), 1'b1, padder_.done))
+state padder_.i : bv<18>
+  [next] ite(padder_.reset, 18'x00000, ite(or(padder_.f_ack, and(or(and(and(not(padder_.state), ite(__synth_change_variable_9, ite(__synth_variable_71, _input_3, ite(__synth_variable_70, _input_2, ite(__synth_variable_69, _input_1, ite(__synth_variable_68, state, ite(__synth_variable_67, out_ready, ite(__synth_variable_66, _input_0, ite(__synth_variable_65, is_last, ite(__synth_variable_64, reset, clk)))))))), in_ready)), %1132), and(padder_.state, %1132)), not(padder_.done))), and(concat(padder_.i[16:0], 1'b1), concat(%1095, concat(%1095, concat(%1095, concat(%1095, concat(%1095, concat(%1095, concat(%1095, concat(%1095, concat(%1095, concat(%1095, concat(%1095, concat(%1095, concat(%1095, concat(%1095, concat(%1095, concat(%1095, concat(%1095, %1095)))))))))))))))))), padder_.i))
+state __synth_variable_95 : bv<1>
+  [next] __synth_variable_95
+state __synth_variable_94 : bv<1>
+  [next] __synth_variable_94
+state __synth_variable_93 : bv<1>
+  [next] __synth_variable_93
+state __synth_variable_92 : bv<1>
+  [next] __synth_variable_92
+state __synth_variable_91 : bv<1>
+  [next] __synth_variable_91
+state __synth_variable_90 : bv<1>
+  [next] __synth_variable_90
+state __synth_variable_89 : bv<1>
+  [next] __synth_variable_89
+state __synth_variable_88 : bv<1>
+  [next] __synth_variable_88
+state __synth_variable_46 : bv<1>
+  [next] __synth_variable_46
+state __synth_variable_45 : bv<1>
+  [next] __synth_variable_45
+state __synth_variable_44 : bv<1>
+  [next] __synth_variable_44
+state __synth_variable_43 : bv<1>
+  [next] __synth_variable_43
+state __synth_variable_42 : bv<1>
+  [next] __synth_variable_42
+state __synth_variable_41 : bv<1>
+  [next] __synth_variable_41
+state __synth_variable_40 : bv<1>
+  [next] __synth_variable_40
+state __synth_variable_39 : bv<1>
+  [next] __synth_variable_39
+state __synth_variable_38 : bv<1>
+  [next] __synth_variable_38
+state __synth_variable_37 : bv<1>
+  [next] __synth_variable_37
+state __synth_variable_36 : bv<1>
+  [next] __synth_variable_36
+state __synth_variable_35 : bv<1>
+  [next] __synth_variable_35
+state __synth_variable_34 : bv<1>
+  [next] __synth_variable_34
+state __synth_variable_33 : bv<1>
+  [next] __synth_variable_33
+state __synth_variable_32 : bv<1>
+  [next] __synth_variable_32
+state __synth_variable_31 : bv<1>
+  [next] __synth_variable_31
+state __synth_variable_30 : bv<1>
+  [next] __synth_variable_30
+state __synth_variable_29 : bv<1>
+  [next] __synth_variable_29
+state __synth_variable_28 : bv<1>
+  [next] __synth_variable_28
+state __synth_variable_27 : bv<1>
+  [next] __synth_variable_27
+state __synth_variable_26 : bv<1>
+  [next] __synth_variable_26
+state __synth_variable_25 : bv<1>
+  [next] __synth_variable_25
+state __synth_variable_24 : bv<1>
+  [next] __synth_variable_24
+state __synth_variable_23 : bv<1>
+  [next] __synth_variable_23
+state __synth_variable_22 : bv<1>
+  [next] __synth_variable_22
+state __synth_variable_21 : bv<1>
+  [next] __synth_variable_21
+state __synth_variable_20 : bv<1>
+  [next] __synth_variable_20
+state __synth_variable_19 : bv<1>
+  [next] __synth_variable_19
+state __synth_variable_18 : bv<1>
+  [next] __synth_variable_18
+state __synth_variable_17 : bv<1>
+  [next] __synth_variable_17
+state __synth_variable_16 : bv<1>
+  [next] __synth_variable_16
+state __synth_variable_15 : bv<1>
+  [next] __synth_variable_15
+state __synth_variable_14 : bv<1>
+  [next] __synth_variable_14
+state __synth_variable_13 : bv<1>
+  [next] __synth_variable_13
+state __synth_variable_12 : bv<1>
+  [next] __synth_variable_12
+state __synth_variable_11 : bv<1>
+  [next] __synth_variable_11
+state __synth_variable_10 : bv<1>
+  [next] __synth_variable_10
+state __synth_variable_9 : bv<1>
+  [next] __synth_variable_9
+state __synth_variable_8 : bv<1>
+  [next] __synth_variable_8
+state __synth_variable_7 : bv<1>
+  [next] __synth_variable_7
+state __synth_variable_6 : bv<1>
+  [next] __synth_variable_6
+state __synth_variable_5 : bv<1>
+  [next] __synth_variable_5
+state __synth_variable_4 : bv<1>
+  [next] __synth_variable_4
+state __synth_variable_3 : bv<1>
+  [next] __synth_variable_3
+state __synth_variable_2 : bv<1>
+  [next] __synth_variable_2
+state __synth_variable_1 : bv<1>
+  [next] __synth_variable_1
+state __synth_variable_0 : bv<1>
+  [next] __synth_variable_0
+state __synth_change_variable_13 : bv<1>
+  [next] __synth_change_variable_13
+state __synth_change_variable_5 : bv<1>
+  [next] __synth_change_variable_5
+state __synth_change_variable_4 : bv<1>
+  [next] __synth_change_variable_4
+state __synth_change_variable_3 : bv<1>
+  [next] __synth_change_variable_3
+state __synth_change_variable_2 : bv<1>
+  [next] __synth_change_variable_2
+state __synth_change_variable_1 : bv<1>
+  [next] __synth_change_variable_1
+state __synth_change_variable_0 : bv<1>
+  [next] __synth_change_variable_0
