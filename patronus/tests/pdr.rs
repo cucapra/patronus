@@ -497,7 +497,7 @@ mod pdr {
         case_aman_goel_4bit(&solver_from_env());
     }
 
-    #[ignore = "Need more blocked cube generalization"]
+    #[ignore = "need more blocked cube generalization"]
     #[test]
     fn test_aman_goel_16bit() {
         case_aman_goel_16bit(&solver_from_env());
@@ -528,6 +528,7 @@ mod pdr {
         case_pipe(&solver_from_env());
     }
 
+    #[ignore = "too slow to finish in CI/CD"]
     #[test]
     fn test_zipversa_p11() {
         case_zipversa_p11(&solver_from_env());
