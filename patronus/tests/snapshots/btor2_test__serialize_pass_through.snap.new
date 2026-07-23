@@ -1,7 +1,0 @@
----
-source: patronus/tests/btor2_test.rs
-assertion_line: 70
-expression: sys.serialize_to_str(&ctx)
----
-pass
-input i : bv<1>

@@ -72,10 +72,11 @@ impl UnrollSmtEncoding {
 
         // we skip states in our signal order since they are not calculated directly in the update function
         let input_set = FxHashSet::from_iter(sys.inputs.iter().cloned());
+        let mut seen = FxHashSet::default();
         for (id, root) in ser_info
             .signal_order
             .into_iter()
-            .filter(|r| !is_state.contains(&r.expr))
+            .filter(|r| !is_state.contains(&r.expr) && seen.insert(r.expr))
             .enumerate()
         {
             signal_order.push(root.expr);

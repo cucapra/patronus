@@ -237,9 +237,6 @@ pub fn analyze_for_serialization(
             uses[input],
             SerializeSignalKind::Input,
         ));
-
-        // mark inputs as visited
-        visited.insert(input);
     }
 
     // add all roots and give them a large other count
