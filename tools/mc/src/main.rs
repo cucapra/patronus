@@ -11,6 +11,7 @@ use patronus::smt::*;
 use patronus::system::transform::simplify_expressions;
 use patronus::*;
 use std::fs::File;
+use std::process::exit;
 
 #[derive(Parser, Debug)]
 #[command(name = "mc")]
@@ -142,17 +143,24 @@ fn main() {
 
             pdr(&mut ctx, &mut smt_ctx, &sys, disable_unsat_cores)
         }
-    }
-    .unwrap();
-    match res {
-        mc::ModelCheckResult::Success => {
-            println!("unsat");
+    };
+
+    if let Ok(res) = res {
+        // Received model check result from engine
+        match res {
+            mc::ModelCheckResult::Success => {
+                println!("unsat");
+            }
+            mc::ModelCheckResult::Unknown => {
+                println!("unknown");
+            }
+            mc::ModelCheckResult::Fail(wit) => {
+                btor2::print_witness(&mut std::io::stdout(), &wit).unwrap();
+            }
         }
-        mc::ModelCheckResult::Unknown => {
-            println!("unknown");
-        }
-        mc::ModelCheckResult::Fail(wit) => {
-            btor2::print_witness(&mut std::io::stdout(), &wit).unwrap();
-        }
+    } else {
+        // Error from engine: print out message
+        eprintln!("Model checker failure: {}", res.err().unwrap());
+        exit(2);
     }
 }
