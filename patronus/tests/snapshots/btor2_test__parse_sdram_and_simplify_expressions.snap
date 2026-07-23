@@ -34,7 +34,7 @@ node _logic_not_sdram_controller.no_tri_state.v:315_26 : bv<1> = eq(state_cnt, 4
 node _ge_sdram_controller.no_tri_state.v:294_25 : bv<1> = ugte(concat(22'x000000, refresh_cnt), 32'x00000207)
 node _eq_sdram_controller.no_tri_state.v:292_24 : bv<1> = eq(state, 5'b00000)
 node _auto_opt_dff.cc:195:make_patterns_logic_224 : bv<1> = or(_eq_sdram_controller.no_tri_state.v:292_24, _logic_not_sdram_controller.no_tri_state.v:315_26)
-node _procmux_171 : bv<1> = eq(state, 5'b10100)
+node _eq_sdram_controller.no_tri_state.v:209_10 : bv<1> = eq(state, 5'b10100)
 state command : bv<8>
   [next] ite(rst_n, ite(_auto_opt_dff.cc:195:make_patterns_logic_224, ite(_eq_sdram_controller.no_tri_state.v:292_24, ite(_ge_sdram_controller.no_tri_state.v:294_25, 8'b10010001, ite(rd_enable, 8'b10011000, ite(wr_enable, 8'b10011000, 8'b10111000))), ite(_logic_not_sdram_controller.no_tri_state.v:315_26, %152[16:9], 8'b00000000)), command), 8'b10111000)
 state state : bv<5>
@@ -46,9 +46,9 @@ state busy : bv<1>
 state data_out : bv<16>
   [next] ite(rst_n, ite(wr_enable, wr_data, data_out), 16'x0000)
 state rd_data : bv<16>
-  [next] ite(rst_n, ite(_procmux_171, data_in, rd_data), 16'x0000)
+  [next] ite(rst_n, ite(_eq_sdram_controller.no_tri_state.v:209_10, data_in, rd_data), 16'x0000)
 state rd_ready : bv<1>
-  [next] ite(rst_n, _procmux_171, rd_ready)
+  [next] ite(rst_n, _eq_sdram_controller.no_tri_state.v:209_10, rd_ready)
 state _state_5 : bv<5> -> bv<17>
   [init] ([17'x00000] x 2^5)[5'b00000 := 17'x17000][5'b00001 := 17'x17020][5'b00010 := 17'x11030][5'b00011 := 17'x17047][5'b00100 := 17'x17000][5'b00101 := 17'x110a0][5'b00110 := 17'x17000][5'b00111 := 17'x17000][5'b01000 := 17'x12290][5'b01001 := 17'x17050][5'b01010 := 17'x170b7][5'b01011 := 17'x110c0][5'b01100 := 17'x170d7][5'b01101 := 17'x100e0][5'b01110 := 17'x170f1][5'b01111 := 17'x17000][5'b10000 := 17'x17111][5'b10001 := 17'x15320][5'b10010 := 17'x17131][5'b10011 := 17'x17140][5'b10100 := 17'x17000][5'b10101 := 17'x17000][5'b10110 := 17'x17000][5'b10111 := 17'x17000][5'b11000 := 17'x17191][5'b11001 := 17'x143a0][5'b11010 := 17'x171b1][5'b11011 := 17'x17000][5'b11100 := 17'x17000][5'b11101 := 17'x17000][5'b11110 := 17'x17000][5'b11111 := 17'x17000]
   [next] _state_5

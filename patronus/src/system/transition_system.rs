@@ -156,10 +156,10 @@ impl TransitionSystem {
                 // a Boolean literal
                 if self.names[new_expr].is_none() && !target.is_symbol() && !target.is_bv_lit() {
                     self.names[new_expr] = self.names[old_expr];
-
-                    // Cleanup old expression reference
-                    self.names[old_expr] = None;
                 }
+
+                // Cleanup old expression reference
+                self.names[old_expr] = None;
             }
         }
     }
