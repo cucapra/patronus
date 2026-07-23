@@ -4,7 +4,7 @@
 
 use crate::expr::*;
 use crate::mc::bmc::start_bmc_or_pdr;
-use crate::mc::encoding::TransitionSystemEncoding;
+use crate::mc::encoding::{Step, TransitionSystemEncoding};
 use crate::mc::{
     ModelCheckResult, UnrollSmtEncoding, bmc, check_assuming, check_assuming_end, get_smt_value,
 };
@@ -15,8 +15,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BinaryHeap;
 use std::num::NonZeroUsize;
 use std::ops::{Index, IndexMut};
-
-type Step = u64;
 
 const FROM_STEP: Step = 1;
 

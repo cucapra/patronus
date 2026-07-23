@@ -7,23 +7,25 @@ use crate::system::analysis::{Uses, analyze_for_serialization};
 use crate::system::{State, TransitionSystem};
 use rustc_hash::FxHashSet;
 
+pub type Step = u64;
+
 pub trait TransitionSystemEncoding {
     fn define_header(&self, smt_ctx: &mut impl SolverContext) -> Result<()>;
     fn init_at(
         &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
-        step: u64,
+        step: Step,
     ) -> Result<()>;
     fn unroll(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()>;
     /// Allows access to inputs, states, constraints and bad_state expressions at a particular step.
-    fn get_signal_at(&self, ctx: &Context, expr: ExprRef, k: u64) -> ExprRef;
+    fn get_signal_at(&self, ctx: &Context, expr: ExprRef, k: Step) -> ExprRef;
 }
 
 pub struct UnrollSmtEncoding {
     /// the offset at which our encoding was initialized
-    offset: Option<u64>,
-    current_step: Option<u64>,
+    offset: Option<Step>,
+    current_step: Option<Step>,
     /// all signals that need to be serialized separately, in the correct order
     signal_order: Vec<ExprRef>,
     /// look up table to see if an expression is a reference
@@ -122,7 +124,7 @@ impl UnrollSmtEncoding {
         &self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
-        step: u64,
+        step: Step,
         filter: &impl Fn(&SmtSignalInfo) -> bool,
     ) -> Result<()> {
         for expr in self.signal_order.iter() {
@@ -146,7 +148,7 @@ impl UnrollSmtEncoding {
         Ok(())
     }
 
-    fn create_signal_symbols_in_step(&mut self, ctx: &mut Context, step: u64) {
+    fn create_signal_symbols_in_step(&mut self, ctx: &mut Context, step: Step) {
         let offset = self.offset.expect("Need to call init_at first!");
         let index = (step - offset) as usize;
         assert_eq!(self.symbols_at.len(), index, "Missing or duplicate step!");
@@ -170,7 +172,7 @@ impl UnrollSmtEncoding {
         self.symbols_at.push(syms);
     }
 
-    fn signal_sym_in_step(&self, expr: ExprRef, step: u64) -> Option<ExprRef> {
+    fn signal_sym_in_step(&self, expr: ExprRef, step: Step) -> Option<ExprRef> {
         if let Some(Some(info)) = self.signals.get(usize::from(expr)) {
             let offset = self.offset.expect("Need to call init_at first!");
             let index = (step - offset) as usize;
@@ -180,7 +182,7 @@ impl UnrollSmtEncoding {
         }
     }
 
-    fn expr_in_step(&self, ctx: &mut Context, expr: ExprRef, step: u64) -> ExprRef {
+    fn expr_in_step(&self, ctx: &mut Context, expr: ExprRef, step: Step) -> ExprRef {
         let expr_is_symbol = ctx[expr].is_symbol();
         simple_transform_expr(ctx, expr, |_, e, _| {
             // If the expression we are trying to serialize is not a symbol, then wo
@@ -204,7 +206,7 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
         &mut self,
         ctx: &mut Context,
         smt_ctx: &mut impl SolverContext,
-        step: u64,
+        step: Step,
     ) -> Result<()> {
         // delete old mutable state
         self.symbols_at.clear();
@@ -240,10 +242,17 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
             }
         }
 
-        // define other signals including inputs, init signals are never needed here
-        self.define_signals(ctx, smt_ctx, step, &|info: &SmtSignalInfo| {
-            (info.uses.other > 0 || info.is_input) && (info.uses.init == 0)
-        })?;
+        if step == 0 {
+            // define other signals including inputs, init signals are never needed here
+            self.define_signals(ctx, smt_ctx, step, &|info: &SmtSignalInfo| {
+                (info.uses.other > 0 || info.is_input) && (info.uses.init == 0)
+            })?;
+        } else {
+            // else, define all signals that are not defined in unroll
+            self.define_signals(ctx, smt_ctx, step, &|info: &SmtSignalInfo| {
+                !(info.uses.next > 0 && info.uses.other == 0 && !info.is_input)
+            })?;
+        }
 
         Ok(())
     }
@@ -290,7 +299,7 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
         Ok(())
     }
 
-    fn get_signal_at(&self, ctx: &Context, expr: ExprRef, step: u64) -> ExprRef {
+    fn get_signal_at(&self, ctx: &Context, expr: ExprRef, step: Step) -> ExprRef {
         assert!(step <= self.current_step.unwrap_or(0));
         self.signal_sym_in_step(expr, step).unwrap_or_else(|| {
             if ctx[expr].is_true() || ctx[expr].is_false() {
@@ -305,6 +314,6 @@ impl TransitionSystemEncoding for UnrollSmtEncoding {
     }
 }
 
-fn name_at(name: &str, step: u64) -> String {
+fn name_at(name: &str, step: Step) -> String {
     format!("{}@{}", name, step)
 }

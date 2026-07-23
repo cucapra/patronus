@@ -225,6 +225,9 @@ pub fn analyze_for_serialization(
 ) -> SerializeMeta {
     let uses = determine_simples_uses(ctx, sys, include_outputs);
 
+    // keep track of which signals have been processed
+    let mut visited = DenseExprSet::default();
+
     // always add all inputs first to the signal order
     let mut signal_order = Vec::new();
     for &input in sys.inputs.iter() {
@@ -234,10 +237,10 @@ pub fn analyze_for_serialization(
             uses[input],
             SerializeSignalKind::Input,
         ));
-    }
 
-    // keep track of which signals have been processed
-    let mut visited = DenseExprSet::default();
+        // mark inputs as visited
+        visited.insert(input);
+    }
 
     // add all roots and give them a large other count
     let mut todo: Vec<RootInfo> = vec![];
