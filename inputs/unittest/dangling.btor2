@@ -1,0 +1,12 @@
+1 sort bitvec 1
+2 input 1 a
+3 input 1 b
+4 and 1 2 3 h
+5 or 1 4 2 c1
+6 constraint 5
+7 state 1 s
+8 and 1 4 3 c2
+9 init 1 7 8
+10 not 1 7
+11 next 1 7 10
+12 bad 7

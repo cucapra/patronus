@@ -5,7 +5,7 @@
 
 use crate::expr::*;
 use crate::mc::Witness;
-use crate::mc::encoding::{TransitionSystemEncoding, UnrollSmtEncoding};
+use crate::mc::encoding::{Step, TransitionSystemEncoding, UnrollSmtEncoding};
 use crate::mc::types::{InitValue, ModelCheckResult, Result};
 use crate::mc::utils::{check_assuming, check_assuming_end, get_smt_value};
 use crate::smt::*;
@@ -25,7 +25,7 @@ pub fn bmc(
     sys: &TransitionSystem,
     check_constraints: bool,
     check_bad_states_individually: bool,
-    k_max: u64,
+    k_max: Step,
 ) -> Result<ModelCheckResult> {
     assert!(k_max > 0 && k_max <= 2000, "unreasonable k_max={}", k_max);
 
@@ -135,7 +135,7 @@ fn get_witness(
     _use_counts: &[UseCountInt], // TODO: analyze array expressions in order to record which indices are accessed
     smt_ctx: &mut impl SolverContext,
     enc: &impl TransitionSystemEncoding,
-    k_max: u64,
+    k_max: Step,
     bad_states: &[ExprRef],
 ) -> Result<Witness> {
     let mut wit = Witness::default();
@@ -165,7 +165,7 @@ fn get_witness(
             Value::Array(v) => {
                 // TODO: narrow down the relevant indices
                 let indices = (0..v.num_elements())
-                    .map(|ii| BitVecValue::from_u64(ii as u64, v.index_width()))
+                    .map(|ii| BitVecValue::from_u64(ii as Step, v.index_width()))
                     .collect::<Vec<_>>();
                 InitValue::Array(v, indices)
             }

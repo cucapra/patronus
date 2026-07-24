@@ -120,7 +120,11 @@ impl TransitionSystem {
 
     /// Update all output, input, assume, assert, state expressions.
     /// If `update` returns `None`, no update is performed.
-    pub fn update_expressions(&mut self, mut update: impl FnMut(ExprRef) -> Option<ExprRef>) {
+    pub fn update_expressions(
+        &mut self,
+        ctx: &Context,
+        mut update: impl FnMut(ExprRef) -> Option<ExprRef>,
+    ) {
         for old in self.inputs.iter_mut() {
             *old = update(*old).unwrap_or(*old);
         }
@@ -145,7 +149,17 @@ impl TransitionSystem {
             if let Some(new_expr) = update(old_expr)
                 && new_expr != old_expr
             {
-                self.names[new_expr] = self.names[old_expr];
+                // Get current entry for updated expression
+                let target = &ctx[new_expr];
+
+                // Check that transformed expression is not already named, is a state/input, or
+                // a Boolean literal
+                if self.names[new_expr].is_none() && !target.is_symbol() && !target.is_bv_lit() {
+                    self.names[new_expr] = self.names[old_expr];
+                }
+
+                // Cleanup old expression reference
+                self.names[old_expr] = None;
             }
         }
     }

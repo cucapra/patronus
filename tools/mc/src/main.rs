@@ -11,6 +11,7 @@ use patronus::smt::*;
 use patronus::system::transform::simplify_expressions;
 use patronus::*;
 use std::fs::File;
+use std::process::exit;
 
 #[derive(Parser, Debug)]
 #[command(name = "mc")]
@@ -130,7 +131,8 @@ fn main() {
         ),
         ModelCheckEngine::Pdr => {
             // Automatically disable UNSAT core generalization if solver does not support `(get-unsat-assumptions)`
-            let disable_unsat_cores = args.disable_unsat_cores || !solver.supports_get_unsat_assumptions();
+            let disable_unsat_cores =
+                args.disable_unsat_cores || !solver.supports_get_unsat_assumptions();
 
             // Print out message in verbose mode to remind client
             if args.verbose && !solver.supports_get_unsat_assumptions() {
@@ -142,17 +144,24 @@ fn main() {
 
             pdr(&mut ctx, &mut smt_ctx, &sys, disable_unsat_cores)
         }
-    }
-    .unwrap();
-    match res {
-        mc::ModelCheckResult::Success => {
-            println!("unsat");
+    };
+
+    if let Ok(res) = res {
+        // Received model check result from engine
+        match res {
+            mc::ModelCheckResult::Success => {
+                println!("unsat");
+            }
+            mc::ModelCheckResult::Unknown => {
+                println!("unknown");
+            }
+            mc::ModelCheckResult::Fail(wit) => {
+                btor2::print_witness(&mut std::io::stdout(), &wit).unwrap();
+            }
         }
-        mc::ModelCheckResult::Unknown => {
-            println!("unknown");
-        }
-        mc::ModelCheckResult::Fail(wit) => {
-            btor2::print_witness(&mut std::io::stdout(), &wit).unwrap();
-        }
+    } else {
+        // Error from engine: print out message
+        eprintln!("Model checker failure: {}", res.err().unwrap());
+        exit(2);
     }
 }

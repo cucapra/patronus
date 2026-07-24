@@ -8,7 +8,7 @@ Cargo.lock
 /perf.data.old
 replay.smt
 patronus/tests/patronus_out/*
-
+.jj/
 
 # Python
 __pycache__/
