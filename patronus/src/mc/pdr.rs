@@ -526,7 +526,7 @@ impl BasePdr {
     /// # Returns
     /// SMT expression asserting over-approximation of states reachable in `frame` steps
     /// (i.e. state space of `frame`-th frame), stepped at pre-transition step
-    fn frame_assumptions(&self, ctx: &mut Context, frame_id: FrameId) -> ExprRef {
+    fn frame_assumptions(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext, frame_id: FrameId) -> Result<ExprRef> {
         assert!(
             frame_id == FrameId::Init
                 || frame_id <= self.frontier()
@@ -535,15 +535,20 @@ impl BasePdr {
 
         // Special case: for init frame, just return initial activation literal
         if frame_id == FrameId::Init {
-            return self.iter().fold(self.init_frame, |acc, id| {
+            let init_proxy = self.create_act_lit(ctx, smt_ctx)?;
+            let init_assump = self.iter().fold(self.init_frame, |acc, id| {
                 let neg_act = ctx.not(self[id].act);
                 ctx.and(acc, neg_act)
             });
+            let imp = ctx.implies(init_proxy, init_assump);
+            smt_ctx.assert(ctx, imp)?;
+
+            return Ok(init_proxy);
         }
 
         // Conjunct all blocked cubes in this frame and higher (since all blocked
         // cubes in higher delta frames are also blocked in this frame)
-        self.iter().fold(ctx.not(self.init_frame), |acc, id| {
+        let frame_assump = self.iter().fold(ctx.not(self.init_frame), |acc, id| {
             if id >= frame_id {
                 // Include activation literals of target frame and all higher frames,
                 // which include cubes blocked in the `frame_id`-th frame
@@ -555,7 +560,15 @@ impl BasePdr {
                 let neg_act = ctx.not(self[id].act);
                 ctx.and(acc, neg_act)
             }
-        })
+        });
+
+        // Introduce proxy variable for frame assumptions (i.e. x = frame_assump)
+        // to avoid compound SMT expression
+        let proxy = self.create_act_lit(ctx, smt_ctx)?;
+        let imp = ctx.implies(proxy, frame_assump);
+        smt_ctx.assert(ctx, imp)?;
+
+        Ok(proxy)
     }
 
     /// Check if assumptions intersect with the initial states
@@ -575,7 +588,7 @@ impl BasePdr {
         get_unsat_core: bool,
     ) -> Result<(bool, Option<Cube>)> {
         // Initial frame
-        let init = self.frame_assumptions(ctx, FrameId::Init);
+        let init = self.frame_assumptions(ctx, smt_ctx, FrameId::Init)?;
 
         // Disable bad states for `FROM_STEP`
         let neg_bad = ctx.not(self.from_step_bad_active);
@@ -596,6 +609,10 @@ impl BasePdr {
             fin_assumps,
             get_unsat_core,
         )?;
+
+        // Cleanup
+        let neg_init = ctx.not(init);
+        smt_ctx.assert(ctx, neg_init)?;
 
         if smt_res.0 == CheckSatResponse::Unknown {
             // Unknown query result: return error
@@ -626,11 +643,19 @@ impl BasePdr {
         gen_cube: Cube,
         rm_lits: impl IntoIterator<Item = ExprRef>,
     ) -> Result<Cube> {
+        // Proxies to clean up
+        let mut cleanup = vec![];
+
         // If generalized cube already doesn't intersect with initial states, just return
+        let cube_proxy = self.create_act_lit(ctx, smt_ctx)?;
         let cube_expr = gen_cube.to_expr(ctx);
         let cube_from = self.enc.expr_at_step(ctx, cube_expr, FROM_STEP);
+        let imp = ctx.implies(cube_proxy, cube_from);
+        smt_ctx.assert(ctx, imp)?;
+        cleanup.push(cube_proxy);
+
         if !self
-            .intersects_init(ctx, smt_ctx, sys, [cube_from], false)?
+            .intersects_init(ctx, smt_ctx, sys, [cube_proxy], false)?
             .0
         {
             return Ok(gen_cube);
@@ -656,21 +681,25 @@ impl BasePdr {
         let mut first_iter = true;
 
         // Original generalized cube at `FROM_STEP`
+        let cube_proxy = self.create_act_lit(ctx, smt_ctx)?;
         let cube_expr = gen_cube.to_expr(ctx);
         let cube_from = self.enc.expr_at_step(ctx, cube_expr, FROM_STEP);
+        let imp = ctx.implies(cube_proxy, cube_from);
+        smt_ctx.assert(ctx, imp)?;
+        cleanup.push(cube_proxy);
 
         loop {
             // Gather activation literals of original cube literals that could be dropped
             let mut assumps = lit_map.keys().copied().collect::<Vec<_>>();
 
             // Add original generalized cube to assumption
-            assumps.push(cube_from);
+            assumps.push(cube_proxy);
 
             let check_res = self.intersects_init(ctx, smt_ctx, sys, assumps, true)?;
 
             if check_res.0 && first_iter {
                 // Clean up activation literals
-                for &act in lit_map.keys() {
+                for &act in lit_map.keys().chain(cleanup.iter()) {
                     let neg_act = ctx.not(act);
                     smt_ctx.assert(ctx, neg_act)?;
                 }
@@ -709,7 +738,7 @@ impl BasePdr {
                 fin_lits.extend(lit_map.values().copied());
 
                 // Clean up activation literals
-                for &act in lit_map.keys() {
+                for &act in lit_map.keys().chain(cleanup.iter()) {
                     let neg_act = ctx.not(act);
                     smt_ctx.assert(ctx, neg_act)?;
                 }
@@ -736,11 +765,15 @@ impl BasePdr {
         query_type: RelIndType,
     ) -> Result<(CheckSatResponse, Option<Cube>)> {
         // Query assumptions
-        let mut assumptions = Vec::new();
+        let mut assumptions = vec![];
+
+        // Extra proxies to clean up
+        let mut cleanup = vec![];
 
         // Get frame assumption
-        let frame_assumption = self.frame_assumptions(ctx, cube.frame.decrement());
+        let frame_assumption = self.frame_assumptions(ctx, smt_ctx, cube.frame.decrement())?;
         assumptions.push(frame_assumption);
+        cleanup.push(frame_assumption);
 
         // Map between activation literal and original unstepped literal
         let mut lit_map = FxHashMap::default();
@@ -759,12 +792,18 @@ impl BasePdr {
 
         // Next step cube (expressed as `TO_STEP` literals)
         assumptions.extend(lit_map.keys());
+        cleanup.extend(lit_map.keys());
 
         // Current step negation cube
         if query_type == RelIndType::Extended {
+            let neg_cube_proxy = self.create_act_lit(ctx, smt_ctx)?;
             let neg_cube_expr = cube.cube.negate(ctx);
             let neg_cube_from = self.enc.expr_at_step(ctx, neg_cube_expr, FROM_STEP);
-            assumptions.push(neg_cube_from);
+            let imp = ctx.implies(neg_cube_proxy, neg_cube_from);
+            smt_ctx.assert(ctx, imp)?;
+
+            assumptions.push(neg_cube_proxy);
+            cleanup.push(neg_cube_proxy);
         }
 
         // Assert constraints hold after transition
@@ -813,7 +852,7 @@ impl BasePdr {
         };
 
         // Disable all created activation literals as cleanup
-        for &act in lit_map.keys() {
+        for act in cleanup {
             let neg_act = ctx.not(act);
             smt_ctx.assert(ctx, neg_act)?;
         }
@@ -848,7 +887,7 @@ impl BasePdr {
         let front = self.frontier();
 
         // Get frame assumptions for frontier frame
-        let front_assumption = self.frame_assumptions(ctx, front);
+        let front_assumption = self.frame_assumptions(ctx, smt_ctx, front)?;
 
         // Turn off constraint requirements for `TO_STEP`
         let neg_cons = ctx.not(self.to_step_constraints_active);
@@ -1055,15 +1094,21 @@ impl BasePdr {
             }
         }
 
+        let inf_assumption = self.frame_assumptions(ctx, smt_ctx, FrameId::Infinite)?;
+
         // Try to propagate all blocked cubes in the last finite frame into the infinite frame
         for cube in std::mem::take(&mut self[front].cubes) {
-            let inf_assumption = self.frame_assumptions(ctx, FrameId::Infinite);
-
+            let clause_proxy = self.create_act_lit(ctx, smt_ctx)?;
             let clause_expr = cube.negate(ctx);
             let clause_from = self.enc.expr_at_step(ctx, clause_expr, FROM_STEP);
+            let clause_imp = ctx.implies(clause_proxy, clause_from);
+            smt_ctx.assert(ctx, clause_imp)?;
 
+            let cube_proxy = self.create_act_lit(ctx, smt_ctx)?;
             let cube_expr = cube.to_expr(ctx);
             let cube_to = self.enc.expr_at_step(ctx, cube_expr, TO_STEP);
+            let cube_imp = ctx.implies(cube_proxy, cube_to);
+            smt_ctx.assert(ctx, cube_imp)?;
 
             // Disable `FROM_STEP` bad states
             let neg_bad = ctx.not(self.from_step_bad_active);
@@ -1077,14 +1122,20 @@ impl BasePdr {
                 &mut self.enc,
                 vec![
                     inf_assumption,
-                    clause_from,
-                    cube_to,
+                    clause_proxy,
+                    cube_proxy,
                     self.to_step_constraints_active,
                     neg_bad,
                 ],
                 false,
             )?
             .0;
+
+            // Cleanup
+            let neg_clause_proxy = ctx.not(clause_proxy);
+            let neg_cube_proxy = ctx.not(cube_proxy);
+            smt_ctx.assert(ctx, neg_clause_proxy)?;
+            smt_ctx.assert(ctx, neg_cube_proxy)?;
 
             if smt_res == CheckSatResponse::Unsat {
                 // If UNSAT, blocked cube can also be propagated to infinite frame
