@@ -298,6 +298,20 @@ fn case_quiz4_sat(solver: &SmtLibSolver) {
     }
 }
 
+fn case_dangling(solver: &SmtLibSolver) {
+    let Some((ctx, sys, res)) =
+        run_pdr_file(solver, "../inputs/unittest/dangling.btor2", None, false)
+    else {
+        return;
+    };
+
+    if let ModelCheckResult::Fail(wit) = res {
+        validate_witness(&ctx, &sys, &wit);
+    } else {
+        panic!("test_dangling failed");
+    }
+}
+
 fn case_delay(solver: &SmtLibSolver) {
     let Some((_, _, res)) = run_pdr_file(solver, "../inputs/verilog_tests/Delay.btor", None, false)
     else {
@@ -401,18 +415,6 @@ fn case_pipe(solver: &SmtLibSolver) {
     assert!(matches!(res, ModelCheckResult::Success));
 }
 
-fn case_zipversa_p11(solver: &SmtLibSolver) {
-    let Some((_, _, res)) = run_pdr_file(
-        solver,
-        "../inputs/unittest/zipversa_composecrc_prf-p11.btor",
-        None,
-        false,
-    ) else {
-        return;
-    };
-    assert!(matches!(res, ModelCheckResult::Success));
-}
-
 #[cfg(test)]
 mod pdr {
     use super::*;
@@ -473,6 +475,11 @@ mod pdr {
     }
 
     #[test]
+    fn test_dangling() {
+        case_dangling(&solver_from_env());
+    }
+
+    #[test]
     fn test_delay() {
         case_delay(&solver_from_env());
     }
@@ -526,11 +533,5 @@ mod pdr {
     #[test]
     fn test_pipe() {
         case_pipe(&solver_from_env());
-    }
-
-    #[ignore = "too slow to finish in CI/CD"]
-    #[test]
-    fn test_zipversa_p11() {
-        case_zipversa_p11(&solver_from_env());
     }
 }
