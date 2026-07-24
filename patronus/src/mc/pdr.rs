@@ -526,7 +526,12 @@ impl BasePdr {
     /// # Returns
     /// SMT expression asserting over-approximation of states reachable in `frame` steps
     /// (i.e. state space of `frame`-th frame), stepped at pre-transition step
-    fn frame_assumptions(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext, frame_id: FrameId) -> Result<ExprRef> {
+    fn frame_assumptions(
+        &mut self,
+        ctx: &mut Context,
+        smt_ctx: &mut impl SolverContext,
+        frame_id: FrameId,
+    ) -> Result<ExprRef> {
         assert!(
             frame_id == FrameId::Init
                 || frame_id <= self.frontier()
@@ -658,6 +663,12 @@ impl BasePdr {
             .intersects_init(ctx, smt_ctx, sys, [cube_proxy], false)?
             .0
         {
+            // Clean up
+            for act in cleanup {
+                let neg_act = ctx.not(act);
+                smt_ctx.assert(ctx, neg_act)?;
+            }
+
             return Ok(gen_cube);
         }
 
@@ -677,16 +688,10 @@ impl BasePdr {
             lit_map.insert(act, lit);
         }
 
+        cleanup.extend(lit_map.keys());
+
         // Flag for first iteration
         let mut first_iter = true;
-
-        // Original generalized cube at `FROM_STEP`
-        let cube_proxy = self.create_act_lit(ctx, smt_ctx)?;
-        let cube_expr = gen_cube.to_expr(ctx);
-        let cube_from = self.enc.expr_at_step(ctx, cube_expr, FROM_STEP);
-        let imp = ctx.implies(cube_proxy, cube_from);
-        smt_ctx.assert(ctx, imp)?;
-        cleanup.push(cube_proxy);
 
         loop {
             // Gather activation literals of original cube literals that could be dropped
@@ -699,7 +704,7 @@ impl BasePdr {
 
             if check_res.0 && first_iter {
                 // Clean up activation literals
-                for &act in lit_map.keys().chain(cleanup.iter()) {
+                for act in cleanup {
                     let neg_act = ctx.not(act);
                     smt_ctx.assert(ctx, neg_act)?;
                 }
@@ -724,21 +729,13 @@ impl BasePdr {
             // Remove all candidate literals not in UNSAT core
             lit_map.retain(|e, _| gen_lits.contains(e));
 
-            // Permanently disable literals that were removed
-            for &act in &prev_acts {
-                if !lit_map.contains_key(&act) {
-                    let neg_act = ctx.not(act);
-                    smt_ctx.assert(ctx, neg_act)?;
-                }
-            }
-
             if lit_map.len() == prev_acts.len() {
                 // If no literals are removed, then fixpoint reached
                 let mut fin_lits = gen_cube.literals;
                 fin_lits.extend(lit_map.values().copied());
 
                 // Clean up activation literals
-                for &act in lit_map.keys().chain(cleanup.iter()) {
+                for act in cleanup {
                     let neg_act = ctx.not(act);
                     smt_ctx.assert(ctx, neg_act)?;
                 }
@@ -892,15 +889,21 @@ impl BasePdr {
         // Turn off constraint requirements for `TO_STEP`
         let neg_cons = ctx.not(self.to_step_constraints_active);
 
-        // Run query SAT?[R_N /\ \neg P]
-        match query(
+        let res = query(
             ctx,
             smt_ctx,
             sys,
             &mut self.enc,
             vec![front_assumption, self.from_step_bad_active, neg_cons], // Assert bad states at `FROM_STEP`
             false,
-        )? {
+        )?;
+
+        // Clean up
+        let neg_proxy = ctx.not(front_assumption);
+        smt_ctx.assert(ctx, neg_proxy)?;
+
+        // Run query SAT?[R_N /\ \neg P]
+        match res {
             (CheckSatResponse::Sat, Some(cube)) => {
                 // Safety property violation found: return witness cube
                 Ok(Some(cube))
@@ -1094,7 +1097,7 @@ impl BasePdr {
             }
         }
 
-        let inf_assumption = self.frame_assumptions(ctx, smt_ctx, FrameId::Infinite)?;
+        let inf_assump = self.frame_assumptions(ctx, smt_ctx, FrameId::Infinite)?;
 
         // Try to propagate all blocked cubes in the last finite frame into the infinite frame
         for cube in std::mem::take(&mut self[front].cubes) {
@@ -1121,7 +1124,7 @@ impl BasePdr {
                 sys,
                 &mut self.enc,
                 vec![
-                    inf_assumption,
+                    inf_assump,
                     clause_proxy,
                     cube_proxy,
                     self.to_step_constraints_active,
@@ -1131,7 +1134,7 @@ impl BasePdr {
             )?
             .0;
 
-            // Cleanup
+            // Clean up
             let neg_clause_proxy = ctx.not(clause_proxy);
             let neg_cube_proxy = ctx.not(cube_proxy);
             smt_ctx.assert(ctx, neg_clause_proxy)?;
@@ -1152,6 +1155,10 @@ impl BasePdr {
                 self[front].cubes.push(cube);
             }
         }
+
+        // Clean up
+        let neg_inf_proxy = ctx.not(inf_assump);
+        smt_ctx.assert(ctx, neg_inf_proxy)?;
 
         // Inductive invariant not found
         Ok(false)

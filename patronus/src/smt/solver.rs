@@ -479,12 +479,12 @@ pub const BITWUZLA: SmtLibSolver = SmtLibSolver {
 pub const YICES2: SmtLibSolver = SmtLibSolver {
     name: "yices-smt2",
     args: &["--incremental"],
-    options: &[],
-    supports_uf: false, // actually true, but ignoring for now
-    supports_check_assuming: false,
+    options: &["produce-unsat-assumptions"],
+    supports_uf: false,            // actually true, but ignoring for now
+    supports_check_assuming: true, // only works with Boolean literals
     // see https://github.com/SRI-CSL/yices2/issues/110
     supports_const_array: false,
-    supports_unsat_assumptions: false,
+    supports_unsat_assumptions: true,
 };
 
 pub const Z3: SmtLibSolver = SmtLibSolver {
