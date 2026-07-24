@@ -85,6 +85,10 @@ pub trait SolverMetaData {
     // properties
     fn name(&self) -> &str;
     fn supports_check_assuming(&self) -> bool;
+    /// Indicates whether `(check-sat-assuming ...)` accepts arbitrary Boolean-valued expressions
+    fn supports_check_assuming_exprs(&self) -> bool {
+        true
+    }
     fn supports_uf(&self) -> bool;
     /// Indicates whether the solver supports the non-standard `(as const)` command.
     fn supports_const_array(&self) -> bool;
@@ -128,6 +132,7 @@ pub struct SmtLibSolver {
     options: &'static [&'static str],
     supports_uf: bool,
     supports_check_assuming: bool,
+    supports_check_assuming_exprs: bool,
     supports_const_array: bool,
     supports_unsat_assumptions: bool,
 }
@@ -139,6 +144,10 @@ impl SolverMetaData for SmtLibSolver {
 
     fn supports_check_assuming(&self) -> bool {
         self.supports_check_assuming
+    }
+
+    fn supports_check_assuming_exprs(&self) -> bool {
+        self.supports_check_assuming_exprs
     }
 
     fn supports_uf(&self) -> bool {
@@ -180,6 +189,7 @@ impl Solver for SmtLibSolver {
             solver_options: self.options.iter().map(|a| a.to_string()).collect(),
             supports_uf: self.supports_uf,
             supports_check_assuming: self.supports_check_assuming,
+            supports_check_assuming_exprs: self.supports_check_assuming_exprs,
             supports_const_array: self.supports_const_array,
             supports_get_unsat_assumptions: self.supports_unsat_assumptions,
             symbols: vec![SymbolTable::default()],
@@ -214,6 +224,7 @@ pub struct SmtLibSolverCtx {
     // solver capabilities
     supports_uf: bool,
     supports_check_assuming: bool,
+    supports_check_assuming_exprs: bool,
     supports_const_array: bool,
     supports_get_unsat_assumptions: bool,
     /// Internal symbol tables for each solver context
@@ -329,6 +340,10 @@ impl SolverMetaData for SmtLibSolverCtx {
     }
     fn supports_check_assuming(&self) -> bool {
         self.supports_check_assuming
+    }
+
+    fn supports_check_assuming_exprs(&self) -> bool {
+        self.supports_check_assuming_exprs
     }
 
     fn supports_const_array(&self) -> bool {
@@ -472,6 +487,7 @@ pub const BITWUZLA: SmtLibSolver = SmtLibSolver {
     options: &["incremental", "produce-models", "produce-unsat-assumptions"],
     supports_uf: false,
     supports_check_assuming: true,
+    supports_check_assuming_exprs: true,
     supports_const_array: true,
     supports_unsat_assumptions: true,
 };
@@ -480,8 +496,9 @@ pub const YICES2: SmtLibSolver = SmtLibSolver {
     name: "yices-smt2",
     args: &["--incremental"],
     options: &["produce-unsat-assumptions"],
-    supports_uf: false,            // actually true, but ignoring for now
-    supports_check_assuming: true, // only works with Boolean literals
+    supports_uf: false,                   // actually true, but ignoring for now
+    supports_check_assuming: true,
+    supports_check_assuming_exprs: false,
     // see https://github.com/SRI-CSL/yices2/issues/110
     supports_const_array: false,
     supports_unsat_assumptions: true,
@@ -498,6 +515,7 @@ pub const Z3: SmtLibSolver = SmtLibSolver {
     options: &["produce-unsat-assumptions"],
     supports_uf: true,
     supports_check_assuming: true,
+    supports_check_assuming_exprs: true,
     supports_const_array: true,
     supports_unsat_assumptions: true,
 };
@@ -508,6 +526,7 @@ pub const CVC5: SmtLibSolver = SmtLibSolver {
     options: &["produce-unsat-assumptions"],
     supports_uf: true,
     supports_check_assuming: true,
+    supports_check_assuming_exprs: true,
     supports_const_array: true,
     supports_unsat_assumptions: true,
 };
@@ -558,7 +577,7 @@ mod tests {
     #[test]
     fn test_check_sat_assuming() {
         let backend = solver_from_env();
-        if !backend.supports_check_assuming() {
+        if !backend.supports_check_assuming() || !backend.supports_check_assuming_exprs() {
             return;
         }
         let mut ctx = Context::default();
@@ -577,7 +596,7 @@ mod tests {
     #[test]
     fn test_unsat_assumptions_basic() {
         let backend = solver_from_env();
-        if !backend.supports_get_unsat_assumptions() {
+        if !backend.supports_get_unsat_assumptions() || !backend.supports_check_assuming_exprs() {
             return;
         }
         let mut ctx = Context::default();
@@ -602,7 +621,7 @@ mod tests {
     #[test]
     fn test_unsat_assumptions_false() {
         let backend = solver_from_env();
-        if !backend.supports_get_unsat_assumptions() {
+        if !backend.supports_get_unsat_assumptions() || !backend.supports_check_assuming_exprs() {
             return;
         }
         let mut ctx = Context::default();
@@ -629,7 +648,7 @@ mod tests {
     #[test]
     fn test_unsat_assumptions_subset() {
         let backend = solver_from_env();
-        if !backend.supports_get_unsat_assumptions() {
+        if !backend.supports_get_unsat_assumptions() || !backend.supports_check_assuming_exprs() {
             return;
         }
         let mut ctx = Context::default();
@@ -693,7 +712,7 @@ mod tests {
     #[test]
     fn test_unsat_assumptions_empty() {
         let backend = solver_from_env();
-        if !backend.supports_get_unsat_assumptions() {
+        if !backend.supports_get_unsat_assumptions() || !backend.supports_check_assuming_exprs() {
             return;
         }
         let mut ctx = Context::default();
@@ -726,7 +745,7 @@ mod tests {
     #[test]
     fn test_push_pop() {
         let backend = solver_from_env();
-        if !backend.supports_get_unsat_assumptions() {
+        if !backend.supports_get_unsat_assumptions() || !backend.supports_check_assuming_exprs() {
             return;
         }
         let mut ctx = Context::default();
@@ -826,7 +845,7 @@ mod tests {
     #[test]
     fn test_unsat_assumptions_fail() {
         let backend = solver_from_env();
-        if !backend.supports_get_unsat_assumptions() {
+        if !backend.supports_get_unsat_assumptions() || !backend.supports_check_assuming_exprs() {
             return;
         }
         let mut ctx = Context::default();
