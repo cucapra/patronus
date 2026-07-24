@@ -496,7 +496,7 @@ pub const YICES2: SmtLibSolver = SmtLibSolver {
     name: "yices-smt2",
     args: &["--incremental"],
     options: &["produce-unsat-assumptions"],
-    supports_uf: false,                   // actually true, but ignoring for now
+    supports_uf: false, // actually true, but ignoring for now
     supports_check_assuming: true,
     supports_check_assuming_exprs: false,
     // see https://github.com/SRI-CSL/yices2/issues/110
