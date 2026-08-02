@@ -24,6 +24,14 @@ pub struct Simplifier<T: ExprMap<Option<ExprRef>>> {
     cache: T,
 }
 
+pub type DefaultSimplifier = Simplifier<SparseExprMap<Option<ExprRef>>>;
+
+impl Default for Simplifier<SparseExprMap<Option<ExprRef>>> {
+    fn default() -> Self {
+        Self::new(SparseExprMap::default())
+    }
+}
+
 impl<T: ExprMap<Option<ExprRef>>> Simplifier<T> {
     pub fn new(cache: T) -> Self {
         Self { cache }
