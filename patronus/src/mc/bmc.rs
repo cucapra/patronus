@@ -38,6 +38,8 @@ pub fn bmc(
     let constraints = sys.constraints.clone();
     let bad_states = sys.bad_states.clone();
 
+    let mut next_proxy_id = 0u64;
+
     if k_max > 0 && sys.states.is_empty() {
         println!(
             "[warn]: k_max={k_max} is unnecessarily large. System {} has no states.",
@@ -65,6 +67,7 @@ pub fn bmc(
 
         if check_bad_states_individually {
             for expr_ref in bad_states.iter() {
+                // don't need to proxy because bad state signals are effectively Boolean literals
                 let expr = enc.get_signal_at(ctx, *expr_ref, k);
                 let res = check_assuming(ctx, smt_ctx, [expr])?;
 
@@ -81,8 +84,16 @@ pub fn bmc(
                 .iter()
                 .map(|expr_ref| enc.get_signal_at(ctx, *expr_ref, k))
                 .collect::<Vec<_>>();
+
+            let bad_proxy = ctx.bv_symbol(format!("__bmc_act_{next_proxy_id}").as_str(), 1);
+            smt_ctx.declare_const(ctx, bad_proxy)?;
+
             let any_bad = all_bads.into_iter().reduce(|a, b| ctx.or(a, b)).unwrap();
-            let res = check_assuming(ctx, smt_ctx, [any_bad])?;
+            let imp = ctx.implies(bad_proxy, any_bad);
+            smt_ctx.assert(ctx, imp)?;
+            next_proxy_id += 1;
+
+            let res = check_assuming(ctx, smt_ctx, [bad_proxy])?;
 
             // count expression uses
             let use_counts = count_system_expr_uses(ctx, sys);
@@ -91,6 +102,10 @@ pub fn bmc(
                 return Ok(ModelCheckResult::Fail(wit));
             }
             check_assuming_end(smt_ctx)?;
+
+            // Clean up
+            let neg_proxy = ctx.not(bad_proxy);
+            smt_ctx.assert(ctx, neg_proxy)?;
         }
 
         // advance
