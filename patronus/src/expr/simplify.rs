@@ -562,9 +562,16 @@ fn simplify_bv_slice(ctx: &mut Context, e: ExprRef, hi: WidthInt, lo: WidthInt) 
         // slice of sign extend
         Expr::BVSignExt { e, .. } => {
             let e_width = e.get_bv_type(ctx).unwrap();
-            if hi < e_width {
+
+            if lo >= e_width {
+                // Slice exists in extended bits (just get sign bits)
+                let sign_bit = ctx.slice(e, e_width - 1, e_width - 1);
+                Some(ctx.sign_extend(sign_bit, hi - lo))
+            } else if hi < e_width {
+                // Slice exists in original bits only
                 Some(ctx.slice(e, hi, lo))
             } else {
+                // Slice straddles original and extended bits
                 let inner = ctx.slice(e, e_width - 1, lo);
                 Some(ctx.sign_extend(inner, hi - e_width + 1))
             }

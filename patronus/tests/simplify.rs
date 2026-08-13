@@ -411,6 +411,8 @@ fn test_simplify_slice_on_sign_extension() {
     ts("sext(a:bv<4>, 2)[4:0]", "sext(a:bv<4>, 1)");
     ts("sext(a:bv<4>, 2)[5:0]", "sext(a:bv<4>, 2)");
     ts("sext(a:bv<4>, 2)[4:1]", "sext(a:bv<4>[3:1], 1)");
+    ts("sext(a:bv<4>, 32)[31:31]", "a:bv<4>[3:3]");
+    ts("sext(a:bv<4>, 32)[31:28]", "sext(a:bv<4>[3:3], 3)");
 }
 
 #[test]

@@ -4,6 +4,9 @@ inputs:
   version:
     description: version to install
     required: true
+  glibc_version:
+    description: glibc version of the release archive
+    required: true
 
 runs:
   using: composite
@@ -12,7 +15,7 @@ runs:
       id: cache-z3
       uses: actions/cache@v5
       with:
-        key: z3-${{ runner.os }}-${{ inputs.version }}
+        key: z3-${{ runner.os }}-${{ inputs.version }}-glibc-${{ inputs.glibc_version }}
         path: /tmp/z3
     - name: Download Z3
       shell: sh
