@@ -11,15 +11,12 @@ use rustc_hash::FxHashMap;
 use trampoline::*;
 
 pub(super) struct RuntimeLib {
-    pub(super) clone_array: FuncRef,
-    pub(super) clone_array_of_wide_bv: FuncRef,
     pub(super) dealloc_array: FuncRef,
     pub(super) dealloc_array_of_wide_bv: FuncRef,
     pub(super) alloc_array: FuncRef,
     pub(super) alloc_array_of_wide_bv: FuncRef,
     pub(super) copy_from_array: FuncRef,
     pub(super) copy_from_array_of_wide_bv: FuncRef,
-    pub(super) clone_bv: FuncRef,
     pub(super) dealloc_bv: FuncRef,
     pub(super) copy_from_bv: FuncRef,
     pub(super) bv_ops: FxHashMap<&'static str, FuncRef>,
@@ -74,15 +71,6 @@ pub(super) fn import_runtime_lib_to_func_scope(
     module: &mut JITModule,
     func: &mut Function,
 ) -> RuntimeLib {
-    let clone_array =
-        import_extern_function(module, func, CLONE_ARRAY_SYM, [types::I64; 3], [types::I64]);
-    let clone_array_of_wide_bv = import_extern_function(
-        module,
-        func,
-        CLONE_ARRAY_OF_WIDE_BV_SYM,
-        [types::I64; 3],
-        [types::I64],
-    );
     let dealloc_array =
         import_extern_function(module, func, DEALLOC_ARRAY_SYM, [types::I64; 3], []);
     let dealloc_array_of_wide_bv = import_extern_function(
@@ -110,21 +98,17 @@ pub(super) fn import_runtime_lib_to_func_scope(
         [types::I64; 4],
         [],
     );
-    let clone_bv =
-        import_extern_function(module, func, CLONE_BV_SYM, [types::I64; 2], [types::I64]);
+
     let dealloc_bv = import_extern_function(module, func, DEALLOC_BV_SYM, [types::I64; 2], []);
     let copy_from_bv = import_extern_function(module, func, COPY_FROM_BV_SYM, [types::I64; 3], []);
 
     RuntimeLib {
-        clone_array,
-        clone_array_of_wide_bv,
         dealloc_array,
         dealloc_array_of_wide_bv,
         alloc_array,
         alloc_array_of_wide_bv,
         copy_from_array,
         copy_from_array_of_wide_bv,
-        clone_bv,
         dealloc_bv,
         copy_from_bv,
         bv_ops: import_bv_runtime_to_func_scope(module, func),

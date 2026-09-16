@@ -20,6 +20,3 @@ cranelift-reader = "0.125.4"
 walkdir = "2.5.0"
 delegate = "0.13.4"
 
-[features]
-inline = []
-aot-clif = []

@@ -22,22 +22,6 @@ impl SlotDataRefReduce for BaaValueConverter {
         // XXX: this might be wrong
         baa::Value::Array(words.as_slice().into())
     }
-    fn with_wide_bit_vec_array<'a>(
-        &mut self,
-        data: impl Iterator<Item = &'a [u64]>,
-        index_width: WidthInt,
-        data_width: WidthInt,
-    ) -> Self::Output {
-        let mut array =
-            baa::ArrayValue::new_dense(index_width, &baa::BitVecValue::zero(data_width));
-        for (idx, bv) in data.enumerate() {
-            array.store(
-                &BitVecValue::from_u64(idx as u64, index_width),
-                BitVecValueRef::new(bv, data_width),
-            );
-        }
-        baa::Value::Array(array)
-    }
 }
 
 impl SlotDataRefMutReduce for BaaValueSetter<'_> {
@@ -64,20 +48,6 @@ impl SlotDataRefMutReduce for BaaValueSetter<'_> {
                 src.to_u64().unwrap().try_into().unwrap_or_else(|_| {
                     panic!("baa array element can not be converted to u64 safely")
                 });
-        });
-    }
-    fn with_wide_bit_vec_array<'a>(
-        &mut self,
-        data: impl Iterator<Item = &'a mut [u64]>,
-        index_width: WidthInt,
-        _data_width: WidthInt,
-    ) -> Self::Output {
-        let baa::Value::Array(array) = self.0 else {
-            panic!("slot data type mismatch")
-        };
-        data.into_iter().enumerate().for_each(|(idx, v)| {
-            let src = array.select(&BitVecValue::from_u64(idx as u64, index_width));
-            v.copy_from_slice(src.words());
         });
     }
 }

@@ -9,7 +9,7 @@ use super::{JITResult, THIN_BV_MAX_WIDTH, runtime};
 use patronus::expr::{self, *};
 use patronus::system::*;
 
-use baa::{BitVecValueRef, Word};
+use baa::Word;
 use cranelift::codegen::ir;
 use cranelift::jit::{JITBuilder, JITModule};
 use cranelift::module::Module;
@@ -20,7 +20,6 @@ pub(super) struct JITCompiler {
     module: JITModule,
     pub(super) sealed_heap_resources: Vec<ManagedHeapResource>,
     pub(super) active_heap_resource: ManagedHeapResource,
-    pub(super) constant: ManagedHeapResource,
 }
 
 #[derive(Default)]
@@ -74,7 +73,6 @@ impl JITCompiler {
             module: JITModule::new(builder),
             sealed_heap_resources: vec![],
             active_heap_resource: Default::default(),
-            constant: Default::default(),
         }
     }
 
@@ -624,27 +622,6 @@ impl CodeGenContext<'_, '_, '_> {
             .call(callee, &[*array_to_dealloc, index_width, data_width]);
     }
 
-    #[expect(dead_code)]
-    fn clone_array(&mut self, from: TaggedValue) -> TaggedValue {
-        let ArrayType {
-            index_width,
-            data_width,
-        } = from.expect_array_type();
-        let callee = if data_width <= THIN_BV_MAX_WIDTH {
-            self.runtime_lib.clone_array
-        } else {
-            self.runtime_lib.clone_array_of_wide_bv
-        };
-        let (index_width, data_width) = (iconst!(self, index_width), iconst!(self, data_width));
-        let call = self
-            .fn_builder
-            .ins()
-            .call(callee, &[*from, index_width, data_width]);
-        let ret = TaggedValue::tag(self.fn_builder.inst_results(call)[0], from.data_type);
-        self.register_short_lived_heap_allocation(ret);
-        ret
-    }
-
     fn alloc_array(&mut self, default_data: TaggedValue, tpe: ArrayType) -> TaggedValue {
         let callee = if tpe.data_width <= THIN_BV_MAX_WIDTH {
             self.runtime_lib.alloc_array
@@ -669,19 +646,6 @@ impl CodeGenContext<'_, '_, '_> {
         self.fn_builder
             .ins()
             .call(self.runtime_lib.dealloc_bv, &[*bv_to_dealloc, width]);
-    }
-
-    #[expect(dead_code)]
-    pub(super) fn clone_bv(&mut self, src: TaggedValue) -> TaggedValue {
-        assert!(src.requires_bv_delegation());
-        let width = iconst!(self, src.expect_bv_type());
-        let call = self
-            .fn_builder
-            .ins()
-            .call(self.runtime_lib.clone_bv, &[*src, width]);
-        let ret = TaggedValue::tag(self.fn_builder.inst_results(call)[0], src.data_type);
-        self.register_short_lived_heap_allocation(ret);
-        ret
     }
 
     pub(super) fn copy_from_bv(&mut self, dst: TaggedValue, src: TaggedValue) {
@@ -816,12 +780,13 @@ impl CodeGenContext<'_, '_, '_> {
         TaggedValue::tag(value, expr.get_type(self.expr_ctx))
     }
 
+    // dispatch an operation
     fn dispatch_bv_operation_codegen(&mut self, expr: ExprRef, args: &[TaggedValue]) -> Value {
         let width = expr.get_bv_type(self.expr_ctx).unwrap();
-        let vtable: &dyn BVCodeGenVTable = match width {
-            0..=64 => &super::bv_codegen::BVWord::new(width),
-            _ => &super::bv_codegen::BVIndirect::new(width),
-        };
+        if width > 64 {
+            panic!("tried to generate code for a bitvec wider than 64b")
+        }
+        let vtable = bv_codegen::BVWord::new(width);
         let args: Vec<_> = args
             .iter()
             .map(|&arg| {
@@ -865,45 +830,4 @@ impl CodeGenContext<'_, '_, '_> {
             _ => todo!("{:?}", self.expr_ctx[expr]),
         }
     }
-}
-
-pub(super) trait BVCodeGenVTable {
-    fn symbol(&self, expr: ExprRef, ctx: &mut CodeGenContext) -> Value;
-    fn literal(&self, value: BitVecValueRef, ctx: &mut CodeGenContext) -> Value;
-    fn add(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-    fn sub(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-    fn mul(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-    fn and(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-    fn or(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-    fn xor(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-    fn not(&self, arg: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-    fn negate(&self, arg: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-    fn zero_extend(&self, arg: TaggedValue, by: WidthInt, ctx: &mut CodeGenContext) -> Value;
-    fn sign_extend(&self, arg: TaggedValue, by: WidthInt, ctx: &mut CodeGenContext) -> Value;
-
-    fn shift_right(&self, arg0: TaggedValue, arg1: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-    fn arithmetic_shift_right(
-        &self,
-        arg0: TaggedValue,
-        arg1: TaggedValue,
-        ctx: &mut CodeGenContext,
-    ) -> Value;
-    fn shift_left(&self, arg0: TaggedValue, arg1: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-
-    fn equal(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-    fn gt(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-    fn ge(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-    fn gt_signed(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-    fn ge_signed(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-
-    fn concat(&self, hi: TaggedValue, lo: TaggedValue, ctx: &mut CodeGenContext) -> Value;
-    fn slice(
-        &self,
-        value: TaggedValue,
-        hi: WidthInt,
-        lo: WidthInt,
-        ctx: &mut CodeGenContext,
-    ) -> Value;
-
-    fn implies(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value;
 }

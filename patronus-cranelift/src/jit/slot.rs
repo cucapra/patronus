@@ -18,11 +18,6 @@ impl SlotData {
     pub(super) fn as_ref(&self) -> SlotDataRef<'_> {
         SlotDataRef::from_opaque_data(&self.raw, self.tpe)
     }
-
-    #[expect(dead_code)]
-    pub(super) fn as_mut(&mut self) -> SlotDataRefMut<'_> {
-        SlotDataRefMut::from_opaque_data(&mut self.raw, self.tpe)
-    }
 }
 
 pub(super) trait SlotDataRefReduce {
@@ -34,12 +29,6 @@ pub(super) trait SlotDataRefReduce {
         index_width: WidthInt,
         data_width: WidthInt,
     ) -> Self::Output;
-    fn with_wide_bit_vec_array<'slot>(
-        &mut self,
-        data: impl Iterator<Item = &'slot [u64]>,
-        index_width: WidthInt,
-        data_width: WidthInt,
-    ) -> Self::Output;
 }
 
 pub(super) trait SlotDataRefMutReduce {
@@ -48,12 +37,6 @@ pub(super) trait SlotDataRefMutReduce {
     fn with_primitive_array<T: TryFrom<u64>>(
         &mut self,
         data: &mut [T],
-        index_width: WidthInt,
-        data_width: WidthInt,
-    ) -> Self::Output;
-    fn with_wide_bit_vec_array<'slot>(
-        &mut self,
-        data: impl Iterator<Item = &'slot mut [u64]>,
         index_width: WidthInt,
         data_width: WidthInt,
     ) -> Self::Output;
@@ -70,32 +53,6 @@ pub(super) struct SlotDataRefMut<'a> {
     pub tpe: expr::Type,
 }
 
-pub(super) struct ArrayWithOpaqueElement<'a> {
-    data: &'a [OpaqueSlotData],
-    tpe: ArrayType,
-}
-
-pub(super) struct ArrayWithOpaqueElementMut<'a> {
-    data: &'a mut [OpaqueSlotData],
-    tpe: ArrayType,
-}
-
-impl<'a> ArrayWithOpaqueElement<'a> {
-    fn iter(&self) -> impl Iterator<Item = SlotDataRef<'a>> {
-        self.data.iter().map(|element| {
-            SlotDataRef::from_opaque_data(element, expr::Type::BV(self.tpe.data_width))
-        })
-    }
-}
-
-impl ArrayWithOpaqueElementMut<'_> {
-    fn iter_mut(&mut self) -> impl Iterator<Item = SlotDataRefMut<'_>> {
-        self.data.iter_mut().map(|element| {
-            SlotDataRefMut::from_opaque_data(element, expr::Type::BV(self.tpe.data_width))
-        })
-    }
-}
-
 #[derive(PartialEq, Eq)]
 pub(super) enum SlotDataRefKind<'a> {
     BitVec(&'a [u64]),
@@ -103,7 +60,6 @@ pub(super) enum SlotDataRefKind<'a> {
     ArrayU16(&'a [u16]),
     ArrayU32(&'a [u32]),
     ArrayU64(&'a [u64]),
-    ArrayWideBitVec(ArrayWithOpaqueElement<'a>),
 }
 
 pub(super) enum SlotDataRefMutKind<'a> {
@@ -112,15 +68,6 @@ pub(super) enum SlotDataRefMutKind<'a> {
     ArrayU16(&'a mut [u16]),
     ArrayU32(&'a mut [u32]),
     ArrayU64(&'a mut [u64]),
-    ArrayWideBitVec(ArrayWithOpaqueElementMut<'a>),
-}
-
-impl Eq for ArrayWithOpaqueElement<'_> {}
-
-impl PartialEq for ArrayWithOpaqueElement<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.iter().zip(other.iter()).all(|(a, b)| a.eq(&b))
-    }
 }
 
 /// The `StateBuffer` associates each `state` expression with an expr slot.
@@ -197,7 +144,7 @@ impl OpaqueSlotData {
                 if width <= 64 {
                     0
                 } else {
-                    runtime::__alloc_bv(width as u64) as u64
+                    panic!("attempting to create slot of size >64b");
                 }
             }
             expr::Type::Array(ArrayType {
@@ -208,14 +155,7 @@ impl OpaqueSlotData {
                 if data_width <= 64 {
                     runtime::__alloc_array(0, index_width, data_width) as u64
                 } else {
-                    // SAFETY: zero is allocated from runtime
-                    unsafe {
-                        let zero = runtime::__alloc_bv(data_width);
-                        let raw =
-                            runtime::__alloc_array_of_wide_bv(zero as _, index_width, data_width);
-                        runtime::__dealloc_bv(zero, data_width);
-                        raw as u64
-                    }
+                    panic!("attempting to create slot of array with element size >64b");
                 }
             }
         };
@@ -237,10 +177,7 @@ impl OpaqueSlotData {
             9..=16 => SlotDataRefKind::ArrayU16(reinterp_array_ptr_with_element::<u16>(self, tpe)),
             17..=32 => SlotDataRefKind::ArrayU32(reinterp_array_ptr_with_element::<u32>(self, tpe)),
             33..=64 => SlotDataRefKind::ArrayU64(reinterp_array_ptr_with_element::<u64>(self, tpe)),
-            65.. => {
-                let data = reinterp_array_ptr_with_element::<OpaqueSlotData>(self, tpe);
-                SlotDataRefKind::ArrayWideBitVec(ArrayWithOpaqueElement { data, tpe })
-            }
+            65.. => panic!("array with elements >64b"),
             _ => panic!("zero sized array"),
         }
     }
@@ -268,10 +205,7 @@ impl OpaqueSlotData {
             33..=64 => {
                 SlotDataRefMutKind::ArrayU64(reinterp_array_ptr_with_element_mut::<u64>(self, tpe))
             }
-            65.. => {
-                let data = reinterp_array_ptr_with_element_mut::<OpaqueSlotData>(self, tpe);
-                SlotDataRefMutKind::ArrayWideBitVec(ArrayWithOpaqueElementMut { data, tpe })
-            }
+            65.. => panic!("array with elements >64b"),
             _ => panic!("zero sized array"),
         }
     }
@@ -334,14 +268,6 @@ impl<'a> SlotDataRef<'a> {
         SlotDataRef { kind, tpe }
     }
 
-    pub(super) fn expect_bit_vec(self) -> &'a [u64] {
-        if let SlotDataRefKind::BitVec(words) = self.kind {
-            words
-        } else {
-            panic!("expect bit vec type")
-        }
-    }
-
     pub(super) fn reduce<T>(&self, mut reducer: impl SlotDataRefReduce<Output = T>) -> T {
         match self.kind {
             SlotDataRefKind::BitVec(data) => {
@@ -371,10 +297,6 @@ impl<'a> SlotDataRef<'a> {
             }
             SlotDataRefKind::ArrayU64(data) => {
                 reducer.with_primitive_array(data, index_width, data_width)
-            }
-            SlotDataRefKind::ArrayWideBitVec(data) => {
-                let data = data.iter().map(|element| element.expect_bit_vec());
-                reducer.with_wide_bit_vec_array(data, index_width, data_width)
             }
             _ => unreachable!(),
         }
@@ -426,10 +348,6 @@ impl<'a> SlotDataRefMut<'a> {
             SlotDataRefMutKind::ArrayU64(data) => {
                 reducer.with_primitive_array(data, index_width, data_width)
             }
-            SlotDataRefMutKind::ArrayWideBitVec(data) => {
-                let data = data.iter_mut().map(|element| element.expect_bit_vec());
-                reducer.with_wide_bit_vec_array(data, index_width, data_width)
-            }
             _ => unreachable!(),
         }
     }
@@ -459,11 +377,6 @@ impl<'a> SlotDataRefMut<'a> {
             }
             (SlotDataRefMutKind::ArrayU64(dst), SlotDataRefKind::ArrayU64(src)) => {
                 dst.copy_from_slice(src)
-            }
-            (SlotDataRefMutKind::ArrayWideBitVec(dst), SlotDataRefKind::ArrayWideBitVec(src)) => {
-                for (mut dst_bv, src_bv) in dst.iter_mut().zip(src.iter()) {
-                    dst_bv.copy_from(src_bv)
-                }
             }
             _ => unreachable!(),
         }
