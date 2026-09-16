@@ -225,7 +225,7 @@ impl std::ops::Drop for SlotData {
             match self.tpe {
                 expr::Type::BV(width) => {
                     if width > 64 {
-                        runtime::__dealloc_bv(self.raw.0 as _, width as u64)
+                        panic!("trying to drop a slot of size >64")
                     }
                 }
                 expr::Type::Array(ArrayType {

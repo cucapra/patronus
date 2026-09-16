@@ -3,7 +3,6 @@
 // author: Zihan Li <zl2225@cornell.edu>
 
 use baa::{BitVecOps, BitVecValueRef};
-use cranelift::codegen::ir::FuncRef;
 use cranelift::prelude::*;
 use patronus::expr::*;
 
@@ -34,9 +33,7 @@ impl BVWord {
     pub(super) fn new(width: WidthInt) -> Self {
         Self(width)
     }
-}
 
-impl BVWord {
     /// Unsigned extend input `value` to fit target width.
     pub(super) fn extend_to_fit(&self, value: TaggedValue, ctx: &mut CodeGenContext) -> Value {
         debug_assert!(self.0 >= value.expect_bv_type());
@@ -77,9 +74,7 @@ impl BVWord {
     fn cmp(&self, lhs: Value, rhs: Value, condcode: IntCC, ctx: &mut CodeGenContext) -> Value {
         ctx.fn_builder.ins().icmp(condcode, lhs, rhs)
     }
-}
 
-impl BVWord {
     pub fn symbol(&self, arg: ExprRef, ctx: &mut CodeGenContext) -> Value {
         let value = ctx.load_input_state(arg);
         // TODO: currently bv symbol is always stored as `i64`
@@ -180,39 +175,27 @@ impl BVWord {
     }
 
     pub fn equal(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        if lhs.requires_bv_delegation() {
-            invoke_bv_extern_binary_function("equal", [lhs, rhs], ctx).unwrap()
-        } else {
-            self.cmp(*lhs, *rhs, IntCC::Equal, ctx)
-        }
+        assert!(!lhs.requires_bv_delegation());
+
+        self.cmp(*lhs, *rhs, IntCC::Equal, ctx)
     }
     pub fn gt(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        if lhs.requires_bv_delegation() {
-            invoke_bv_extern_binary_function("gt", [lhs, rhs], ctx).unwrap()
-        } else {
-            self.cmp(*lhs, *rhs, IntCC::UnsignedGreaterThan, ctx)
-        }
+        assert!(!lhs.requires_bv_delegation());
+
+        self.cmp(*lhs, *rhs, IntCC::UnsignedGreaterThan, ctx)
     }
     pub fn ge(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        if lhs.requires_bv_delegation() {
-            invoke_bv_extern_binary_function("ge", [lhs, rhs], ctx).unwrap()
-        } else {
-            self.cmp(*lhs, *rhs, IntCC::UnsignedGreaterThanOrEqual, ctx)
-        }
+        assert!(!lhs.requires_bv_delegation());
+        self.cmp(*lhs, *rhs, IntCC::UnsignedGreaterThanOrEqual, ctx)
     }
     pub fn gt_signed(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        if lhs.requires_bv_delegation() {
-            invoke_bv_extern_binary_function("gt_signed", [lhs, rhs], ctx).unwrap()
-        } else {
-            self.cmp(*lhs, *rhs, IntCC::SignedGreaterThan, ctx)
-        }
+        assert!(!lhs.requires_bv_delegation());
+        self.cmp(*lhs, *rhs, IntCC::SignedGreaterThan, ctx)
     }
+
     pub fn ge_signed(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        if lhs.requires_bv_delegation() {
-            invoke_bv_extern_binary_function("ge_signed", [lhs, rhs], ctx).unwrap()
-        } else {
-            self.cmp(*lhs, *rhs, IntCC::SignedGreaterThanOrEqual, ctx)
-        }
+        assert!(!lhs.requires_bv_delegation());
+        self.cmp(*lhs, *rhs, IntCC::SignedGreaterThanOrEqual, ctx)
     }
 
     pub fn concat(&self, hi: TaggedValue, lo: TaggedValue, ctx: &mut CodeGenContext) -> Value {
@@ -229,56 +212,20 @@ impl BVWord {
         lo: WidthInt,
         ctx: &mut CodeGenContext,
     ) -> Value {
-        if value.requires_bv_delegation() {
-            let hi = iconst!(ctx, hi);
-            let lo = iconst!(ctx, lo);
-            let value_width = iconst!(ctx, value.expect_bv_type());
+        assert!(!value.requires_bv_delegation());
 
-            // extern `slice` fn always returns i64 type
-            let ret = invoke_bv_extern_function(
-                ctx.runtime_lib.bv_ops["slice"],
-                &[*value, value_width, hi, lo],
-                ctx,
-            )
-            .unwrap();
-            self.truncate_to_fit(TaggedValue::tag_bv(ret, 64), ctx)
-        } else {
-            let shifted = self.truncate_to_fit(
-                TaggedValue::tag_bv(
-                    ctx.fn_builder.ins().ushr_imm(*value, lo as i64),
-                    value.expect_bv_type(),
-                ),
-                ctx,
-            );
-            self.mask(shifted, hi - lo + 1, ctx)
-        }
+        let shifted = self.truncate_to_fit(
+            TaggedValue::tag_bv(
+                ctx.fn_builder.ins().ushr_imm(*value, lo as i64),
+                value.expect_bv_type(),
+            ),
+            ctx,
+        );
+        self.mask(shifted, hi - lo + 1, ctx)
     }
     pub fn implies(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
         let lhs = ctx.fn_builder.ins().bnot(*lhs);
         let ret = ctx.fn_builder.ins().bor(lhs, *rhs);
         self.overflow_guard(ret, ctx)
     }
-}
-
-fn invoke_bv_extern_function(
-    func: FuncRef,
-    args: &[Value],
-    ctx: &mut CodeGenContext,
-) -> Option<Value> {
-    let call = ctx.fn_builder.ins().call(func, args);
-    ctx.fn_builder.inst_results(call).first().copied()
-}
-
-fn invoke_bv_extern_binary_function(
-    symbol: impl AsRef<str>,
-    args: [TaggedValue; 2],
-    ctx: &mut CodeGenContext,
-) -> Option<Value> {
-    let [lhs, rhs] = args;
-    debug_assert_eq!(lhs.expect_bv_type(), rhs.expect_bv_type());
-    invoke_bv_extern_function(
-        ctx.runtime_lib.bv_ops[symbol.as_ref()],
-        &[*lhs, *rhs, iconst!(ctx, lhs.expect_bv_type())],
-        ctx,
-    )
 }

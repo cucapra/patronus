@@ -6,22 +6,15 @@ use cranelift::codegen::ir::{AbiParam, FuncRef, Function, types};
 use cranelift::jit::{JITBuilder, JITModule};
 use cranelift::module::{Linkage, Module};
 use cranelift::prelude::*;
-use patronus::expr::*;
-use rustc_hash::FxHashMap;
-use trampoline::*;
 
 pub(super) struct RuntimeLib {
     pub(super) dealloc_array: FuncRef,
-    pub(super) dealloc_array_of_wide_bv: FuncRef,
     pub(super) alloc_array: FuncRef,
-    pub(super) alloc_array_of_wide_bv: FuncRef,
+
     pub(super) copy_from_array: FuncRef,
-    pub(super) copy_from_array_of_wide_bv: FuncRef,
-    pub(super) dealloc_bv: FuncRef,
+
     pub(super) copy_from_bv: FuncRef,
-    pub(super) bv_ops: FxHashMap<&'static str, FuncRef>,
 }
-inventory::collect!(trampoline::BVOpRegistry);
 
 const CLONE_ARRAY_SYM: &str = "__clone_array";
 const CLONE_ARRAY_OF_WIDE_BV_SYM: &str = "__clone_array_of_wide_bv";
@@ -59,12 +52,6 @@ pub(super) fn load_runtime_lib(builder: &mut JITBuilder) {
     builder.symbol(CLONE_BV_SYM, __clone_bv as *const u8);
     builder.symbol(DEALLOC_BV_SYM, __dealloc_bv as *const u8);
     builder.symbol(COPY_FROM_BV_SYM, __copy_from_bv as *const u8);
-    for registered in inventory::iter::<trampoline::BVOpRegistry>() {
-        builder.symbol(
-            bv_operation_name_mangle(registered.sym),
-            registered.raw_address(),
-        );
-    }
 }
 
 pub(super) fn import_runtime_lib_to_func_scope(
@@ -73,74 +60,22 @@ pub(super) fn import_runtime_lib_to_func_scope(
 ) -> RuntimeLib {
     let dealloc_array =
         import_extern_function(module, func, DEALLOC_ARRAY_SYM, [types::I64; 3], []);
-    let dealloc_array_of_wide_bv = import_extern_function(
-        module,
-        func,
-        DEALLOC_ARRAY_OF_WIDE_BV_SYM,
-        [types::I64; 3],
-        [],
-    );
     let alloc_array =
         import_extern_function(module, func, ALLOC_ARRAY_SYM, [types::I64; 3], [types::I64]);
-    let alloc_array_of_wide_bv = import_extern_function(
-        module,
-        func,
-        ALLOC_ARRAY_OF_WIDE_BV_SYM,
-        [types::I64; 3],
-        [types::I64],
-    );
+
     let copy_from_array =
         import_extern_function(module, func, COPY_FROM_ARRAY_SYM, [types::I64; 4], []);
-    let copy_from_array_of_wide_bv = import_extern_function(
-        module,
-        func,
-        COPY_FROM_ARRAY_OF_WIDE_BV_SYM,
-        [types::I64; 4],
-        [],
-    );
 
-    let dealloc_bv = import_extern_function(module, func, DEALLOC_BV_SYM, [types::I64; 2], []);
     let copy_from_bv = import_extern_function(module, func, COPY_FROM_BV_SYM, [types::I64; 3], []);
 
     RuntimeLib {
         dealloc_array,
-        dealloc_array_of_wide_bv,
-        alloc_array,
-        alloc_array_of_wide_bv,
-        copy_from_array,
-        copy_from_array_of_wide_bv,
-        dealloc_bv,
-        copy_from_bv,
-        bv_ops: import_bv_runtime_to_func_scope(module, func),
-    }
-}
 
-fn import_bv_runtime_to_func_scope(
-    module: &mut JITModule,
-    func: &mut Function,
-) -> FxHashMap<&'static str, FuncRef> {
-    let mut bv_runtime_lib = FxHashMap::default();
-    for registered in inventory::iter::<BVOpRegistry>() {
-        let num_params = match registered.kind {
-            BVOpKind::Unary(_) | BVOpKind::Cmp(_) => 3,
-            BVOpKind::Binary(_) | BVOpKind::Slice(_) | BVOpKind::Extend(_) => 4,
-            BVOpKind::SliceWithOutputBuffer(_) | BVOpKind::Shift(_) | BVOpKind::Concat(_) => 5,
-        };
-        let return_types: &[types::Type] = match registered.kind {
-            BVOpKind::Cmp(_) => &[types::I8],
-            BVOpKind::Slice(_) => &[types::I64],
-            _ => &[],
-        };
-        let func_ref = import_extern_function(
-            module,
-            func,
-            &bv_operation_name_mangle(registered.sym),
-            std::iter::repeat_n(types::I64, num_params),
-            return_types.iter().copied(),
-        );
-        bv_runtime_lib.insert(registered.sym, func_ref);
+        alloc_array,
+
+        copy_from_array,
+        copy_from_bv,
     }
-    bv_runtime_lib
 }
 
 fn import_extern_function(
@@ -159,11 +94,6 @@ fn import_extern_function(
         .declare_function(name, Linkage::Import, &sig)
         .unwrap_or_else(|reason| panic!("fail to load {name}, due to {reason:#?}"));
     module.declare_func_in_func(id, func)
-}
-
-#[inline]
-fn bv_operation_name_mangle(sym: &str) -> String {
-    format!("__bv_{sym}")
 }
 
 macro_rules! reinterp_array_ptr_by_data_width {
@@ -372,282 +302,4 @@ pub(super) unsafe fn bv_words_slice_from_raw_parts_mut<'a>(
 ) -> &'a mut [Word] {
     unsafe { std::slice::from_raw_parts_mut(ptr, width.div_ceil(Word::BITS as u64) as usize) }
 }
-
-macro_rules! bv_value_ref {
-    ($ptr: expr, $width: expr) => {
-        baa::BitVecValueRef::new(
-            $crate::jit::runtime::bv_words_slice_from_raw_parts($ptr, $width as u64),
-            $width as baa::WidthInt,
-        )
-    };
-}
-
-macro_rules! bv_value_ref_from_scalar {
-    ($value: expr, $width: expr) => {
-        baa::BitVecValueRef::new(std::slice::from_ref(&$value), $width as baa::WidthInt)
-    };
-}
-
-macro_rules! bv_value_mut {
-    ($ptr: expr, $width: expr) => {
-        baa::BitVecValueMutRef::new(
-            $width as baa::WidthInt,
-            $crate::jit::runtime::bv_words_slice_from_raw_parts_mut($ptr, $width as u64),
-        )
-    };
-}
 // pub(super) use {bv_value_mut, bv_value_ref, bv_value_ref_from_scalar};
-
-mod trampoline {
-    use super::*;
-    use baa::{BitVecMutOps, BitVecOps};
-
-    pub(super) struct BVOpRegistry {
-        pub(super) sym: &'static str,
-        pub(super) kind: BVOpKind,
-    }
-
-    impl BVOpRegistry {
-        pub(super) fn raw_address(&self) -> *const u8 {
-            match self.kind {
-                BVOpKind::Binary(address) => address as *const u8,
-                BVOpKind::Unary(address) => address as *const u8,
-                BVOpKind::Cmp(address) => address as *const u8,
-                BVOpKind::Slice(address) => address as *const u8,
-                BVOpKind::SliceWithOutputBuffer(address) => address as *const u8,
-                BVOpKind::Concat(address) => address as *const u8,
-                BVOpKind::Extend(address) => address as *const u8,
-                BVOpKind::Shift(address) => address as *const u8,
-            }
-        }
-    }
-    type MaybeIndirect = u64;
-    type ThinBV = i64;
-    pub(super) enum BVOpKind {
-        Binary(unsafe extern "C" fn(*mut Word, *const Word, *const Word, u64)),
-        Unary(unsafe extern "C" fn(*mut Word, *const Word, u64)),
-        Cmp(unsafe extern "C" fn(*const Word, *const Word, u64) -> i8),
-        Slice(unsafe extern "C" fn(*const Word, u64, u64, u64) -> ThinBV),
-        SliceWithOutputBuffer(unsafe extern "C" fn(*mut Word, *const Word, u64, u64, u64)),
-        Concat(unsafe extern "C" fn(*mut Word, MaybeIndirect, MaybeIndirect, u64, u64)),
-        Extend(unsafe extern "C" fn(*mut Word, MaybeIndirect, u64, u64)),
-        Shift(unsafe extern "C" fn(*mut Word, *const Word, u64, MaybeIndirect, u64)),
-    }
-
-    macro_rules! baa_binary_op_shim {
-        ($($op: ident),*) => {
-            $(
-                paste::paste! {
-                    baa_binary_op_shim!(@internal [<__bv_ $op>], [<$op _in_place>], $op);
-                }
-            )*
-        };
-        (@internal $func: ident, $baa_delegation: ident, $sym: ident) => {
-            inventory::submit!(BVOpRegistry {
-                kind: BVOpKind::Binary($func),
-                sym: stringify!($sym)
-            });
-            pub(super) unsafe extern "C" fn $func(
-                dst: *mut Word,
-                lhs: *const Word,
-                rhs: *const Word,
-                width: u64,
-            ) {
-                unsafe {
-                    bv_value_mut!(dst, width)
-                        .$baa_delegation(&bv_value_ref!(lhs, width), &bv_value_ref!(rhs, width))
-                }
-            }
-        }
-    }
-
-    macro_rules! baa_cmp_op_shim {
-        ($($op: ident $([rename: $rename: ident])?),*) => {
-            $(
-                baa_cmp_op_shim!(@maybe_rename $op $(,$rename)?);
-            )*
-        };
-
-        (@maybe_rename $op: ident, $rename: ident) => {
-            paste::paste! {
-                baa_cmp_op_shim!(@internal [<__bv_ $op>], $op, $rename);
-            }
-        };
-
-        (@maybe_rename $op: ident) => {
-            paste::paste! {
-                baa_cmp_op_shim!(@internal [<__bv_ $op>], $op, $op);
-            }
-        };
-
-        (@internal $func: ident, $baa_delegation: ident, $sym: ident) => {
-            inventory::submit!(BVOpRegistry {
-                kind: BVOpKind::Cmp($func),
-                sym: stringify!($sym)
-            });
-            pub(super) unsafe extern "C" fn $func(lhs: *const Word, rhs: *const Word, width: u64) -> i8 {
-                unsafe { bv_value_ref!(lhs, width).$baa_delegation(&bv_value_ref!(rhs, width)) as i8 }
-            }
-        };
-    }
-
-    macro_rules! baa_unary_op_shim {
-        ($($op: ident),*) => {
-            $(
-                paste::paste! {
-                    baa_unary_op_shim!(@internal [<__bv_ $op>], [<$op _in_place>], $op);
-                }
-            )*
-        };
-        (@internal $func: ident, $baa_delegation: ident, $sym: ident) => {
-            inventory::submit!(BVOpRegistry {
-                kind: BVOpKind::Unary($func),
-                sym: stringify!($sym)
-            });
-            pub(super) unsafe extern "C" fn $func(dst: *mut Word, value: *const Word, width: u64) {
-                unsafe {
-                    bv_words_slice_from_raw_parts_mut(dst, width)
-                        .copy_from_slice(bv_words_slice_from_raw_parts(value, width));
-                    bv_value_mut!(dst, width).$baa_delegation();
-                }
-            }
-        };
-    }
-
-    macro_rules! baa_extend_op_shim {
-        ($($op: ident),*) => {
-            $(
-                paste::paste! {
-                    baa_extend_op_shim!(@internal [<__bv_ $op>], [<$op _in_place>], $op);
-                }
-            )*
-        };
-        (@internal $func: ident, $baa_delegation: ident, $sym: ident) => {
-            inventory::submit!(BVOpRegistry {
-                kind: BVOpKind::Extend($func),
-                sym: stringify!($sym)
-            });
-            pub(super) unsafe extern "C" fn $func(
-                dst: *mut Word,
-                value: MaybeIndirect,
-                original_width: u64,
-                by: u64,
-            ) { unsafe {
-                let value = if original_width <= 64 {
-                    &bv_value_ref_from_scalar!(value, original_width)
-                } else {
-                    &bv_value_ref!(value as *const Word, original_width)
-                };
-                bv_value_mut!(dst, original_width + by).$baa_delegation(value, by as WidthInt);
-            }}
-        };
-    }
-    macro_rules! baa_shift_op_shim {
-        ($($op: ident),*) => {
-            $(
-                paste::paste! {
-                    baa_shift_op_shim!(@internal [<__bv_ $op>], [<$op _in_place>], $op);
-                }
-            )*
-        };
-
-        (@internal $func: ident, $baa_delegation: ident, $sym: ident) => {
-            inventory::submit!(BVOpRegistry {
-                kind: BVOpKind::Shift($func),
-                sym: stringify!($sym)
-            });
-            pub(super) unsafe extern "C" fn $func(
-                dst: *mut Word,
-                value: *const Word,
-                width: u64,
-                shift: MaybeIndirect,
-                shift_data_width: u64,
-            ) {
-                unsafe {
-                    let shift = if shift_data_width <= 64 {
-                        bv_value_ref_from_scalar!(shift, shift_data_width)
-                    } else {
-                        bv_value_ref!(shift as *const Word, shift_data_width)
-                    };
-                    bv_value_mut!(dst, width).$baa_delegation(&bv_value_ref!(value, width), &shift);
-                }
-            }
-        };
-    }
-    baa_binary_op_shim!(add, sub, mul, and, or, xor);
-    baa_shift_op_shim!(shift_right, arithmetic_shift_right, shift_left);
-    baa_extend_op_shim!(sign_extend, zero_extend);
-    baa_unary_op_shim!(not, negate);
-    baa_cmp_op_shim!(
-        is_greater [rename: gt],
-        is_greater_or_equal [rename: ge],
-        is_greater_signed [rename: gt_signed],
-        is_greater_or_equal_signed [rename: ge_signed],
-        is_equal [rename: equal]
-    );
-
-    inventory::submit!(BVOpRegistry {
-        kind: BVOpKind::Slice(__bv_slice),
-        sym: "slice"
-    });
-    pub(super) unsafe extern "C" fn __bv_slice(
-        value: *const Word,
-        value_width: u64,
-        hi: u64,
-        lo: u64,
-    ) -> ThinBV {
-        unsafe {
-            bv_value_ref!(value, value_width)
-                .slice(hi as WidthInt, lo as WidthInt)
-                .to_u64()
-                .unwrap() as ThinBV
-        }
-    }
-
-    inventory::submit!(BVOpRegistry {
-        kind: BVOpKind::SliceWithOutputBuffer(__bv_slice_with_output_buffer),
-        sym: "slice_with_output_buffer"
-    });
-    pub(super) unsafe extern "C" fn __bv_slice_with_output_buffer(
-        dst: *mut Word,
-        value: *const Word,
-        value_width: u64,
-        hi: u64,
-        lo: u64,
-    ) {
-        unsafe {
-            debug_assert!((hi - lo + 1) > 64);
-            bv_value_mut!(dst, hi - lo + 1).slice_in_place(
-                &bv_value_ref!(value, value_width),
-                hi as WidthInt,
-                lo as WidthInt,
-            )
-        }
-    }
-
-    inventory::submit!(BVOpRegistry {
-        kind: BVOpKind::Concat(__bv_concat),
-        sym: "concat"
-    });
-    pub(super) unsafe extern "C" fn __bv_concat(
-        dst: *mut Word,
-        hi: MaybeIndirect,
-        lo: MaybeIndirect,
-        hi_width: u64,
-        lo_width: u64,
-    ) {
-        unsafe {
-            let hi = if hi_width <= 64 {
-                bv_value_ref_from_scalar!(hi, hi_width)
-            } else {
-                bv_value_ref!(hi as *const Word, hi_width)
-            };
-            let lo = if lo_width <= 64 {
-                bv_value_ref_from_scalar!(lo, lo_width)
-            } else {
-                bv_value_ref!(lo as *const Word, lo_width)
-            };
-            bv_value_mut!(dst, hi_width + lo_width).concat_in_place(&hi, &lo);
-        }
-    }
-}

@@ -383,11 +383,7 @@ impl CodeGenContext<'_, '_, '_> {
         for value in self.short_lived_heap_allocation.clone() {
             match value.data_type {
                 expr::Type::Array(..) => self.dealloc_array(value),
-                expr::Type::BV(width) => {
-                    if width > THIN_BV_MAX_WIDTH {
-                        self.dealloc_bv(value)
-                    }
-                }
+                _ => panic!("trying to deallocate wide bitvec"),
             }
         }
     }
@@ -407,65 +403,45 @@ impl CodeGenContext<'_, '_, '_> {
     /// This extra level of indirection allows us to "swap" heap pointer with external pointer when necessary to reduce
     /// unnecessary heap allocation or data copy.
     fn finalize_long_lived_heap_resources(&mut self) {
-        let mut bv_holes: Vec<Value> = vec![];
         let mut array_holes: Vec<Value> = vec![];
-        let mut array_with_wide_bv_holes: Vec<Value> = vec![];
         for &(value, tpe) in &self.long_live_cache_read_holes {
             match tpe {
                 expr::Type::BV(width) => {
-                    debug_assert!(width > THIN_BV_MAX_WIDTH);
-                    self.compiler
-                        .active_heap_resource
-                        .bv_data
-                        .push(runtime::reserve_bv_boxed_words(width as u64));
-                    bv_holes.push(value);
+                    if width > 64 {
+                        panic!("trying to finalise a bitvec >64b")
+                    }
                 }
                 expr::Type::Array(ArrayType {
                     index_width,
                     data_width,
                 }) => {
-                    if data_width <= THIN_BV_MAX_WIDTH {
-                        let ptr = runtime::__alloc_array(0, index_width as u64, data_width as u64);
-                        let num_bytes = (1 << (index_width as usize))
-                            * (select_container_primitive(data_width).bytes() as usize);
-                        // SAFETY: `ptr` is always byte aligned and the coerced bytes slice len is computed properly
-                        let boxed_bytes = unsafe {
-                            Box::from_raw(std::ptr::slice_from_raw_parts_mut(
-                                ptr as *mut u8,
-                                num_bytes,
-                            ))
-                        };
-                        self.compiler
-                            .active_heap_resource
-                            .array_data
-                            .push(boxed_bytes);
-                        array_holes.push(value);
-                    } else {
-                        let data: Vec<_> =
-                            std::iter::repeat_with(|| runtime::__alloc_bv(data_width as u64))
-                                .take(1 << index_width)
-                                .collect();
-                        self.compiler
-                            .active_heap_resource
-                            .array_with_wide_bv_data
-                            .push(data.into_boxed_slice());
-                        array_with_wide_bv_holes.push(value);
+                    if data_width > THIN_BV_MAX_WIDTH {
+                        panic!("trying to finalise an array of vecs >64b")
                     }
+                    let ptr = runtime::__alloc_array(0, index_width as u64, data_width as u64);
+                    let num_bytes = (1 << (index_width as usize))
+                        * (select_container_primitive(data_width).bytes() as usize);
+                    // SAFETY: `ptr` is always byte aligned and the coerced bytes slice len is computed properly
+                    let boxed_bytes = unsafe {
+                        Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                            ptr as *mut u8,
+                            num_bytes,
+                        ))
+                    };
+                    self.compiler
+                        .active_heap_resource
+                        .array_data
+                        .push(boxed_bytes);
+                    array_holes.push(value);
                 }
             }
         }
         self.compiler.seal_active_heap_resource();
         let last_pinned = self.compiler.last_pinned_heap_resource().unwrap();
-        for (holes, pinned_start_address) in [
-            (bv_holes, last_pinned.bv_data.pinned_start_address()),
-            (array_holes, last_pinned.array_data.pinned_start_address()),
-            (
-                array_with_wide_bv_holes,
-                last_pinned.array_with_wide_bv_data.pinned_start_address(),
-            ),
-        ] {
-            self.finalize_pinned_heap_resources(holes, pinned_start_address)
-        }
+        self.finalize_pinned_heap_resources(
+            array_holes,
+            last_pinned.array_data.pinned_start_address(),
+        );
     }
 
     fn finalize_pinned_heap_resources(
@@ -513,7 +489,12 @@ impl std::ops::Deref for TaggedValue {
 
 impl TaggedValue {
     pub(super) fn requires_bv_delegation(&self) -> bool {
-        matches!(self.data_type, expr::Type::BV(width) if width > THIN_BV_MAX_WIDTH)
+        if let expr::Type::BV(width) = self.data_type {
+            if width > THIN_BV_MAX_WIDTH {
+                panic!("bv delegation")
+            }
+        }
+        false
     }
 
     pub(super) fn expect_array_type(&self) -> ArrayType {
@@ -595,11 +576,11 @@ impl CodeGenContext<'_, '_, '_> {
             data_width,
         } = dst.expect_array_type();
         assert_eq!(src.data_type, dst.data_type);
-        let callee = if data_width <= THIN_BV_MAX_WIDTH {
-            self.runtime_lib.copy_from_array
-        } else {
-            self.runtime_lib.copy_from_array_of_wide_bv
-        };
+        if data_width > THIN_BV_MAX_WIDTH {
+            panic!("attempting to copy an array of wide bv");
+        }
+
+        let callee = self.runtime_lib.copy_from_array;
         let (index_width, data_width) = (iconst!(self, index_width), iconst!(self, data_width));
         self.fn_builder
             .ins()
@@ -611,11 +592,10 @@ impl CodeGenContext<'_, '_, '_> {
             index_width,
             data_width,
         } = array_to_dealloc.expect_array_type();
-        let callee = if data_width <= THIN_BV_MAX_WIDTH {
-            self.runtime_lib.dealloc_array
-        } else {
-            self.runtime_lib.dealloc_array_of_wide_bv
-        };
+        if data_width > THIN_BV_MAX_WIDTH {
+            panic!("attempting to deallocate an array of wide bv");
+        }
+        let callee = self.runtime_lib.dealloc_array;
         let (index_width, data_width) = (iconst!(self, index_width), iconst!(self, data_width));
         self.fn_builder
             .ins()
@@ -623,11 +603,11 @@ impl CodeGenContext<'_, '_, '_> {
     }
 
     fn alloc_array(&mut self, default_data: TaggedValue, tpe: ArrayType) -> TaggedValue {
-        let callee = if tpe.data_width <= THIN_BV_MAX_WIDTH {
-            self.runtime_lib.alloc_array
-        } else {
-            self.runtime_lib.alloc_array_of_wide_bv
-        };
+        if tpe.data_width > THIN_BV_MAX_WIDTH {
+            panic!("attempting to allocate an array of wide bv");
+        }
+
+        let callee = self.runtime_lib.alloc_array;
         let (index_width, data_width) = (
             iconst!(self, tpe.index_width),
             iconst!(self, tpe.data_width),
@@ -639,13 +619,6 @@ impl CodeGenContext<'_, '_, '_> {
         let ret = TaggedValue::tag_array(self.fn_builder.inst_results(call)[0], tpe);
         self.register_short_lived_heap_allocation(ret);
         ret
-    }
-
-    fn dealloc_bv(&mut self, bv_to_dealloc: TaggedValue) {
-        let width = iconst!(self, bv_to_dealloc.expect_bv_type());
-        self.fn_builder
-            .ins()
-            .call(self.runtime_lib.dealloc_bv, &[*bv_to_dealloc, width]);
     }
 
     pub(super) fn copy_from_bv(&mut self, dst: TaggedValue, src: TaggedValue) {
@@ -711,24 +684,16 @@ impl CodeGenContext<'_, '_, '_> {
                 let offset = self.array_offset(index, data_width);
                 let address = self.fn_builder.ins().iadd(*base, offset);
                 if data_width > THIN_BV_MAX_WIDTH {
-                    let dst_bv = self.fn_builder.ins().load(
-                        self.int,
-                        // upheld by the unsafeness of CompiledEvalFn::call
-                        ir::MemFlags::trusted(),
-                        address,
-                        0,
-                    );
-                    let data = self.resource_ptr_at_slot(data);
-                    self.copy_from_bv(TaggedValue::tag_bv(dst_bv, data_width), data);
-                } else {
-                    self.fn_builder.ins().store(
-                        // upheld by the unsafeness of CompiledEvalFn::call
-                        ir::MemFlags::trusted(),
-                        *data,
-                        address,
-                        0,
-                    );
+                    panic!("attempting to store to array of wide bv");
                 }
+                self.fn_builder.ins().store(
+                    // upheld by the unsafeness of CompiledEvalFn::call
+                    ir::MemFlags::trusted(),
+                    *data,
+                    address,
+                    0,
+                );
+
                 return slot;
             }
             Expr::BVArrayRead { .. } => {
@@ -736,11 +701,11 @@ impl CodeGenContext<'_, '_, '_> {
                 let (slot, index) = (args[0], args[1]);
                 let base = self.resource_ptr_at_slot(slot);
                 let index = bv_codegen::BVWord(64).extend_to_fit(index, self);
-                let element_type = if data_width <= THIN_BV_MAX_WIDTH {
-                    select_container_primitive(data_width)
-                } else {
-                    types::I64
-                };
+                if data_width > THIN_BV_MAX_WIDTH {
+                    panic!("attempting to read array of wide bv");
+                }
+
+                let element_type = types::I64;
                 let offset = self
                     .fn_builder
                     .ins()
@@ -753,12 +718,6 @@ impl CodeGenContext<'_, '_, '_> {
                     address,
                     0,
                 );
-                if data_width > THIN_BV_MAX_WIDTH {
-                    // maintains the invariance that wide bv never moves out of its container array
-                    return self.reserve_cloned_intermediate_cache_slot(TaggedValue::tag_bv(
-                        element, data_width,
-                    ));
-                }
                 element
             }
             Expr::ArrayConstant { .. } => {
