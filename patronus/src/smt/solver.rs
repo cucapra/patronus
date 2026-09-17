@@ -345,8 +345,8 @@ fn shut_down_solver(solver: &mut SmtLibSolverCtx) {
 /// (i.e. `expr ::= <symbol> | ( not <symbol> )`)
 fn is_valid_yices2_expr(ctx: &Context, e: ExprRef) -> bool {
     match &ctx[e] {
-        Expr::BVSymbol { .. } => true,
-        Expr::BVNot(inner, _) => ctx[*inner].is_symbol(),
+        Expr::BVSymbol { width, .. } => *width == 1,
+        Expr::BVNot(inner, _) => matches!(&ctx[*inner], Expr::BVSymbol { width: 1, .. }),
         _ => false,
     }
 }
@@ -410,7 +410,9 @@ impl SolverContext for SmtLibSolverCtx {
     }
 
     fn assert(&mut self, ctx: &Context, e: ExprRef) -> Result<()> {
-        self.write_cmd(Some(ctx), &SmtCommand::Assert(e))
+        self.write_cmd(Some(ctx), &SmtCommand::Assert(e))?;
+        self.last_query_unsat = false;
+        Ok(())
     }
 
     fn declare_const(&mut self, ctx: &Context, symbol: ExprRef) -> Result<()> {
@@ -551,11 +553,7 @@ impl SolverContext for SmtLibSolverCtx {
         // is backend solver
         if self.name == "yices-smt2" {
             for expr in core.iter_mut() {
-                if let Expr::BVNot(internal, _) = &ctx[*expr]
-                    && let Some(&orig) = self.expr_map.get(internal)
-                {
-                    *expr = ctx.not(orig);
-                } else if let Some(&orig) = self.expr_map.get(expr) {
+                if let Some(&orig) = self.expr_map.get(expr) {
                     *expr = orig;
                 }
             }
@@ -933,6 +931,30 @@ mod tests {
         solver.pop().unwrap();
     }
 
+    /// Check that `UNSAT` results in popped child contexts are voided
+    #[test]
+    fn test_pop_void_unsat() {
+        let mut ctx = Context::default();
+        let x = ctx.bv_symbol("x", 3);
+        let eq2 = ctx.build(|c| c.equal(x, c.bit_vec_val(2, 3)));
+
+        let mut solver = solver_from_env().start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
+        solver.declare_const(&ctx, x).unwrap();
+        solver.assert(&ctx, eq2).unwrap();
+
+        solver.push().unwrap();
+
+        let eq3 = ctx.build(|c| c.equal(x, c.bit_vec_val(3, 3)));
+        solver.assert(&ctx, eq3).unwrap();
+        let res = solver.check_sat().unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        solver.pop().unwrap();
+
+        assert!(solver.get_unsat_assumptions(&mut ctx).is_err());
+    }
+
     /// Check that `(get-unsat-assumptions)` fails after non-`UNSAT` query
     #[test]
     fn test_unsat_assumptions_fail() {
@@ -963,6 +985,31 @@ mod tests {
         assert!(core.contains(&eq2) && core.contains(&eq3));
     }
 
+    /// Check that previous `UNSAT` results are voided by calls to `assert`
+    #[test]
+    fn test_assert_void_unsat() {
+        let backend = solver_from_env();
+        if !backend.supports_get_unsat_assumptions() || !backend.supports_check_assuming_exprs() {
+            return;
+        }
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 3);
+        let eq3 = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+        let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
+
+        let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+
+        let res = solver.check_sat_assuming(&mut ctx, [eq3, eq4]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let extra = ctx.build(|c| c.equal(a, c.bit_vec_val(2, 3)));
+        solver.assert(&ctx, extra).unwrap();
+
+        assert!(solver.get_unsat_assumptions(&mut ctx).is_err());
+    }
+
     #[test]
     fn test_restart() {
         let mut ctx = Context::default();
@@ -984,5 +1031,10 @@ mod tests {
         let _res = solver.check_sat().unwrap();
         let value_of_a = solver.get_value(&mut ctx, a).unwrap();
         assert_eq!(value_of_a, four);
+
+        solver.restart().unwrap();
+
+        // Popping contexts should fail
+        assert!(solver.pop().is_err());
     }
 }
