@@ -2,7 +2,7 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::expr::{Context, ExprRef};
+use crate::expr::{Context, Expr, ExprRef};
 use crate::smt::parser::{
     SmtParserError, count_parens, parse_get_unsat_assumptions_response, parse_get_value_response,
 };
@@ -13,6 +13,9 @@ use std::io::{BufRead, BufReader, BufWriter};
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use thiserror::Error;
+
+/// Activation literal name prefix
+const ACT_LIT_PREFIX: &str = "__solver_act_";
 
 /// A SMT Solver Error.
 #[derive(Error, Debug)]
@@ -110,7 +113,7 @@ pub trait SolverContext: SolverMetaData {
     fn define_const(&mut self, ctx: &Context, symbol: ExprRef, expr: ExprRef) -> Result<()>;
     fn check_sat_assuming(
         &mut self,
-        ctx: &Context,
+        ctx: &mut Context,
         props: impl IntoIterator<Item = ExprRef>,
     ) -> Result<CheckSatResponse>;
     fn check_sat(&mut self) -> Result<CheckSatResponse>;
@@ -191,6 +194,9 @@ impl Solver for SmtLibSolver {
             supports_const_array: self.supports_const_array,
             supports_get_unsat_assumptions: self.supports_unsat_assumptions,
             symbols: vec![SymbolTable::default()],
+            next_act_id: 0,
+            expr_map: FxHashMap::default(),
+            cached_exprs: vec![FxHashMap::default()],
             last_query_unsat: false,
         };
         for option in self.options.iter() {
@@ -228,6 +234,12 @@ pub struct SmtLibSolverCtx {
     /// Internal symbol tables for each solver context
     /// **Representation invariant**: `symbols.len() > 0`
     symbols: Vec<SymbolTable>,
+    /// Next ID for activation literals
+    next_act_id: u64,
+    /// Map from activation literals to corresponding expressions
+    expr_map: FxHashMap<ExprRef, ExprRef>,
+    /// Map from expressions to activation literals, one for each scope
+    cached_exprs: Vec<FxHashMap<ExprRef, ExprRef>>,
     /// Flag for whether last query was `UNSAT`
     last_query_unsat: bool,
 }
@@ -328,6 +340,17 @@ fn shut_down_solver(solver: &mut SmtLibSolverCtx) {
     // we don't care whether the solver crashed or returned success, as long as it is cleaned up
 }
 
+/// Internal method that determines if yices2 will accept
+/// formula as assumption in `(check-sat-assuming)` call
+/// (i.e. `expr ::= <symbol> | ( not <symbol> )`)
+fn is_valid_yices2_expr(ctx: &Context, e: ExprRef) -> bool {
+    match &ctx[e] {
+        Expr::BVSymbol { .. } => true,
+        Expr::BVNot(inner, _) => ctx[*inner].is_symbol(),
+        _ => false,
+    }
+}
+
 impl SolverMetaData for SmtLibSolverCtx {
     fn name(&self) -> &str {
         &self.name
@@ -375,6 +398,9 @@ impl SolverContext for SmtLibSolverCtx {
         }
         self.symbols = vec![SymbolTable::default()];
         self.last_query_unsat = false;
+        self.next_act_id = 0;
+        self.expr_map.clear();
+        self.cached_exprs = vec![FxHashMap::default()];
         Ok(())
     }
 
@@ -406,11 +432,48 @@ impl SolverContext for SmtLibSolverCtx {
 
     fn check_sat_assuming(
         &mut self,
-        ctx: &Context,
+        ctx: &mut Context,
         props: impl IntoIterator<Item = ExprRef>,
     ) -> Result<CheckSatResponse> {
-        let props: Vec<ExprRef> = props.into_iter().collect();
-        self.write_cmd(Some(ctx), &SmtCommand::CheckSatAssuming(props))?;
+        let mut fin_props = vec![];
+
+        for prop in props {
+            // Must create activation literal for compound formulas
+            // if backend solver is yices2
+            if self.name == "yices-smt2" && !is_valid_yices2_expr(ctx, prop) {
+                let mut poss: Option<ExprRef> = None;
+
+                // Search for first instance of variable in scope
+                for map in self.cached_exprs.iter().rev() {
+                    if let Some(&act) = map.get(&prop) {
+                        poss = Some(act);
+                        break;
+                    }
+                }
+
+                let act = if let Some(act) = poss {
+                    act
+                } else {
+                    let act =
+                        ctx.bv_symbol(format!("{ACT_LIT_PREFIX}{}", self.next_act_id).as_str(), 1);
+                    self.next_act_id += 1;
+                    self.declare_const(ctx, act)?;
+
+                    let imp = ctx.implies(act, prop);
+                    self.assert(ctx, imp)?;
+
+                    self.expr_map.insert(act, prop);
+                    self.cached_exprs.last_mut().unwrap().insert(prop, act);
+                    act
+                };
+
+                fin_props.push(act);
+            } else {
+                fin_props.push(prop);
+            }
+        }
+
+        self.write_cmd(Some(ctx), &SmtCommand::CheckSatAssuming(fin_props))?;
         let res = self.read_sat_response()?;
         self.last_query_unsat = matches!(res, CheckSatResponse::Unsat);
         Ok(res)
@@ -427,6 +490,7 @@ impl SolverContext for SmtLibSolverCtx {
         self.write_cmd(None, &SmtCommand::Push(1))?;
         // Add new symbol table for context
         self.symbols.push(SymbolTable::default());
+        self.cached_exprs.push(FxHashMap::default());
         self.stack_depth += 1;
         Ok(())
     }
@@ -436,6 +500,13 @@ impl SolverContext for SmtLibSolverCtx {
             self.write_cmd(None, &SmtCommand::Pop(1))?;
             // Remove symbol table from old context
             self.symbols.pop();
+
+            // Clean poppped activation literals
+            for act in self.cached_exprs.last().unwrap().values() {
+                self.expr_map.remove(act);
+            }
+
+            self.cached_exprs.pop();
             self.stack_depth -= 1;
             Ok(())
         } else {
@@ -471,11 +542,23 @@ impl SolverContext for SmtLibSolverCtx {
             st.extend(st_ctx.iter().map(|(k, &v)| (k.clone(), v)));
         }
 
-        Ok(parse_get_unsat_assumptions_response(
-            ctx,
-            &st,
-            response.as_bytes(),
-        )?)
+        let mut core = parse_get_unsat_assumptions_response(ctx, &st, response.as_bytes())?;
+
+        // Replace activation literal with original expressions if yices2
+        // is backend solver
+        if self.name == "yices-smt2" {
+            for expr in core.iter_mut() {
+                if let Expr::BVNot(internal, _) = &ctx[*expr]
+                    && let Some(&orig) = self.expr_map.get(internal)
+                {
+                    *expr = ctx.not(orig);
+                } else if let Some(&orig) = self.expr_map.get(expr) {
+                    *expr = orig;
+                }
+            }
+        }
+
+        Ok(core)
     }
 }
 
@@ -495,11 +578,11 @@ pub const YICES2: SmtLibSolver = SmtLibSolver {
     args: &["--incremental"],
     options: &["produce-unsat-assumptions"],
     supports_uf: false, // actually true, but ignoring for now
-    supports_check_assuming: false,
-    supports_check_assuming_exprs: false,
+    supports_check_assuming: true,
+    supports_check_assuming_exprs: true,
     // see https://github.com/SRI-CSL/yices2/issues/110
     supports_const_array: false,
-    supports_unsat_assumptions: false,
+    supports_unsat_assumptions: true,
 };
 
 pub const Z3: SmtLibSolver = SmtLibSolver {
@@ -584,7 +667,7 @@ mod tests {
         let mut solver = backend.start(None).unwrap();
         solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, a).unwrap();
-        let res = solver.check_sat_assuming(&ctx, [e]);
+        let res = solver.check_sat_assuming(&mut ctx, [e]);
         assert_eq!(res.unwrap(), CheckSatResponse::Sat);
         let value_of_a = solver.get_value(&mut ctx, a).unwrap();
         assert_eq!(value_of_a, ctx.bit_vec_val(3, 3));
@@ -606,7 +689,7 @@ mod tests {
         solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, a).unwrap();
 
-        let res = solver.check_sat_assuming(&ctx, [eq3, eq4]).unwrap();
+        let res = solver.check_sat_assuming(&mut ctx, [eq3, eq4]).unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
@@ -632,7 +715,7 @@ mod tests {
         solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, a).unwrap();
         let res = solver
-            .check_sat_assuming(&ctx, [smt_false, ge3, ge5])
+            .check_sat_assuming(&mut ctx, [smt_false, ge3, ge5])
             .unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
@@ -661,7 +744,9 @@ mod tests {
         solver.declare_const(&ctx, a).unwrap();
         solver.declare_const(&ctx, b).unwrap();
 
-        let res = solver.check_sat_assuming(&ctx, [eq3, eq4, b_is_1]).unwrap();
+        let res = solver
+            .check_sat_assuming(&mut ctx, [eq3, eq4, b_is_1])
+            .unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
         // {eq3, eq4} is itself UNSAT, so any sufficient core must contain both.
@@ -697,7 +782,9 @@ mod tests {
             solver.assert(&ctx, imp).unwrap();
         }
 
-        let res = solver.check_sat_assuming(&ctx, act_lits.clone()).unwrap();
+        let res = solver
+            .check_sat_assuming(&mut ctx, act_lits.clone())
+            .unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
         // act_lits[0] (x==2) and act_lits[2] (x>=5) are jointly UNSAT and thus
@@ -730,7 +817,7 @@ mod tests {
         solver.assert(&ctx, eq4).unwrap();
         solver.assert(&ctx, b_is_1).unwrap();
 
-        let res = solver.check_sat_assuming(&ctx, [b_is_1]).unwrap();
+        let res = solver.check_sat_assuming(&mut ctx, [b_is_1]).unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
@@ -756,7 +843,9 @@ mod tests {
         solver.set_logic(Logic::QfBv).unwrap();
 
         solver.declare_const(&ctx, x).unwrap();
-        let res = solver.check_sat_assuming(&ctx, [eq2, ge5, ge1]).unwrap();
+        let res = solver
+            .check_sat_assuming(&mut ctx, [eq2, ge5, ge1])
+            .unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
         // {eq2, ge5} is itself UNSAT, so a sufficient core must contain both.
@@ -771,7 +860,7 @@ mod tests {
 
         solver.declare_const(&ctx, y).unwrap();
         let res = solver
-            .check_sat_assuming(&ctx, [y_is_1, eq2, ge5, ge1])
+            .check_sat_assuming(&mut ctx, [y_is_1, eq2, ge5, ge1])
             .unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
@@ -783,7 +872,9 @@ mod tests {
         solver.push().unwrap();
 
         let y_is_2 = ctx.build(|c| c.equal(y, c.bit_vec_val(2, 3)));
-        let res = solver.check_sat_assuming(&ctx, [y_is_1, y_is_2]).unwrap();
+        let res = solver
+            .check_sat_assuming(&mut ctx, [y_is_1, y_is_2])
+            .unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
@@ -801,7 +892,7 @@ mod tests {
         solver.declare_const(&ctx, z).unwrap();
 
         let res = solver
-            .check_sat_assuming(&ctx, [z_is_1, z_is_2, y_is_1])
+            .check_sat_assuming(&mut ctx, [z_is_1, z_is_2, y_is_1])
             .unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
@@ -813,7 +904,7 @@ mod tests {
         solver.pop().unwrap();
         solver.pop().unwrap();
 
-        let err = solver.check_sat_assuming(&ctx, [y_is_1, y_is_2]);
+        let err = solver.check_sat_assuming(&mut ctx, [y_is_1, y_is_2]);
         assert!(err.is_err());
     }
 
@@ -854,14 +945,14 @@ mod tests {
         solver.set_logic(Logic::QfBv).unwrap();
         solver.declare_const(&ctx, x).unwrap();
 
-        let res = solver.check_sat_assuming(&ctx, [eq2]).unwrap();
+        let res = solver.check_sat_assuming(&mut ctx, [eq2]).unwrap();
         assert_eq!(res, CheckSatResponse::Sat);
 
         let core = solver.get_unsat_assumptions(&mut ctx);
         assert!(core.is_err());
 
         let eq3 = ctx.build(|c| c.equal(x, c.bit_vec_val(3, 3)));
-        let res = solver.check_sat_assuming(&ctx, [eq2, eq3]).unwrap();
+        let res = solver.check_sat_assuming(&mut ctx, [eq2, eq3]).unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
 
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
