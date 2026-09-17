@@ -1,52 +1,11 @@
 use std::marker::PhantomData;
 
-pub(super) struct HeapResourceCache<T> {
-    buffer: Pinnable<i64>,
-    phantom: PhantomData<T>,
-}
+use baa::Word;
 
 pub(super) struct SlicedHeapResourceCache<T> {
     buffer: Pinnable<i64>,
     lens: Vec<usize>,
     phantom: PhantomData<T>,
-}
-
-impl<T> Default for HeapResourceCache<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[expect(dead_code)]
-impl<T> HeapResourceCache<T> {
-    pub(super) fn new() -> Self {
-        Self {
-            buffer: Pinnable::default(),
-            phantom: PhantomData,
-        }
-    }
-
-    pub(super) fn pinned_start_address(&self) -> *const i64 {
-        self.buffer.as_pinned_ptr()
-    }
-
-    pub(super) fn push(&mut self, item: Box<T>) {
-        self.buffer.push(Box::into_raw(item) as i64);
-    }
-
-    pub(super) fn seal(&mut self) {
-        self.buffer.pin();
-    }
-}
-
-impl<T> std::ops::Drop for HeapResourceCache<T> {
-    fn drop(&mut self) {
-        for &ptr in self.buffer.iter() {
-            unsafe {
-                let _ = Box::from_raw(ptr as *mut T);
-            }
-        }
-    }
 }
 
 impl<T> Default for SlicedHeapResourceCache<T> {
@@ -128,5 +87,21 @@ impl<T> Pinnable<T> {
             Self::Pinned(boxed) => boxed.as_ptr(),
             _ => panic!("`pin` has never been called"),
         }
+    }
+}
+
+#[derive(Default)]
+pub(super) struct ManagedHeapResource {
+    pub(super) bv_data: SlicedHeapResourceCache<Word>,
+    pub(super) array_data: SlicedHeapResourceCache<u8>,
+    /// TODO: resources reclaim this length erased pointer
+    array_with_wide_bv_data: SlicedHeapResourceCache<*mut Word>,
+}
+
+impl ManagedHeapResource {
+    pub(crate) fn seal(&mut self) {
+        self.bv_data.seal();
+        self.array_data.seal();
+        self.array_with_wide_bv_data.seal();
     }
 }

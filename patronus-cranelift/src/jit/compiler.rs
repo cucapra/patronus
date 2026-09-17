@@ -9,7 +9,6 @@ use super::{JITResult, THIN_BV_MAX_WIDTH, runtime};
 use patronus::expr::{self, *};
 use patronus::system::*;
 
-use baa::Word;
 use cranelift::codegen::ir;
 use cranelift::jit::{JITBuilder, JITModule};
 use cranelift::module::Module;
@@ -20,22 +19,6 @@ pub(super) struct JITCompiler {
     module: JITModule,
     pub(super) sealed_heap_resources: Vec<ManagedHeapResource>,
     pub(super) active_heap_resource: ManagedHeapResource,
-}
-
-#[derive(Default)]
-pub(super) struct ManagedHeapResource {
-    pub(super) bv_data: SlicedHeapResourceCache<Word>,
-    array_data: SlicedHeapResourceCache<u8>,
-    /// TODO: resources reclaim this length erased pointer
-    array_with_wide_bv_data: SlicedHeapResourceCache<*mut Word>,
-}
-
-impl ManagedHeapResource {
-    fn seal(&mut self) {
-        self.bv_data.seal();
-        self.array_data.seal();
-        self.array_with_wide_bv_data.seal();
-    }
 }
 
 pub(super) struct EvalBatchedExprWithUpdate(extern "C" fn(*const u64, *mut u64));
@@ -272,22 +255,15 @@ fn store_thin_bv_at_slot(
 }
 
 fn swap_ptr_at_slot(codegen_ctx: &mut CodeGenContext, slot_a: Value, slot_b: Value) {
-    let ptr_a = codegen_ctx
-        .fn_builder
+    let builder = &mut codegen_ctx.fn_builder;
+    let ptr_a = builder
         .ins()
         .load(codegen_ctx.int, MemFlags::trusted(), slot_a, 0);
-    let ptr_b = codegen_ctx
-        .fn_builder
+    let ptr_b = builder
         .ins()
         .load(codegen_ctx.int, MemFlags::trusted(), slot_b, 0);
-    codegen_ctx
-        .fn_builder
-        .ins()
-        .store(MemFlags::trusted(), ptr_b, slot_a, 0);
-    codegen_ctx
-        .fn_builder
-        .ins()
-        .store(MemFlags::trusted(), ptr_a, slot_b, 0);
+    builder.ins().store(MemFlags::trusted(), ptr_b, slot_a, 0);
+    builder.ins().store(MemFlags::trusted(), ptr_a, slot_b, 0);
 }
 
 pub(super) struct CodeGenContext<'expr, 'ctx, 'engine> {
@@ -662,6 +638,7 @@ impl CodeGenContext<'_, '_, '_> {
     fn expr_codegen(&mut self, expr: ExprRef, args: &[TaggedValue]) -> TaggedValue {
         let value = match &self.expr_ctx[expr] {
             Expr::ArraySymbol { .. } => {
+                // declared new arrays
                 if !self.consume_input {
                     let input = self.load_input_state(expr);
                     return self.reserve_cloned_intermediate_cache_slot(input);

@@ -3,7 +3,6 @@
 // author: Zihan Li <zl2225@cornell.edu>
 mod bv_codegen;
 mod compiler;
-mod converter;
 mod expr_graph;
 mod heap;
 mod runtime;
@@ -348,7 +347,7 @@ impl<'expr> JITEngine<'expr> {
         self.output_ledge
             .borrow()
             .get_slot_data(expr)
-            .map(|data| data.reduce(converter::BaaValueConverter))
+            .map(|data| data.reduce(BaaValueConverter))
     }
 
     fn swap_state_buffer(&mut self) {
@@ -415,7 +414,7 @@ impl patronus::sim::Simulator for JITEngine<'_> {
         let mut generator = patronus::sim::InitValueGenerator::from_kind(kind);
         for mut data in &mut self.input_state_buffer.ledge {
             let init_value = generator.generate(data.tpe);
-            data.reduce(converter::BaaValueSetter(&init_value));
+            data.reduce(BaaValueSetter(&init_value));
         }
 
         for state in &self.sys.states {
@@ -469,11 +468,9 @@ impl patronus::sim::Simulator for JITEngine<'_> {
         if let Some(data) = self.try_fetch_from_latest_outputs(expr) {
             data
         } else if let Some(slot) = self.input_state_buffer.ledge.get_slot_data(expr) {
-            slot.reduce(converter::BaaValueConverter)
+            slot.reduce(BaaValueConverter)
         } else {
-            self.eval_expr(expr)
-                .as_ref()
-                .reduce(converter::BaaValueConverter)
+            self.eval_expr(expr).as_ref().reduce(BaaValueConverter)
         }
     }
 

@@ -1,17 +1,43 @@
 // Copyright 2025 Cornell University
 // released under BSD 3-Clause License
 // author: Zihan Li <zl2225@cornell.edu>
-use super::slot::*;
 use baa::*;
 
-pub(super) struct BaaValueConverter;
-pub(super) struct BaaValueSetter<'a>(pub &'a baa::Value);
+/// deref and clone, essentially
+pub trait SlotDataRefReduce {
+    type Output;
+    fn with_bit_vec(&mut self, data: &[u64], width: WidthInt) -> Self::Output;
+    fn with_primitive_array<T: Into<u64> + Copy>(
+        &mut self,
+        data: &[T],
+        index_width: WidthInt,
+        data_width: WidthInt,
+    ) -> Self::Output;
+}
+
+pub trait SlotDataRefMutReduce {
+    type Output;
+    fn with_bit_vec(&mut self, data: &mut [u64], width: WidthInt) -> Self::Output;
+    fn with_primitive_array<T: TryFrom<u64>>(
+        &mut self,
+        data: &mut [T],
+        index_width: WidthInt,
+        data_width: WidthInt,
+    ) -> Self::Output;
+}
+
+pub struct BaaValueConverter;
+pub struct BaaValueSetter<'a>(pub &'a baa::Value);
 
 impl SlotDataRefReduce for BaaValueConverter {
     type Output = baa::Value;
+
+    /// reinterprets the data as a baa::Value
     fn with_bit_vec(&mut self, data: &[u64], width: WidthInt) -> Self::Output {
         baa::Value::BitVec(BitVecValueRef::new(data, width).into())
     }
+
+    /// reinterprets the data as an array.
     fn with_primitive_array<T: Into<u64> + Copy>(
         &mut self,
         data: &[T],
@@ -23,6 +49,8 @@ impl SlotDataRefReduce for BaaValueConverter {
         baa::Value::Array(words.as_slice().into())
     }
 }
+
+// TODO: i have no clue what this does.
 
 impl SlotDataRefMutReduce for BaaValueSetter<'_> {
     type Output = ();
