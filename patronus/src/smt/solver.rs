@@ -952,7 +952,16 @@ mod tests {
 
         solver.pop().unwrap();
 
-        assert!(solver.get_unsat_assumptions(&mut ctx).is_err());
+        // The stale `UNSAT` must be rejected by us, not by the solver: forwarding
+        // `(get-unsat-assumptions)` here also fails, so only the error kind tells the
+        // two apart.
+        assert!(matches!(
+            solver.get_unsat_assumptions(&mut ctx),
+            Err(Error::FromSolver(_, msg)) if msg == "Previous query not UNSAT"
+        ));
+
+        // Since we never sent the command, the solver is untouched and still usable.
+        assert_eq!(solver.check_sat().unwrap(), CheckSatResponse::Sat);
     }
 
     /// Check that `(get-unsat-assumptions)` fails after non-`UNSAT` query
@@ -1007,7 +1016,15 @@ mod tests {
         let extra = ctx.build(|c| c.equal(a, c.bit_vec_val(2, 3)));
         solver.assert(&ctx, extra).unwrap();
 
-        assert!(solver.get_unsat_assumptions(&mut ctx).is_err());
+        // Must be rejected by us rather than forwarded: cvc5 aborts with
+        // "Unreachable code reached" if `(get-unsat-assumptions)` reaches it here.
+        assert!(matches!(
+            solver.get_unsat_assumptions(&mut ctx),
+            Err(Error::FromSolver(_, msg)) if msg == "Previous query not UNSAT"
+        ));
+
+        // Since we never sent the command, the solver is still alive and usable.
+        assert_eq!(solver.check_sat().unwrap(), CheckSatResponse::Sat);
     }
 
     #[test]
@@ -1031,6 +1048,11 @@ mod tests {
         let _res = solver.check_sat().unwrap();
         let value_of_a = solver.get_value(&mut ctx, a).unwrap();
         assert_eq!(value_of_a, four);
+
+        // Open some contexts so the restart below has a stack depth to reset;
+        // without that reset these frames would still be considered open.
+        solver.push().unwrap();
+        solver.push().unwrap();
 
         solver.restart().unwrap();
 
