@@ -398,6 +398,7 @@ impl SolverContext for SmtLibSolverCtx {
         }
         self.symbols = vec![SymbolTable::default()];
         self.last_query_unsat = false;
+        self.stack_depth = 0;
         self.next_act_id = 0;
         self.expr_map.clear();
         self.cached_exprs = vec![FxHashMap::default()];
@@ -492,6 +493,7 @@ impl SolverContext for SmtLibSolverCtx {
         self.symbols.push(SymbolTable::default());
         self.cached_exprs.push(FxHashMap::default());
         self.stack_depth += 1;
+        self.last_query_unsat = false;
         Ok(())
     }
 
@@ -508,6 +510,7 @@ impl SolverContext for SmtLibSolverCtx {
 
             self.cached_exprs.pop();
             self.stack_depth -= 1;
+            self.last_query_unsat = false;
             Ok(())
         } else {
             Err(Error::StackUnderflow)
