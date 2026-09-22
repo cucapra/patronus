@@ -4,6 +4,8 @@ use patronus::expr::{self, *};
 use super::refs::*;
 
 /// a word-width value-like 'thing'
+
+#[derive(Clone)]
 #[repr(transparent)]
 pub struct OpaqueSlotData(pub(super) u64);
 
@@ -80,7 +82,7 @@ impl std::ops::Drop for SlotData {
     }
 }
 
-/// contains an immutable reference to some opaque data and its type.
+/// contains a mutable reference to some opaque data and its type.
 pub struct SlotEntry<'slot> {
     pub(super) slot: &'slot mut OpaqueSlotData,
     pub(super) tpe: expr::Type,

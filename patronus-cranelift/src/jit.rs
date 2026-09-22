@@ -5,6 +5,7 @@ mod bv_codegen;
 mod compiler;
 mod expr_graph;
 mod heap;
+mod indep_gen;
 mod runtime;
 mod slot;
 mod store;
@@ -72,7 +73,7 @@ impl JITBackend {
         &mut self,
         expr: ExprRef,
         ctx: &expr::Context,
-        input_state_buffer: &StateBuffer<'_>,
+        input_state_buffer: &StateBuffer,
         mut entry: SlotEntry<'_>,
     ) {
         let eval_fn = self.compiled_expr_eval.entry(expr).or_insert_with(|| {
@@ -98,7 +99,7 @@ impl JITBackend {
         &mut self,
         expr: ExprRef,
         ctx: &expr::Context,
-        input_state_buffer: &StateBuffer<'_>,
+        input_state_buffer: &StateBuffer,
     ) -> SlotData {
         let mut ledge = ExprLedge::new_singleton(ctx, expr);
         self.eval_expr_with_output_slot(expr, ctx, input_state_buffer, ledge.entry_at_offset(0));
@@ -109,7 +110,7 @@ impl JITBackend {
         &mut self,
         ctx: &expr::Context,
         output_exprs: &[ExprRef],
-        input_state_buffer: &StateBuffer<'_>,
+        input_state_buffer: &StateBuffer,
         output_ledge: &mut ExprLedge,
     ) {
         let eval_fn = self
@@ -133,9 +134,10 @@ impl JITBackend {
         &mut self,
         ctx: &expr::Context,
         sys: &TransitionSystem,
-        input_state_buffer: &StateBuffer<'_>,
-        output_state_buffer: &mut StateBuffer<'_>,
+        input_state_buffer: &StateBuffer,
+        output_state_buffer: &mut StateBuffer,
     ) {
+        // attempt compilation if transition sys has not been compiled yet, or otherwise use the existing result
         let eval_fn = self.compiled_transition_sys.get_or_insert_with(|| {
             self.compiler
                 .compile_transition_sys(ctx, sys, input_state_buffer, &*output_state_buffer)
@@ -155,7 +157,7 @@ impl JITBackend {
 }
 
 pub struct JITEngine<'expr> {
-    state: JITState<'expr>,
+    state: JITState,
     /// Value placeholders for output expressions, including `output`, `bad` and `constraint`
     output_ledge: RefCell<ExprLedge>,
     output_exprs: Vec<ExprRef>,
@@ -170,7 +172,7 @@ pub struct JITEngine<'expr> {
     /// When enabled, JIT will switch between per-expr and batched update mode in each `step()` according to the dirty
     /// percetange of output states.
     dynamic_update_mode_switching_enabled: bool,
-    snapshots: Vec<StateBuffer<'expr>>,
+    snapshots: Vec<StateBuffer>,
     output_up_to_date: Cell<bool>,
 }
 
@@ -190,9 +192,7 @@ impl<'expr> JITEngine<'expr> {
         for (idx, &expr) in output_exprs.iter().enumerate() {
             output_exprs_to_offset.insert(expr, idx);
         }
-        let output_ledge = ExprLedge::new(ctx, &output_exprs, move |e| {
-            output_exprs_to_offset.get(&e).copied()
-        });
+        let output_ledge = ExprLedge::new(ctx, &output_exprs, output_exprs_to_offset);
 
         let dynamic_update_mode_switching_enabled =
             *DYNAMIC_MODE_SWITCH && ctx.num_exprs() > DYNAMIC_MODE_SWITCH_THRESHOLD;

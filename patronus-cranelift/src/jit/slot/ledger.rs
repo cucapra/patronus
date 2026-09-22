@@ -6,25 +6,23 @@ use rustc_hash::FxHashMap;
 pub struct ExprLedge {
     pub slots: Box<[OpaqueSlotData]>,
     pub dtypes: Box<[expr::Type]>,
-    pub offset_map: Box<dyn Fn(ExprRef) -> Option<usize>>,
+    pub offset_map: FxHashMap<ExprRef, usize>,
 }
 
 impl ExprLedge {
     pub fn new_singleton(ctx: &Context, expr: ExprRef) -> Self {
-        Self::new(ctx, &[expr], |_| Some(0))
+        let mut offset_map = FxHashMap::default();
+        offset_map.insert(expr, 0);
+        Self::new(ctx, &[expr], offset_map)
     }
-    pub fn new(
-        ctx: &Context,
-        exprs: &[ExprRef],
-        offset_map: impl Fn(ExprRef) -> Option<usize> + 'static,
-    ) -> Self {
+    pub fn new(ctx: &Context, exprs: &[ExprRef], offset_map: FxHashMap<ExprRef, usize>) -> Self {
         let mut assignment = FxHashMap::default();
         let dtypes: Vec<_> = exprs.iter().map(|&e| e.get_type(ctx)).collect();
         for (&e, dtype) in exprs.iter().zip(&dtypes) {
             assert!(
                 assignment
                     .insert(
-                        offset_map(e).expect("input expr not found"),
+                        offset_map.get(&e).expect("input expr not found"),
                         OpaqueSlotData::new(*dtype)
                     )
                     .is_none(),
@@ -41,7 +39,7 @@ impl ExprLedge {
         Self {
             slots: slots.into_boxed_slice(),
             dtypes: dtypes.into_boxed_slice(),
-            offset_map: Box::new(offset_map),
+            offset_map: offset_map,
         }
     }
 
@@ -83,7 +81,10 @@ impl ExprLedge {
     }
 
     pub fn offset_query(&self, expr: ExprRef) -> Option<usize> {
-        (self.offset_map)(expr).filter(|&offset| offset < self.slots.len())
+        self.offset_map
+            .get(&expr)
+            .filter(|offset| **offset < self.slots.len())
+            .copied()
     }
 
     pub fn entry(&mut self, expr: ExprRef) -> Option<SlotEntry<'_>> {
@@ -109,6 +110,15 @@ impl ExprLedge {
     pub fn as_raw_data_slice(&self) -> &[u64] {
         // SAFETY: `OpaqueSlotData` is transparent
         unsafe { std::mem::transmute::<&[OpaqueSlotData], &[u64]>(&*self.slots) }
+    }
+
+    pub fn shallow_clone(&self) -> Self {
+        let slots = self.slots.iter().cloned().collect::<Vec<_>>();
+        ExprLedge {
+            slots: slots.into_boxed_slice(),
+            dtypes: self.dtypes.clone(),
+            offset_map: self.offset_map.clone(),
+        }
     }
 }
 

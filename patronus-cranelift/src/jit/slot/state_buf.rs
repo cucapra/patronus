@@ -6,13 +6,11 @@ use rustc_hash::FxHashMap;
 
 /// The `StateBuffer` associates each `state` expression with an expr slot.
 /// Its expr ledge routes each state's expr to slot offset.
-pub struct StateBuffer<'expr> {
+pub struct StateBuffer {
     pub ledge: ExprLedge,
-    pub ctx: &'expr Context,
-    pub sys: &'expr TransitionSystem,
 }
 
-impl StateBuffer<'_> {
+impl StateBuffer {
     // SAFETY: caller should guarantee that each slot in `self` and `other` contains the same data type
     pub unsafe fn swap(&mut self, other: &mut Self) {
         debug_assert!(
@@ -26,15 +24,15 @@ impl StateBuffer<'_> {
     }
 }
 
-pub fn build_in_out_state_buffer<'a>(
-    ctx: &'a Context,
-    sys: &'a TransitionSystem,
-) -> (StateBuffer<'a>, StateBuffer<'a>) {
+pub fn build_in_out_state_buffer(
+    ctx: &Context,
+    sys: &TransitionSystem,
+) -> (StateBuffer, StateBuffer) {
     (StateBuffer::new(ctx, sys), StateBuffer::new(ctx, sys))
 }
 
-impl<'expr> StateBuffer<'expr> {
-    fn new(ctx: &'expr Context, sys: &'expr TransitionSystem) -> Self {
+impl StateBuffer {
+    fn new(ctx: &Context, sys: &TransitionSystem) -> Self {
         let mut offset_map = FxHashMap::default();
         let mut exprs = vec![];
         for (idx, &e) in sys
@@ -48,9 +46,7 @@ impl<'expr> StateBuffer<'expr> {
             exprs.push(e);
         }
         Self {
-            ledge: ExprLedge::new(ctx, &exprs, move |e| offset_map.get(&e).copied()),
-            ctx,
-            sys,
+            ledge: ExprLedge::new(ctx, &exprs, offset_map),
         }
     }
 
@@ -61,12 +57,15 @@ impl<'expr> StateBuffer<'expr> {
     }
 }
 
-impl Clone for StateBuffer<'_> {
+impl Clone for StateBuffer {
     fn clone(&self) -> Self {
-        let mut cloned_buffer = StateBuffer::new(self.ctx, self.sys);
-        for (mut dst, src) in (&mut cloned_buffer.ledge).into_iter().zip(&self.ledge) {
+        let mut cloned_ledge = self.ledge.shallow_clone();
+        for (mut dst, src) in (&mut cloned_ledge).into_iter().zip(&self.ledge) {
             dst.copy_from(src);
         }
-        cloned_buffer
+
+        StateBuffer {
+            ledge: cloned_ledge,
+        }
     }
 }

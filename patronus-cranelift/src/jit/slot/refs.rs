@@ -4,17 +4,17 @@ use patronus::expr::{self, *};
 
 #[derive(PartialEq, Eq)]
 pub struct SlotDataRef<'a> {
-    pub kind: SlotDataRefKind<'a>,
+    kind: SlotDataRefKind<'a>,
     pub tpe: expr::Type,
 }
 
 pub struct SlotDataRefMut<'a> {
-    pub kind: SlotDataRefMutKind<'a>,
+    kind: SlotDataRefMutKind<'a>,
     pub tpe: expr::Type,
 }
 
 #[derive(PartialEq, Eq)]
-pub enum SlotDataRefKind<'a> {
+enum SlotDataRefKind<'a> {
     BitVec(&'a [u64]),
     ArrayU8(&'a [u8]),
     ArrayU16(&'a [u16]),
@@ -22,7 +22,7 @@ pub enum SlotDataRefKind<'a> {
     ArrayU64(&'a [u64]),
 }
 
-pub enum SlotDataRefMutKind<'a> {
+enum SlotDataRefMutKind<'a> {
     BitVec(&'a mut [u64]),
     ArrayU8(&'a mut [u8]),
     ArrayU16(&'a mut [u16]),

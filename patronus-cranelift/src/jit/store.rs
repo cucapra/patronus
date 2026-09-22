@@ -61,9 +61,9 @@ impl DirtyStateRegistry {
     }
 }
 
-pub(crate) struct JITState<'expr> {
-    pub(crate) in_state: StateBuffer<'expr>,
-    pub(crate) out_state: StateBuffer<'expr>,
+pub(crate) struct JITState {
+    pub(crate) in_state: StateBuffer,
+    pub(crate) out_state: StateBuffer,
 
     /// Maintains set of states that need to be recomputed at next step
     pub(crate) dirty_registry: DirtyStateRegistry,
@@ -79,8 +79,8 @@ fn check_slot_dirtiness(a: SlotDataRef<'_>, b: SlotDataRef<'_>) -> bool {
     }
 }
 
-impl<'expr> JITState<'expr> {
-    pub(crate) fn new(ctx: &'expr expr::Context, sys: &'expr TransitionSystem) -> JITState<'expr> {
+impl JITState {
+    pub(crate) fn new(ctx: &expr::Context, sys: &TransitionSystem) -> JITState {
         let (in_state, out_state) = build_in_out_state_buffer(ctx, sys);
         let num_mutable_states = sys.states.len();
         let mut init_states = FixedBitSet::with_capacity(num_mutable_states);
@@ -106,7 +106,7 @@ impl<'expr> JITState<'expr> {
     pub(crate) fn mark_dirty_states(
         &mut self,
         upstream_deps: &FxHashMap<ExprRef, FixedBitSet>,
-        sys: &'expr TransitionSystem,
+        sys: &TransitionSystem,
     ) {
         let states_require_reexamine = &self.dirty_registry.states;
         let next_step_dirty_states = &mut self.dirty_registry.scratch_states;

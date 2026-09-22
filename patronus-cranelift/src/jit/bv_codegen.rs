@@ -13,7 +13,7 @@ pub(super) struct BVWord(pub(super) WidthInt);
 
 macro_rules! iconst {
     ($ctx: expr, $value: expr) => {
-        $ctx.fn_builder.ins().iconst($ctx.int, ($value) as i64)
+        $ctx.fn_builder.ins().iconst(INT_T, ($value) as i64)
     };
 }
 pub(super) use iconst;
