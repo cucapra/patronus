@@ -18,3 +18,14 @@ def test_simplify():
     assert simplify(BitVecVal(0, 4).equals(Extract(8, 5, ZeroExt(4, BitVec('a', 5))))) == true
 
 
+def test_expr_introspection():
+    a = BitVec('a', 1)
+    assert a.op() == Op.BVSymbol
+    assert a.width() == 1
+    a_and_b = a & BitVec('b', 1)
+    assert a_and_b.op() == Op.BVAnd
+    assert a_and_b.width() == 1
+    assert str(a_and_b.op()) == 'Op.BVAnd'
+    arg_a, arg_b = a_and_b.args()
+    assert arg_a == a
+    assert arg_b.name() == "b"
