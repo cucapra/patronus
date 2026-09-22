@@ -317,6 +317,7 @@ fn pypatronus(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> Py
     m.add_function(wrap_pyfunction!(sext, m)?)?;
     m.add_function(wrap_pyfunction!(extract, m)?)?;
     m.add_function(wrap_pyfunction!(slice, m)?)?;
+    m.add_class::<Op>()?;
     // smt
     m.add_function(wrap_pyfunction!(solver, m)?)?;
     m.add_function(wrap_pyfunction!(parse_smtlib_expr, m)?)?;

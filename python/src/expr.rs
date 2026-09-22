@@ -6,7 +6,7 @@ use crate::ctx::{ContextGuardRead, ContextGuardWrite};
 use ::patronus::expr::SerializableIrNode;
 use baa::BitVecValue;
 use num_bigint::BigInt;
-use patronus::expr::{SparseExprMap, TypeCheck, WidthInt};
+use patronus::expr::{Expr, ForEachChild, SparseExprMap, StringRef, TypeCheck, WidthInt};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use std::ops::DerefMut;
@@ -126,6 +126,109 @@ impl ExprRef {
     /// This is different from the Z3 API where `==` builds an SMT expressoion
     fn __eq__(&self, other: &Self) -> bool {
         self.0 == other.0
+    }
+
+    fn op(&self) -> Op {
+        (&ContextGuardRead::default().deref()[self.0]).into()
+    }
+
+    fn args(&self) -> Vec<Self> {
+        let mut children = vec![];
+        ContextGuardRead::default().deref()[self.0].collect_children(&mut children);
+        children.into_iter().map(ExprRef).collect()
+    }
+
+    fn children(&self) -> Vec<Self> {
+        self.args()
+    }
+
+    fn name(&self) -> Option<String> {
+        ContextGuardRead::default()
+            .deref()
+            .get_symbol_name(self.0)
+            .map(|s| s.to_string())
+    }
+}
+
+#[pyclass(eq, eq_int)]
+#[derive(PartialEq)]
+pub enum Op {
+    BVSymbol,
+    BVLiteral,
+    BVZeroExt,
+    BVSignExt,
+    BVSlice,
+    BVNot,
+    BVNegate,
+    BVEqual,
+    BVImplies,
+    BVGreater,
+    BVGreaterSigned,
+    BVGreaterEqual,
+    BVGreaterEqualSigned,
+    BVConcat,
+    BVAnd,
+    BVOr,
+    BVXor,
+    BVShiftLeft,
+    BVArithmeticShiftRight,
+    BVShiftRight,
+    BVAdd,
+    BVMul,
+    BVSignedDiv,
+    BVUnsignedDiv,
+    BVSignedMod,
+    BVSignedRem,
+    BVUnsignedRem,
+    BVSub,
+    BVArrayRead,
+    BVIte,
+    ArraySymbol,
+    ArrayConstant,
+    ArrayEqual,
+    ArrayStore,
+    ArrayIte,
+}
+
+impl From<&patronus::expr::Expr> for Op {
+    fn from(value: &Expr) -> Self {
+        match value {
+            Expr::BVSymbol { .. } => Op::BVSymbol,
+            Expr::BVLiteral(_) => Op::BVLiteral,
+            Expr::BVZeroExt { .. } => Op::BVZeroExt,
+            Expr::BVSignExt { .. } => Op::BVSignExt,
+            Expr::BVSlice { .. } => Op::BVSlice,
+            Expr::BVNot(_, _) => Op::BVNot,
+            Expr::BVNegate(_, _) => Op::BVNegate,
+            Expr::BVEqual(_, _) => Op::BVEqual,
+            Expr::BVImplies(_, _) => Op::BVImplies,
+            Expr::BVGreater(_, _) => Op::BVGreater,
+            Expr::BVGreaterSigned(_, _, _) => Op::BVGreaterSigned,
+            Expr::BVGreaterEqual(_, _) => Op::BVGreaterEqual,
+            Expr::BVGreaterEqualSigned(_, _, _) => Op::BVGreaterEqualSigned,
+            Expr::BVConcat(_, _, _) => Op::BVConcat,
+            Expr::BVAnd(_, _, _) => Op::BVAnd,
+            Expr::BVOr(_, _, _) => Op::BVOr,
+            Expr::BVXor(_, _, _) => Op::BVXor,
+            Expr::BVShiftLeft(_, _, _) => Op::BVShiftLeft,
+            Expr::BVArithmeticShiftRight(_, _, _) => Op::BVArithmeticShiftRight,
+            Expr::BVShiftRight(_, _, _) => Op::BVShiftRight,
+            Expr::BVAdd(_, _, _) => Op::BVAdd,
+            Expr::BVMul(_, _, _) => Op::BVMul,
+            Expr::BVSignedDiv(_, _, _) => Op::BVSignedDiv,
+            Expr::BVUnsignedDiv(_, _, _) => Op::BVUnsignedDiv,
+            Expr::BVSignedMod(_, _, _) => Op::BVSignedMod,
+            Expr::BVSignedRem(_, _, _) => Op::BVSignedRem,
+            Expr::BVUnsignedRem(_, _, _) => Op::BVUnsignedRem,
+            Expr::BVSub(_, _, _) => Op::BVSub,
+            Expr::BVArrayRead { .. } => Op::BVArrayRead,
+            Expr::BVIte { .. } => Op::BVIte,
+            Expr::ArraySymbol { .. } => Op::ArraySymbol,
+            Expr::ArrayConstant { .. } => Op::ArrayConstant,
+            Expr::ArrayEqual(_, _) => Op::ArrayEqual,
+            Expr::ArrayStore { .. } => Op::ArrayStore,
+            Expr::ArrayIte { .. } => Op::ArrayIte,
+        }
     }
 }
 
