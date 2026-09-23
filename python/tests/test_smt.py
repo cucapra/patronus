@@ -6,12 +6,13 @@ import pathlib
 import pytest
 from pypatronus import *
 
-repo_root = (pathlib.Path(__file__) / '..' / '..' / '..').resolve()
+repo_root = (pathlib.Path(__file__) / ".." / ".." / "..").resolve()
+
 
 def test_call_smt_solver():
-    a = BitVec('a', 3)
-    b = BitVec('b', 3)
-    s = Solver('z3')
+    a = BitVec("a", 3)
+    b = BitVec("b", 3)
+    s = Solver("z3")
     r = s.check(a < b)
     assert str(r) == "sat"
 
@@ -30,9 +31,9 @@ def test_call_smt_solver():
 
 def test_parse_smt_lib_expr():
     symbols = {
-        'x_0': BitVec('x_0', 32),
-        'y_0': BitVec('y_0', 32),
-        'x_1': BitVec('x_1', 32),
+        "x_0": BitVec("x_0", 32),
+        "y_0": BitVec("y_0", 32),
+        "x_1": BitVec("x_1", 32),
     }
     a = parse_smtlib_expr("(= x_1 (bvadd x_0 y_0))", symbols)
     assert str(a) == "eq(x_1, add(x_0, y_0))"
