@@ -1,11 +1,11 @@
 // Copyright 2025 Cornell University
 // released under BSD 3-Clause License
 // author: Zihan Li <zl2225@cornell.edu>
+use super::JITResult;
 use super::bv_codegen::{self, iconst};
 use super::expr_graph::*;
 use super::indep_gen::*;
 use super::slot::{ExprLedge, StateBuffer};
-use super::{JITResult, THIN_BV_MAX_WIDTH};
 use patronus::expr::{self, ForEachChild, TypeCheck};
 use patronus::system::*;
 
@@ -249,11 +249,6 @@ impl std::ops::Deref for TaggedValue {
 
 impl TaggedValue {
     pub(super) fn requires_bv_delegation(&self) -> bool {
-        if let expr::Type::BV(width) = self.data_type {
-            if width > THIN_BV_MAX_WIDTH {
-                panic!("bv delegation")
-            }
-        }
         false
     }
 
