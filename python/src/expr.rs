@@ -11,7 +11,7 @@ use patronus::expr::{
 };
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::DerefMut;
 use std::sync::{LazyLock, RwLock};
@@ -164,6 +164,16 @@ impl ExprRef {
             .into_iter()
             .map(Self)
             .collect()
+    }
+
+    fn replace(&self, map: FxHashMap<Self, Self>) -> Self {
+        let map: FxHashMap<_, _> = map.into_iter().map(|(k, v)| (k.0, v.0)).collect();
+        let e = patronus::expr::simple_transform_expr(
+            ContextGuardWrite::default().deref_mut(),
+            self.0,
+            |_, e, _| map.get(&e).cloned(),
+        );
+        Self(e)
     }
 }
 
