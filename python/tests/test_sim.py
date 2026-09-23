@@ -6,14 +6,13 @@ import pathlib
 import pytest
 from pypatronus import *
 
-repo_root = (pathlib.Path(__file__) / '..' / '..' / '..').resolve()
-
+repo_root = (pathlib.Path(__file__) / ".." / ".." / "..").resolve()
 
 
 def test_transition_system_simulation():
     sys = parse_btor2_file(repo_root / "inputs" / "unittest" / "swap.btor")
     sim = Interpreter(sys)
-    a, b = sys['a'].symbol, sys['b'].symbol
+    a, b = sys["a"].symbol, sys["b"].symbol
 
     sim.init()
     assert sim[a] == 0, "a@0"

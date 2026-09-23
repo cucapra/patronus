@@ -4,28 +4,56 @@
 
 from pypatronus import *
 
+
 def test_simplify():
     # by default this uses a global simplifier
     true = BitVecVal(1, 1)
-    false = BitVecVal(0,1)
-    a = BitVec('a', 1)
+    false = BitVecVal(0, 1)
+    a = BitVec("a", 1)
     assert simplify((~a) & a) == false
     assert simplify((~a) | a) == true
 
     assert simplify(SignExt(1, false)) == BitVecVal(0b00, 2)
     assert simplify(SignExt(1, true)) == BitVecVal(0b11, 2)
 
-    assert simplify(BitVecVal(0, 4).equals(Extract(8, 5, ZeroExt(4, BitVec('a', 5))))) == true
+    assert (
+        simplify(BitVecVal(0, 4).equals(Extract(8, 5, ZeroExt(4, BitVec("a", 5)))))
+        == true
+    )
 
 
 def test_expr_introspection():
-    a = BitVec('a', 1)
+    a = BitVec("a", 1)
     assert a.op() == Op.BVSymbol
     assert a.width() == 1
-    a_and_b = a & BitVec('b', 1)
+    a_and_b = a & BitVec("b", 1)
     assert a_and_b.op() == Op.BVAnd
     assert a_and_b.width() == 1
-    assert str(a_and_b.op()) == 'Op.BVAnd'
+    assert str(a_and_b.op()) == "Op.BVAnd"
+    assert a_and_b.op().snake_case() == "bv_and"
     arg_a, arg_b = a_and_b.args()
     assert arg_a == a
     assert arg_b.name() == "b"
+
+
+def test_expressions_hash():
+    a = BitVec("a", 1)
+    d = {a: 1}
+    d[a] += 1
+    assert d[a] == 2
+    a_and_b = a & BitVec("b", 1)
+    d[a_and_b] = 2
+    d[a_and_b] += 2
+    assert d[a_and_b] == 4
+    assert id(a) != id(a_and_b)
+    d[BitVec("a", 1) & BitVec("b", 1)] += 1
+    assert d[a_and_b] == 5
+
+
+def test_find_symbols():
+    a = BitVec("a", 1)
+    b = BitVec("b", 1)
+    a_and_b = a & b
+    assert a_and_b.symbols() == {a, b}
+    assert a.symbols() == {a}
+    assert b.symbols() == {b}

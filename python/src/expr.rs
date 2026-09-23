@@ -6,14 +6,18 @@ use crate::ctx::{ContextGuardRead, ContextGuardWrite};
 use ::patronus::expr::SerializableIrNode;
 use baa::BitVecValue;
 use num_bigint::BigInt;
-use patronus::expr::{Expr, ForEachChild, SparseExprMap, StringRef, TypeCheck, WidthInt};
+use patronus::expr::{
+    Expr, ForEachChild, SparseExprMap, StringRef, TypeCheck, WidthInt, find_symbols,
+};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
+use rustc_hash::FxHashSet;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::DerefMut;
 use std::sync::{LazyLock, RwLock};
 
 #[pyclass(from_py_object)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ExprRef(pub(crate) patronus::expr::ExprRef);
 
 /// Helper for binary ops that require a and b to be bitvectors of the same width
@@ -128,6 +132,12 @@ impl ExprRef {
         self.0 == other.0
     }
 
+    fn __hash__(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.0.hash(&mut hasher);
+        hasher.finish()
+    }
+
     fn op(&self) -> Op {
         (&ContextGuardRead::default().deref()[self.0]).into()
     }
@@ -147,6 +157,13 @@ impl ExprRef {
             .deref()
             .get_symbol_name(self.0)
             .map(|s| s.to_string())
+    }
+
+    fn symbols(&self) -> FxHashSet<Self> {
+        find_symbols(ContextGuardRead::default().deref(), self.0)
+            .into_iter()
+            .map(Self)
+            .collect()
     }
 }
 
@@ -229,6 +246,50 @@ impl From<&patronus::expr::Expr> for Op {
             Expr::ArrayStore { .. } => Op::ArrayStore,
             Expr::ArrayIte { .. } => Op::ArrayIte,
         }
+    }
+}
+
+#[pymethods]
+impl Op {
+    fn snake_case(&self) -> String {
+        let cc = match self {
+            Op::BVSymbol => "bv_symbol",
+            Op::BVLiteral => "bv_literal",
+            Op::BVZeroExt => "bv_zero_ext",
+            Op::BVSignExt => "bv_sign_ext",
+            Op::BVSlice => "bv_slice",
+            Op::BVNot => "bv_not",
+            Op::BVNegate => "bv_negate",
+            Op::BVEqual => "bv_equal",
+            Op::BVImplies => "bv_implies",
+            Op::BVGreater => "bv_greater",
+            Op::BVGreaterSigned => "bv_greater_signed",
+            Op::BVGreaterEqual => "bv_greater_equal",
+            Op::BVGreaterEqualSigned => "bv_greater_equal_signed",
+            Op::BVConcat => "bv_concat",
+            Op::BVAnd => "bv_and",
+            Op::BVOr => "bv_or",
+            Op::BVXor => "bv_xor",
+            Op::BVShiftLeft => "bv_shift_left",
+            Op::BVArithmeticShiftRight => "bv_arithmetic_shift_right",
+            Op::BVShiftRight => "bv_shift_right",
+            Op::BVAdd => "bv_add",
+            Op::BVMul => "bv_mul",
+            Op::BVSignedDiv => "bv_signed_div",
+            Op::BVUnsignedDiv => "bv_unsigned_div",
+            Op::BVSignedMod => "bv_signed_mod",
+            Op::BVSignedRem => "bv_signed_rem",
+            Op::BVUnsignedRem => "bv_unsigned_rem",
+            Op::BVSub => "bv_sub",
+            Op::BVArrayRead => "bv_array_read",
+            Op::BVIte => "bv_ite",
+            Op::ArraySymbol => "array_symbol",
+            Op::ArrayConstant => "array_constant",
+            Op::ArrayEqual => "array_equal",
+            Op::ArrayStore => "array_store",
+            Op::ArrayIte => "array_ite",
+        };
+        cc.into()
     }
 }
 

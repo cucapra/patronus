@@ -9,7 +9,7 @@ import pytest
 from pypatronus import *
 
 
-repo_root = (pathlib.Path(__file__) / '..' / '..' / '..').resolve()
+repo_root = (pathlib.Path(__file__) / ".." / ".." / "..").resolve()
 
 COUNT_2 = """
 1 sort bitvec 3
@@ -25,6 +25,7 @@ COUNT_2 = """
 11 bad 10
 """
 
+
 def test_parse_and_serialize_count2():
     sys = parse_btor2_str(COUNT_2, "count2")
     assert sys.name == "count2"
@@ -38,10 +39,12 @@ state _state_0 : bv<3>
     """
     assert expected_system.strip() == str(sys).strip()
 
+
 @pytest.mark.skip(reason="btor2 serialization is not yet implemented in paronus")
 def btor2_serialize():
     sys = parse_btor2_str(COUNT_2, "count2")
     assert sys.to_btor2_str().strip() == COUNT_2.strip()
+
 
 def test_transition_system_fields():
     sys = parse_btor2_str(COUNT_2, "count2")
@@ -59,20 +62,26 @@ def test_transition_system_fields():
 
 def test_expression_builder():
     # we are emulating the Z3 API as much as possible
-    a = BitVec('a', 3)
-    b = BitVec('b', 3)
+    a = BitVec("a", 3)
+    b = BitVec("b", 3)
     assert str(a < b) == "sgt(b, a)"
 
 
 def test_transition_system_builder():
     sys = TransitionSystem("test")
-    en, count_s = BitVec('en', 1), BitVec('count_s', 8)
+    en, count_s = BitVec("en", 1), BitVec("count_s", 8)
     sys.inputs = [en]
-    sys.states = [State('count_s', init=BitVecVal(0, 8), next=If(en, count_s + BitVecVal(1, 8), count_s))]
-    sys.outputs = [Output('count', count_s)]
+    sys.states = [
+        State(
+            "count_s",
+            init=BitVecVal(0, 8),
+            next=If(en, count_s + BitVecVal(1, 8), count_s),
+        )
+    ]
+    sys.outputs = [Output("count", count_s)]
     # TODO: there is a big pitfall here: you cannot just `append` to the bad_states, inputs, etc. because we use
     #       a getter / setter approach
-    sys.add_bad_state('count_is_123', count_s.equals(BitVecVal(123, 8)))
+    sys.add_bad_state("count_is_123", count_s.equals(BitVecVal(123, 8)))
     expected_system = """
 test
 input en : bv<1>
@@ -83,5 +92,3 @@ state count_s : bv<8>
   [next] ite(en, add(count, 8'b00000001), count)
     """
     assert str(sys).strip() == expected_system.strip()
-
-
