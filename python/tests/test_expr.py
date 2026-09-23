@@ -57,3 +57,16 @@ def test_find_symbols():
     assert a_and_b.symbols() == {a, b}
     assert a.symbols() == {a}
     assert b.symbols() == {b}
+
+
+def test_expr_replacement():
+    a = BitVec("a", 1)
+    b = BitVec("b", 1)
+    x = BitVec("x", 1)
+    a_and_b = a & b
+    x_and_b = a_and_b.replace({a: x})
+    a_and_x = a_and_b.replace({b: x})
+    b_and_a = a_and_b.replace({b: a, a: b})
+    assert x_and_b == x & b
+    assert a_and_x == a & x
+    assert b_and_a == b & a
