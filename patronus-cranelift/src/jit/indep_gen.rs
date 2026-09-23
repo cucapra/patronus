@@ -1,5 +1,3 @@
-use crate::jit::TaggedValue;
-
 use patronus::expr::{self, WidthInt};
 
 use cranelift::codegen::ir;
@@ -46,14 +44,4 @@ fn store_thin_bv_at_slot(
         ret = fn_build.ins().uextend(types::I64, ret);
     }
     fn_build.ins().store(ir::MemFlags::trusted(), ret, slot, 0);
-}
-
-pub(crate) fn resource_ptr_at_slot(
-    fn_build: &mut FunctionBuilder,
-    slot_address: TaggedValue,
-) -> TaggedValue {
-    let ret = fn_build
-        .ins()
-        .load(types::I64, ir::MemFlags::trusted(), *slot_address, 0);
-    TaggedValue::tag(ret, slot_address.data_type)
 }

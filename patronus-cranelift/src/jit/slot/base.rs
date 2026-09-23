@@ -1,4 +1,3 @@
-use crate::jit::runtime;
 use patronus::expr::{self, *};
 
 use super::refs::*;
@@ -22,16 +21,8 @@ impl OpaqueSlotData {
                     panic!("attempting to create slot of size >64b");
                 }
             }
-            expr::Type::Array(ArrayType {
-                index_width,
-                data_width,
-            }) => {
-                let (index_width, data_width) = (index_width as u64, data_width as u64);
-                if data_width <= 64 {
-                    runtime::__alloc_array(0, index_width, data_width) as u64
-                } else {
-                    panic!("attempting to create slot of array with element size >64b");
-                }
+            expr::Type::Array(ArrayType { .. }) => {
+                panic!("array support temporarily removed");
             }
         };
         Self(raw)
@@ -56,31 +47,7 @@ impl SlotData {
     }
 }
 
-impl std::ops::Drop for SlotData {
-    fn drop(&mut self) {
-        // SAFETY: api designs of slot guarantee that data is always valid
-        unsafe {
-            match self.tpe {
-                expr::Type::BV(width) => {
-                    if width > 64 {
-                        panic!("trying to drop a slot of size >64")
-                    }
-                }
-                expr::Type::Array(ArrayType {
-                    index_width,
-                    data_width,
-                }) => {
-                    let (index_width, data_width) = (index_width as u64, data_width as u64);
-                    if data_width > 64 {
-                        panic!("trying to drop an array of width >64")
-                    }
-
-                    runtime::__dealloc_array(self.raw.0 as _, index_width, data_width);
-                }
-            }
-        }
-    }
-}
+// we previously needed to implement a custom drop, but now SlotData doesn't refer to anything on heap
 
 /// contains a mutable reference to some opaque data and its type.
 pub struct SlotEntry<'slot> {

@@ -1,5 +1,5 @@
 use patronus::expr::{traversal, *};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, VecDeque, hash_map};
 
@@ -7,12 +7,6 @@ pub(crate) struct BottomUpExprGraph {
     pub(crate) roots: Vec<ExprRef>,
     /// For each expression node, tracks other nodes that directly depend on it
     pub(crate) node_dependents: FxHashMap<ExprRef, Vec<ExprRef>>,
-}
-
-pub(crate) fn is_parent_of(r: &ExprRef, expr_graph: &BottomUpExprGraph, other: ExprRef) -> bool {
-    expr_graph
-        .parent_expr_iter(other)
-        .any(|parent| *r == parent)
 }
 
 impl BottomUpExprGraph {
@@ -55,22 +49,6 @@ impl BottomUpExprGraph {
         for<'e> F: Fn(&'e ExprRef, &'e ExprRef) -> std::cmp::Ordering,
     {
         BiasedBottomUpExprGraphWalker::new(self, compare)
-    }
-
-    /// Returns an iterator of parent expr.
-    /// Empty iterator will be returned if `expr` is not part of the graph.
-    pub(crate) fn parent_expr_iter(&self, expr: ExprRef) -> impl Iterator<Item = ExprRef> {
-        ParentExprIter {
-            graph: self,
-            todo: VecDeque::from_iter(
-                self.node_dependents
-                    .get(&expr)
-                    .into_iter()
-                    .flatten()
-                    .copied(),
-            ),
-            visited: FxHashSet::default(),
-        }
     }
 
     fn node_in_degree(&self) -> FxHashMap<ExprRef, usize> {
@@ -222,29 +200,4 @@ where
 impl<F> std::cmp::Eq for WeightedExprNode<'_, F> where
     for<'e> F: Fn(&'e ExprRef, &'e ExprRef) -> Ordering
 {
-}
-
-pub(crate) struct ParentExprIter<'a> {
-    graph: &'a BottomUpExprGraph,
-    todo: VecDeque<ExprRef>,
-    visited: FxHashSet<ExprRef>,
-}
-
-impl Iterator for ParentExprIter<'_> {
-    type Item = ExprRef;
-    fn next(&mut self) -> Option<Self::Item> {
-        let next = self.todo.pop_front()?;
-        self.todo.extend(
-            self.graph.node_dependents[&next]
-                .iter()
-                .filter(|&&parent| self.visited.insert(parent)),
-        );
-        Some(next)
-    }
-}
-
-pub(crate) fn independent_expressions(graph: &BottomUpExprGraph, a: ExprRef, b: ExprRef) -> bool {
-    let a_parents: FxHashSet<_> = graph.parent_expr_iter(a).collect();
-    let b_parents: FxHashSet<_> = graph.parent_expr_iter(b).collect();
-    !(b_parents.contains(&a) || a_parents.contains(&b))
 }

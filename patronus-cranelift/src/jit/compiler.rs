@@ -1,12 +1,11 @@
 // Copyright 2025 Cornell University
 // released under BSD 3-Clause License
 // author: Zihan Li <zl2225@cornell.edu>
-use super::bv_codegen::{self, iconst, select_container_primitive};
+use super::bv_codegen::{self, iconst};
 use super::expr_graph::*;
-use super::heap::*;
 use super::indep_gen::*;
 use super::slot::{ExprLedge, StateBuffer};
-use super::{JITResult, THIN_BV_MAX_WIDTH, runtime};
+use super::{JITResult, THIN_BV_MAX_WIDTH};
 use patronus::expr::{self, ForEachChild, TypeCheck};
 use patronus::system::*;
 
@@ -14,12 +13,10 @@ use cranelift::codegen::ir;
 use cranelift::jit::{JITBuilder, JITModule};
 use cranelift::module::Module;
 use cranelift::prelude::*;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 pub(super) struct JITCompiler {
     module: JITModule,
-    pub(super) sealed_heap_resources: Vec<ManagedHeapResource>,
-    pub(super) active_heap_resource: ManagedHeapResource,
 }
 
 pub(super) struct EvalBatchedExprWithUpdate(extern "C" fn(*const u64, *mut u64));
@@ -48,28 +45,14 @@ impl JITCompiler {
                 .into_iter()
                 .flatten(),
         );
-        let mut builder = JITBuilder::with_flags(
+        let builder = JITBuilder::with_flags(
             &Vec::from_iter(default_flags),
             cranelift::module::default_libcall_names(),
         )
         .unwrap_or_else(|err| panic!("fail to launch jit instance, due to: {err:?}"));
-        runtime::load_runtime_lib(&mut builder);
-
         Self {
             module: JITModule::new(builder),
-            sealed_heap_resources: vec![],
-            active_heap_resource: Default::default(),
         }
-    }
-
-    fn seal_active_heap_resource(&mut self) {
-        self.active_heap_resource.seal();
-        self.sealed_heap_resources
-            .push(std::mem::take(&mut self.active_heap_resource));
-    }
-
-    fn last_pinned_heap_resource(&self) -> Option<&ManagedHeapResource> {
-        self.sealed_heap_resources.last()
     }
 
     pub(super) fn compile_transition_sys(
@@ -199,8 +182,6 @@ impl JITCompiler {
             expr_ctx,
             expr_batch,
             input_state_buffer,
-            compiler: self,
-            long_live_cache_read_holes: vec![],
         };
         codegen_ctx.codegen(codegen_epilogue);
 
@@ -223,16 +204,11 @@ pub(super) struct CodeGenContext<'expr, 'ctx, 'engine> {
     input_state_buffer: &'engine StateBuffer,  // TODO: effectively used once
     block_id: Block,
     expr_batch: &'engine [expr::ExprRef],
-    pub(super) compiler: &'ctx mut JITCompiler,
-    /// Points to the dummy instruction that will be replaced with a read instruction from long lived heap resources buffer.
-    /// These replacement operations are done after codegen, when the number of long lived cache are determined.
-    long_live_cache_read_holes: Vec<(Value, expr::Type)>,
 }
 
 impl CodeGenContext<'_, '_, '_> {
     fn codegen<F: FnOnce(Vec<Value>, Self)>(mut self, epilogue: F) {
         let ret = self.mock_interpret();
-        self.finalize_long_lived_heap_resources();
         epilogue(ret, self);
     }
 
@@ -242,117 +218,19 @@ impl CodeGenContext<'_, '_, '_> {
         let bottom_up_expr_graph =
             BottomUpExprGraph::from_top_down_graph(self.expr_ctx, self.expr_batch);
 
-        // Track direct depedents of each array related expr node.
-        // This allows us to determine whether we could steal heap allocated resources from operand expression.
-        let mut array_references: FxHashMap<expr::ExprRef, FxHashSet<expr::ExprRef>> =
-            bottom_up_expr_graph
-                .node_dependents
-                .iter()
-                .filter_map(|(&expr, dependents)| {
-                    if expr.get_type(self.expr_ctx).is_array() {
-                        Some((expr, FxHashSet::from_iter(dependents.iter().copied())))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
         let mut arguments = Vec::with_capacity(4);
-        // Postpone `ArrayStore` as much as possible to reduce unnecessary clone of potentially huge array
-        let fringe_compare = |a: &expr::ExprRef, _: &expr::ExprRef| {
-            if matches!(self.expr_ctx[*a], expr::Expr::ArrayStore { .. }) {
-                std::cmp::Ordering::Greater
-            } else {
-                std::cmp::Ordering::Less
-            }
-        };
+        // previously used to defer arraystores, now we ignore those anyway
+        let fringe_compare = |_: &expr::ExprRef, _: &expr::ExprRef| std::cmp::Ordering::Less;
         let walker = bottom_up_expr_graph.walker_with_sorted_fringe(&fringe_compare);
         for e in walker {
             let expr = &self.expr_ctx[e];
             expr.for_each_child(|child| {
-                if child.get_type(self.expr_ctx).is_array() {
-                    array_references.get_mut(child).unwrap().remove(&e);
-                }
                 arguments.push(evaluated[child]);
             });
             evaluated.insert(e, self.expr_codegen(e, &arguments));
             arguments.drain(..);
         }
         self.expr_batch.iter().map(|e| *evaluated[e]).collect()
-    }
-
-    /// Allocates all registered long-lived heap resources and pins them in a continuous buffer on heap.
-    /// This extra level of indirection allows us to "swap" heap pointer with external pointer when necessary to reduce
-    /// unnecessary heap allocation or data copy.
-    fn finalize_long_lived_heap_resources(&mut self) {
-        let mut array_holes: Vec<Value> = vec![];
-        for &(value, tpe) in &self.long_live_cache_read_holes {
-            match tpe {
-                expr::Type::BV(width) => {
-                    if width > 64 {
-                        panic!("trying to finalise a bitvec >64b")
-                    }
-                }
-                expr::Type::Array(expr::ArrayType {
-                    index_width,
-                    data_width,
-                }) => {
-                    if data_width > THIN_BV_MAX_WIDTH {
-                        panic!("trying to finalise an array of vecs >64b")
-                    }
-                    let ptr = runtime::__alloc_array(0, index_width as u64, data_width as u64);
-                    let num_bytes = (1 << (index_width as usize))
-                        * (select_container_primitive(data_width).bytes() as usize);
-                    // SAFETY: `ptr` is always byte aligned and the coerced bytes slice len is computed properly
-                    let boxed_bytes = unsafe {
-                        Box::from_raw(std::ptr::slice_from_raw_parts_mut(
-                            ptr as *mut u8,
-                            num_bytes,
-                        ))
-                    };
-                    self.compiler
-                        .active_heap_resource
-                        .array_data
-                        .push(boxed_bytes);
-                    array_holes.push(value);
-                }
-            }
-        }
-        self.compiler.seal_active_heap_resource();
-        let last_pinned = self.compiler.last_pinned_heap_resource().unwrap();
-        self.finalize_pinned_heap_resources(
-            array_holes,
-            last_pinned.array_data.pinned_start_address(),
-        );
-    }
-
-    fn finalize_pinned_heap_resources(
-        &mut self,
-        dummy_inst_values: impl IntoIterator<Item = Value>,
-        pinned_start_address: *const i64,
-    ) {
-        for (offset, value) in dummy_inst_values.into_iter().enumerate() {
-            self.fill_heap_cache_read_hole(
-                value,
-                (pinned_start_address as usize) + offset * size_of::<i64>(),
-            )
-        }
-    }
-
-    /// Removes the dummy instruction hole and fills it with the actual slot address.
-    /// Since the slot address is guaranteed to be pinned during the lifetime of compiler, it's sound for us to directly
-    /// hardcode the raw address with `iconst` inst.
-    fn fill_heap_cache_read_hole(&mut self, dummy_inst_value: Value, src_addr: usize) {
-        let ir::dfg::ValueDef::Result(dummy_inst, _) =
-            self.fn_builder.func.dfg.value_def(dummy_inst_value)
-        else {
-            unreachable!()
-        };
-        self.fn_builder
-            .func
-            .dfg
-            .replace(dummy_inst)
-            .iconst(INT_T, src_addr as i64);
     }
 }
 
