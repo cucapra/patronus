@@ -5,7 +5,9 @@ mod bv_codegen;
 mod compiler;
 mod expr_graph;
 mod indep_gen;
-mod slot;
+// mod slot;
+mod slot_new;
+
 mod store;
 
 use store::*;
@@ -16,7 +18,8 @@ use cranelift::module::ModuleError;
 use patronus::expr::{self, *};
 use patronus::system::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use slot::*;
+// use slot::*;
+use slot_new::*;
 use std::cell::{Cell, RefCell};
 use std::sync::LazyLock;
 
@@ -62,8 +65,8 @@ impl JITBackend {
         &mut self,
         expr: ExprRef,
         ctx: &expr::Context,
-        input_state_buffer: &StateBuffer,
-        mut entry: SlotEntry<'_>,
+        input_state_buffer: &StateBuf,
+        entry: &mut u64,
     ) {
         let eval_fn = self.compiled_expr_eval.entry(expr).or_insert_with(|| {
             self.compiler
@@ -71,15 +74,15 @@ impl JITBackend {
                     ctx,
                     &[expr],
                     input_state_buffer,
-                    &mut ExprLedge::new_singleton(ctx, expr),
+                    &mut StateBuf::new_singleton(ctx, expr),
                 )
                 .unwrap_or_else(|err| panic!("fail to compile: `{:?}` due to {:?}", ctx[expr], err))
         });
         // SAFETY: jit compiler has not been dropped
         unsafe {
             eval_fn.call(
-                input_state_buffer.ledge.as_raw_data_slice(),
-                std::slice::from_mut(entry.raw_data_mut()),
+                input_state_buffer.as_raw_data_slice(),
+                std::slice::from_mut(entry),
             );
         }
     }
@@ -88,33 +91,39 @@ impl JITBackend {
         &mut self,
         expr: ExprRef,
         ctx: &expr::Context,
-        input_state_buffer: &StateBuffer,
-    ) -> SlotData {
-        let mut ledge = ExprLedge::new_singleton(ctx, expr);
-        self.eval_expr_with_output_slot(expr, ctx, input_state_buffer, ledge.entry_at_offset(0));
-        ledge.into_slot_data().into_iter().next().unwrap()
+        input_state_buffer: &StateBuf,
+    ) -> BitVecValue {
+        let mut out_dest: u64 = 0;
+        // let mut ledge = ExprLedge::new_singleton(ctx, expr);
+        self.eval_expr_with_output_slot(expr, ctx, input_state_buffer, &mut out_dest);
+        BitVecValue::from_u64(out_dest, expr.get_bv_type(ctx).unwrap())
     }
 
     fn batched_eval_output_exprs(
         &mut self,
         ctx: &expr::Context,
         output_exprs: &[ExprRef],
-        input_state_buffer: &StateBuffer,
-        output_ledge: &mut ExprLedge,
+        input_state_buffer: &StateBuf,
+        output_state_buffer: &mut StateBuf,
     ) {
         let eval_fn = self
             .compiled_output_exprs_batched_update
             .get_or_insert_with(|| {
                 self.compiler
-                    .compile_batched_expr_eval(ctx, output_exprs, input_state_buffer, output_ledge)
+                    .compile_batched_expr_eval(
+                        ctx,
+                        output_exprs,
+                        input_state_buffer,
+                        output_state_buffer,
+                    )
                     .unwrap_or_else(|err| {
                         panic!("fail to compiled batched output exprs update, due to {err:?}")
                     })
             });
         unsafe {
             eval_fn.call(
-                input_state_buffer.ledge.as_raw_data_slice(),
-                output_ledge.as_mut_raw_data_slice(),
+                input_state_buffer.as_raw_data_slice(),
+                output_state_buffer.as_mut_raw_data_slice(),
             )
         }
     }
@@ -123,8 +132,8 @@ impl JITBackend {
         &mut self,
         ctx: &expr::Context,
         sys: &TransitionSystem,
-        input_state_buffer: &StateBuffer,
-        output_state_buffer: &mut StateBuffer,
+        input_state_buffer: &StateBuf,
+        output_state_buffer: &mut StateBuf,
     ) {
         // attempt compilation if transition sys has not been compiled yet, or otherwise use the existing result
         let eval_fn = self.compiled_transition_sys.get_or_insert_with(|| {
@@ -138,8 +147,8 @@ impl JITBackend {
         // SAFETY: jit compiler has not been dropped
         unsafe {
             eval_fn.call(
-                input_state_buffer.ledge.as_raw_data_slice(),
-                output_state_buffer.ledge.as_mut_raw_data_slice(),
+                input_state_buffer.as_raw_data_slice(),
+                output_state_buffer.as_mut_raw_data_slice(),
             )
         }
     }
@@ -148,14 +157,14 @@ impl JITBackend {
 pub struct JITEngine<'expr> {
     state: JITState,
     /// Value placeholders for output expressions, including `output`, `bad` and `constraint`
-    output_ledge: RefCell<ExprLedge>,
+    output_ledge: RefCell<StateBuf>,
     output_exprs: Vec<ExprRef>,
     ctx: &'expr expr::Context,
     sys: &'expr TransitionSystem,
     /// Interior mutability for lazy compilation triggered by `Simulator::get`
     backend: RefCell<JITBackend>,
     step_count: u64,
-    snapshots: Vec<StateBuffer>,
+    snapshots: Vec<StateBuf>,
     output_up_to_date: Cell<bool>,
 }
 
@@ -175,7 +184,7 @@ impl<'expr> JITEngine<'expr> {
         for (idx, &expr) in output_exprs.iter().enumerate() {
             output_exprs_to_offset.insert(expr, idx);
         }
-        let output_ledge = ExprLedge::new(ctx, &output_exprs, output_exprs_to_offset);
+        let output_ledge = StateBuf::new_exprset(ctx, &output_exprs, output_exprs_to_offset);
 
         let engine = Self {
             backend: RefCell::new(JITBackend::with_compiler_flags(CRANELIFT_FLAGS.as_deref())),
@@ -192,7 +201,7 @@ impl<'expr> JITEngine<'expr> {
         engine
     }
 
-    fn eval_expr(&self, expr: ExprRef) -> SlotData {
+    fn eval_expr(&self, expr: ExprRef) -> baa::BitVecValue {
         self.backend
             .borrow_mut()
             .eval_expr(expr, self.ctx, &self.state.in_state)
@@ -209,6 +218,9 @@ impl<'expr> JITEngine<'expr> {
     }
 
     fn try_fetch_from_latest_outputs(&self, expr: ExprRef) -> Option<baa::Value> {
+        if !self.output_ledge.borrow().contains(expr) {
+            return None;
+        }
         if !self.output_up_to_date.get() {
             self.backend.borrow_mut().batched_eval_output_exprs(
                 self.ctx,
@@ -218,10 +230,9 @@ impl<'expr> JITEngine<'expr> {
             );
             self.output_up_to_date.set(true);
         }
-        self.output_ledge
-            .borrow()
-            .get_slot_data(expr)
-            .map(|data| data.reduce(BaaValueConverter))
+        Some(baa::Value::BitVec(
+            self.output_ledge.borrow().get_slot(expr),
+        ))
     }
 
     fn swap_state_buffer(&mut self) {
@@ -242,12 +253,8 @@ impl patronus::sim::Simulator for JITEngine<'_> {
         for state in &self.sys.states {
             if let Some(init) = state.init {
                 let ret = self.eval_expr(init);
-                self.state
-                    .in_state
-                    .ledge
-                    .entry(state.symbol)
-                    .unwrap()
-                    .insert(ret);
+                let offset = self.state.in_state.offset_query(state.symbol).unwrap();
+                self.state.in_state.set_slot(offset, ret.words());
             }
         }
         self.cached_states_shootdown();
@@ -272,10 +279,10 @@ impl patronus::sim::Simulator for JITEngine<'_> {
     fn get(&self, expr: ExprRef) -> baa::Value {
         if let Some(data) = self.try_fetch_from_latest_outputs(expr) {
             data
-        } else if let Some(slot) = self.state.in_ledge().get_slot_data(expr) {
-            slot.reduce(BaaValueConverter)
+        } else if self.state.in_state.contains(expr) {
+            baa::Value::BitVec(self.state.in_state.get_slot(expr))
         } else {
-            self.eval_expr(expr).as_ref().reduce(BaaValueConverter)
+            baa::Value::BitVec(self.eval_expr(expr))
         }
     }
 

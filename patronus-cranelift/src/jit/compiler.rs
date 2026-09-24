@@ -5,7 +5,8 @@ use super::JITResult;
 use super::bv_codegen::{self, iconst};
 use super::expr_graph::*;
 use super::indep_gen::*;
-use super::slot::{ExprLedge, StateBuffer};
+use super::slot_new::*;
+// use super::slot::{ExprLedge, StateBuffer};
 use patronus::expr::{self, ForEachChild, TypeCheck};
 use patronus::system::*;
 
@@ -59,8 +60,8 @@ impl JITCompiler {
         &mut self,
         expr_ctx: &expr::Context,
         sys: &TransitionSystem,
-        input_state_buffer: &StateBuffer,
-        output_state_buffer: &StateBuffer,
+        input_state_buffer: &StateBuf,
+        output_state_buffer: &StateBuf,
     ) -> JITResult<EvalBatchedExprWithUpdate> {
         let (next_expr_batch, states_expr): (Vec<_>, Vec<_>) = sys
             .states
@@ -74,7 +75,7 @@ impl JITCompiler {
             &Vec::from_iter(
                 states_expr
                     .into_iter()
-                    .map(|sym| output_state_buffer.get_state_offset(sym)),
+                    .map(|sym| output_state_buffer.offset_query(sym).unwrap()),
             ),
         )
     }
@@ -83,8 +84,8 @@ impl JITCompiler {
         &mut self,
         expr_ctx: &expr::Context,
         expr_batch: &[expr::ExprRef],
-        input_state_buffer: &StateBuffer,
-        output_ledge: &mut ExprLedge,
+        input_state_buffer: &StateBuf,
+        output_ledge: &mut StateBuf,
     ) -> JITResult<EvalBatchedExprWithUpdate> {
         let slot_offset = Vec::from_iter(
             expr_batch
@@ -103,7 +104,7 @@ impl JITCompiler {
         &mut self,
         expr_ctx: &expr::Context,
         expr_batch: &[expr::ExprRef],
-        input_state_buffer: &StateBuffer,
+        input_state_buffer: &StateBuf,
         slot_offset: &[usize],
     ) -> JITResult<EvalBatchedExprWithUpdate> {
         assert_eq!(expr_batch.len(), slot_offset.len());
@@ -159,7 +160,7 @@ impl JITCompiler {
         sig: Signature,
         expr_ctx: &expr::Context,
         expr_batch: &[expr::ExprRef],
-        input_state_buffer: &StateBuffer,
+        input_state_buffer: &StateBuf,
         codegen_epilogue: F,
     ) -> JITResult<*const u8>
     where
@@ -201,7 +202,7 @@ pub(super) struct CodeGenContext<'expr, 'ctx, 'engine> {
     pub(super) fn_builder: FunctionBuilder<'ctx>,
 
     pub(super) expr_ctx: &'expr expr::Context, // TODO: effectively read-only, can be separated
-    input_state_buffer: &'engine StateBuffer,  // TODO: effectively used once
+    input_state_buffer: &'engine StateBuf,     // TODO: effectively used once
     block_id: Block,
     expr_batch: &'engine [expr::ExprRef],
 }
@@ -283,7 +284,7 @@ impl CodeGenContext<'_, '_, '_> {
     }
 
     fn input_state_slot(&mut self, expr: expr::ExprRef) -> TaggedValue {
-        let param_offset = self.input_state_buffer.get_state_offset(expr) as u32;
+        let param_offset = self.input_state_buffer.offset_query(expr).unwrap() as u32;
         let input_buffer_address = self.fn_builder.block_params(self.block_id)[0];
         let param_offset = iconst!(self, param_offset * INT_T.bytes());
         let slot_address = self
