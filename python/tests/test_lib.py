@@ -66,6 +66,28 @@ def test_expression_builder():
     b = BitVec("b", 3)
     assert str(a < b) == "sgt(b, a)"
 
+    # z3-style array constant
+    x = Array("x", a.sort(), BitVecSort(8))
+    # alternative
+    x1 = Array("x", 3, 8)
+    assert x == x1
+    assert x1.sort() == ArraySort(BitVecSort(3), BitVecSort(8))
+
+    x_of_a = x[a]
+    assert str(x_of_a) == "x[a]"
+    assert x[a] == Select(x, a)
+
+    x_with_3_at_a = Store(x, a, BitVecVal(3, 8))
+    assert str(x_with_3_at_a) == "x[a := 8'b00000011]"
+    assert str(x_with_3_at_a[a]) == "x[a := 8'b00000011][a]"
+    assert Update(x, a, BitVecVal(3, 8)) == x_with_3_at_a
+
+    # constant array
+    all_zero = ConstArray(BitVecSort(3), BitVecVal(0, 8))
+    assert all_zero.sort() == x.sort()
+    assert all_zero == K(BitVecSort(3), BitVecVal(0, 8)), "K is what the z3 API uses"
+    assert str(all_zero) == "([8'b00000000] x 2^3)"
+
 
 def test_transition_system_builder():
     sys = TransitionSystem("test")

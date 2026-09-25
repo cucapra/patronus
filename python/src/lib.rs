@@ -317,7 +317,16 @@ fn pypatronus(_py: Python<'_>, m: &pyo3::Bound<'_, pyo3::types::PyModule>) -> Py
     m.add_function(wrap_pyfunction!(sext, m)?)?;
     m.add_function(wrap_pyfunction!(extract, m)?)?;
     m.add_function(wrap_pyfunction!(slice, m)?)?;
+    m.add_function(wrap_pyfunction!(array, m)?)?;
+    m.add_function(wrap_pyfunction!(bool_sort, m)?)?;
+    m.add_function(wrap_pyfunction!(array_store, m)?)?;
+    m.add_function(wrap_pyfunction!(array_store_alias, m)?)?;
+    m.add_function(wrap_pyfunction!(array_select, m)?)?;
+    m.add_function(wrap_pyfunction!(const_array, m)?)?;
+    m.add_function(wrap_pyfunction!(const_array_z3_alias, m)?)?;
     m.add_class::<Op>()?;
+    m.add_class::<BitVecSort>()?;
+    m.add_class::<ArraySort>()?;
     // smt
     m.add_function(wrap_pyfunction!(solver, m)?)?;
     m.add_function(wrap_pyfunction!(parse_smtlib_expr, m)?)?;
