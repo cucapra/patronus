@@ -2,12 +2,15 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
+use crate::TransitionSystem;
 use crate::ctx::{ContextGuardRead, ContextGuardWrite};
 use ::patronus::expr::SerializableIrNode;
 use baa::BitVecValue;
+use either::Either;
 use num_bigint::BigInt;
 use patronus::expr::{
-    Expr, ForEachChild, SparseExprMap, StringRef, TypeCheck, WidthInt, find_symbols,
+    ArrayType, Expr, ForEachChild, SparseExprMap, StringRef, Type, TypeCheck, WidthInt,
+    find_symbols,
 };
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -121,6 +124,17 @@ impl ExprRef {
     //
     // }
 
+    fn __getitem__<'py>(&self, index: ExprRef) -> PyResult<Self> {
+        let mut guard = ContextGuardWrite::default();
+        let ctx = guard.deref_mut();
+        match self.0.get_type(ctx) {
+            Type::BV(_) => {
+                todo!("add support for bit vector slices")
+            }
+            Type::Array(_) => Ok(Self(ctx.array_read(self.0, index.0))),
+        }
+    }
+
     fn width(&self) -> Option<WidthInt> {
         let c = ContextGuardRead::default();
         c.deref()[self.0].get_bv_type(c.deref())
@@ -174,6 +188,13 @@ impl ExprRef {
             |_, e, _| map.get(&e).cloned(),
         );
         Self(e)
+    }
+
+    fn sort(&self) -> Either<BitVecSort, ArraySort> {
+        match self.0.get_type(ContextGuardRead::default().deref()) {
+            Type::BV(width) => Either::Left(BitVecSort(width)),
+            Type::Array(a) => Either::Right(a.into()),
+        }
     }
 }
 
@@ -336,6 +357,92 @@ pub fn bit_vec_val(value: BigInt, width: WidthInt) -> ExprRef {
     ExprRef(ContextGuardWrite::default().deref_mut().bv_lit(&value))
 }
 
+#[pyclass(from_py_object, eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BitVecSort(WidthInt);
+
+#[pymethods]
+impl BitVecSort {
+    #[new]
+    fn create(width: WidthInt) -> Self {
+        Self(width)
+    }
+
+    fn __str__(&self) -> String {
+        format!("BitVec({})", self.0)
+    }
+}
+
+#[pyclass(from_py_object, eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ArraySort(BitVecSort, BitVecSort);
+
+impl From<ArrayType> for ArraySort {
+    fn from(value: ArrayType) -> Self {
+        Self(BitVecSort(value.index_width), BitVecSort(value.data_width))
+    }
+}
+
+#[pymethods]
+impl ArraySort {
+    #[new]
+    fn create(index: Either<WidthInt, BitVecSort>, data: Either<WidthInt, BitVecSort>) -> Self {
+        let index_width: WidthInt = index.map_right(|s| s.0).either_into();
+        let data_width: WidthInt = data.map_right(|s| s.0).either_into();
+        Self(BitVecSort(index_width), BitVecSort(data_width))
+    }
+
+    fn __str__(&self) -> String {
+        format!("Array({}, {})", self.0.__str__(), self.1.__str__())
+    }
+
+    fn index_width(&self) -> WidthInt {
+        self.0.0
+    }
+
+    fn data_width(&self) -> WidthInt {
+        self.1.0
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "BoolSort")]
+pub fn bool_sort() -> BitVecSort {
+    BitVecSort(1)
+}
+
+#[pyfunction]
+#[pyo3(name = "Array")]
+pub fn array(
+    name: &str,
+    index: Either<WidthInt, BitVecSort>,
+    data: Either<WidthInt, BitVecSort>,
+) -> ExprRef {
+    let tpe = ArraySort::create(index, data);
+    ExprRef(ContextGuardWrite::default().deref_mut().array_symbol(
+        name,
+        tpe.index_width(),
+        tpe.data_width(),
+    ))
+}
+
+#[pyfunction]
+#[pyo3(name = "ConstArray")]
+pub fn const_array(index: Either<WidthInt, BitVecSort>, data: ExprRef) -> ExprRef {
+    let index_width = index.map_right(|s| s.0).either_into();
+    ExprRef(
+        ContextGuardWrite::default()
+            .deref_mut()
+            .array_const(data.0, index_width),
+    )
+}
+
+#[pyfunction]
+#[pyo3(name = "K")]
+pub fn const_array_z3_alias(index: Either<WidthInt, BitVecSort>, data: ExprRef) -> ExprRef {
+    const_array(index, data)
+}
+
 #[pyfunction]
 #[pyo3(name = "If")]
 pub fn if_expr(cond: ExprRef, tru: ExprRef, fals: ExprRef) -> ExprRef {
@@ -344,6 +451,28 @@ pub fn if_expr(cond: ExprRef, tru: ExprRef, fals: ExprRef) -> ExprRef {
             .deref_mut()
             .ite(cond.0, tru.0, fals.0),
     )
+}
+
+#[pyfunction]
+#[pyo3(name = "Store")]
+pub fn array_store(array: ExprRef, index: ExprRef, data: ExprRef) -> ExprRef {
+    ExprRef(
+        ContextGuardWrite::default()
+            .deref_mut()
+            .array_store(array.0, index.0, data.0),
+    )
+}
+
+#[pyfunction]
+#[pyo3(name = "Update")]
+pub fn array_store_alias(array: ExprRef, index: ExprRef, data: ExprRef) -> ExprRef {
+    array_store(array, index, data)
+}
+
+#[pyfunction]
+#[pyo3(name = "Select")]
+pub fn array_select(array: ExprRef, index: ExprRef) -> ExprRef {
+    array.__getitem__(index).unwrap()
 }
 
 #[pyfunction]

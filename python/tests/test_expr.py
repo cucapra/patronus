@@ -22,6 +22,14 @@ def test_simplify():
     )
 
 
+def test_expr_sort():
+    bv_1 = BitVecVal(1, 1).sort()
+    assert bv_1 == BitVecSort(1)
+    assert BitVecVal(1, 1).sort() == BoolSort(), (
+        "in patronus bv<1> and bool are the same"
+    )
+
+
 def test_expr_introspection():
     a = BitVec("a", 1)
     assert a.op() == Op.BVSymbol
