@@ -340,10 +340,9 @@ fn shut_down_solver(solver: &mut SmtLibSolverCtx) {
     // we don't care whether the solver crashed or returned success, as long as it is cleaned up
 }
 
-/// Internal method that determines if yices2 will accept
-/// formula as assumption in `(check-sat-assuming)` call
+/// Internal method that determines if formula is not compound
 /// (i.e. `expr ::= <symbol> | ( not <symbol> )`)
-fn is_valid_yices2_expr(ctx: &Context, e: ExprRef) -> bool {
+fn is_atomic_expr(ctx: &Context, e: ExprRef) -> bool {
     match &ctx[e] {
         Expr::BVSymbol { width, .. } => *width == 1,
         Expr::BVNot(inner, _) => matches!(&ctx[*inner], Expr::BVSymbol { width: 1, .. }),
@@ -443,7 +442,7 @@ impl SolverContext for SmtLibSolverCtx {
         for prop in props {
             // Must create activation literal for compound formulas
             // if backend solver is yices2
-            if self.name == "yices-smt2" && !is_valid_yices2_expr(ctx, prop) {
+            if !self.supports_check_assuming_exprs() && !is_atomic_expr(ctx, prop) {
                 let mut poss: Option<ExprRef> = None;
 
                 // Search for first instance of variable in scope
@@ -549,9 +548,9 @@ impl SolverContext for SmtLibSolverCtx {
 
         let mut core = parse_get_unsat_assumptions_response(ctx, &st, response.as_bytes())?;
 
-        // Replace activation literal with original expressions if yices2
-        // is backend solver
-        if self.name == "yices-smt2" {
+        // Replace activation literal with original expressions if compound formulas
+        // are not supported by solver
+        if !self.supports_check_assuming_exprs() {
             for expr in core.iter_mut() {
                 if let Some(&orig) = self.expr_map.get(expr) {
                     *expr = orig;
