@@ -235,7 +235,8 @@ pub struct SmtLibSolverCtx {
     symbols: Vec<SymbolTable>,
     /// Next ID for activation literals
     next_act_id: u64,
-    /// Map from activation literals to corresponding expressions
+    /// Map from activation literals of the last `check_sat_assuming` in each context to their
+    /// corresponding expressions. They are retired by the next `check_sat_assuming` in that context.
     /// **Representation invariant**: `expr_map.len() == stack_depth + 1`
     expr_map: Vec<FxHashMap<ExprRef, ExprRef>>,
     /// Flag for whether last query was `UNSAT`
@@ -435,7 +436,20 @@ impl SolverContext for SmtLibSolverCtx {
         props: impl IntoIterator<Item = ExprRef>,
     ) -> Result<CheckSatResponse> {
         let mut fin_props = vec![];
-        self.expr_map.last_mut().unwrap().clear();
+
+        // Retire activation literals from the previous query in this context by asserting
+        // their negation, so the solver does not spend effort searching over them
+        let retired: Vec<ExprRef> = self
+            .expr_map
+            .last_mut()
+            .unwrap()
+            .drain()
+            .map(|(act, _)| act)
+            .collect();
+        for act in retired {
+            let not_act = ctx.not(act);
+            self.assert(ctx, not_act)?;
+        }
 
         for prop in props {
             // Must create activation literal for compound formulas if they are not
@@ -466,7 +480,6 @@ impl SolverContext for SmtLibSolverCtx {
         self.write_cmd(None, &SmtCommand::CheckSat)?;
         let res = self.read_sat_response()?;
         self.last_query_unsat = matches!(res, CheckSatResponse::Unsat);
-        self.expr_map.last_mut().unwrap().clear();
         Ok(res)
     }
 
@@ -537,10 +550,8 @@ impl SolverContext for SmtLibSolverCtx {
             }
         }
 
-        // Clear activation literals from current context
-        self.expr_map.last_mut().unwrap().clear();
-
-        // Reset UNSAT result flag
+        // Reset UNSAT result flag. Activation literals are kept until the next
+        // `(check-sat-assuming)` in this context retires them.
         self.last_query_unsat = false;
 
         Ok(core)
@@ -1066,5 +1077,40 @@ mod tests {
         assert_eq!(res.unwrap(), CheckSatResponse::Sat);
         let value_of_a = solver.get_value(&mut ctx, a).unwrap();
         assert_eq!(value_of_a, ctx.bit_vec_val(3, 3));
+    }
+
+    /// Check that activation literals from a previous query are retired (forced false),
+    /// and that the same formula can be assumed again afterwards
+    #[test]
+    fn test_retire_act_lits() {
+        let backend = solver_from_env();
+        if !backend.supports_get_unsat_assumptions() || backend.supports_check_assuming_exprs() {
+            return;
+        }
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 3);
+        let eq3 = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+        let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
+
+        let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+
+        // First query creates `__solver_act_0` for `eq3`
+        let res = solver.check_sat_assuming(&mut ctx, [eq3]).unwrap();
+        assert_eq!(res, CheckSatResponse::Sat);
+
+        // Second query retires `__solver_act_0`, so assuming it directly must be `UNSAT`
+        // (without retirement this is `SAT` with `a == 3`)
+        let act0 = ctx.bv_symbol(&format!("{ACT_LIT_PREFIX}0"), 1);
+        let res = solver.check_sat_assuming(&mut ctx, [act0]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        // `eq3` gets a fresh activation literal and still maps back in the core
+        let res = solver.check_sat_assuming(&mut ctx, [eq3, eq4]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+        let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
+        assert_eq!(core.len(), 2);
+        assert!(core.contains(&eq3) && core.contains(&eq4));
     }
 }
