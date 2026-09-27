@@ -195,8 +195,7 @@ impl Solver for SmtLibSolver {
             supports_get_unsat_assumptions: self.supports_unsat_assumptions,
             symbols: vec![SymbolTable::default()],
             next_act_id: 0,
-            expr_map: FxHashMap::default(),
-            cached_exprs: vec![FxHashMap::default()],
+            expr_map: vec![FxHashMap::default()],
             last_query_unsat: false,
         };
         for option in self.options.iter() {
@@ -232,14 +231,13 @@ pub struct SmtLibSolverCtx {
     supports_const_array: bool,
     supports_get_unsat_assumptions: bool,
     /// Internal symbol tables for each solver context
-    /// **Representation invariant**: `symbols.len() > 0`
+    /// **Representation invariant**: `symbols.len() == stack_depth + 1`
     symbols: Vec<SymbolTable>,
     /// Next ID for activation literals
     next_act_id: u64,
     /// Map from activation literals to corresponding expressions
-    expr_map: FxHashMap<ExprRef, ExprRef>,
-    /// Map from expressions to activation literals, one for each scope
-    cached_exprs: Vec<FxHashMap<ExprRef, ExprRef>>,
+    /// **Representation invariant**: `expr_map.len() == stack_depth + 1`
+    expr_map: Vec<FxHashMap<ExprRef, ExprRef>>,
     /// Flag for whether last query was `UNSAT`
     last_query_unsat: bool,
 }
@@ -399,8 +397,7 @@ impl SolverContext for SmtLibSolverCtx {
         self.last_query_unsat = false;
         self.stack_depth = 0;
         self.next_act_id = 0;
-        self.expr_map.clear();
-        self.cached_exprs = vec![FxHashMap::default()];
+        self.expr_map = vec![FxHashMap::default()];
         Ok(())
     }
 
@@ -438,36 +435,20 @@ impl SolverContext for SmtLibSolverCtx {
         props: impl IntoIterator<Item = ExprRef>,
     ) -> Result<CheckSatResponse> {
         let mut fin_props = vec![];
+        self.expr_map.last_mut().unwrap().clear();
 
         for prop in props {
-            // Must create activation literal for compound formulas
-            // if backend solver is yices2
+            // Must create activation literal for compound formulas if they are not
+            // supported by `(check-sat-assuming)`
             if !self.supports_check_assuming_exprs() && !is_atomic_expr(ctx, prop) {
-                let mut poss: Option<ExprRef> = None;
+                let act =
+                    ctx.bv_symbol(format!("{ACT_LIT_PREFIX}{}", self.next_act_id).as_str(), 1);
+                self.next_act_id += 1;
+                self.declare_const(ctx, act)?;
 
-                // Search for first instance of variable in scope
-                for map in self.cached_exprs.iter().rev() {
-                    if let Some(&act) = map.get(&prop) {
-                        poss = Some(act);
-                        break;
-                    }
-                }
-
-                let act = if let Some(act) = poss {
-                    act
-                } else {
-                    let act =
-                        ctx.bv_symbol(format!("{ACT_LIT_PREFIX}{}", self.next_act_id).as_str(), 1);
-                    self.next_act_id += 1;
-                    self.declare_const(ctx, act)?;
-
-                    let imp = ctx.implies(act, prop);
-                    self.assert(ctx, imp)?;
-
-                    self.expr_map.insert(act, prop);
-                    self.cached_exprs.last_mut().unwrap().insert(prop, act);
-                    act
-                };
+                let imp = ctx.implies(act, prop);
+                self.assert(ctx, imp)?;
+                self.expr_map.last_mut().unwrap().insert(act, prop);
 
                 fin_props.push(act);
             } else {
@@ -485,6 +466,7 @@ impl SolverContext for SmtLibSolverCtx {
         self.write_cmd(None, &SmtCommand::CheckSat)?;
         let res = self.read_sat_response()?;
         self.last_query_unsat = matches!(res, CheckSatResponse::Unsat);
+        self.expr_map.last_mut().unwrap().clear();
         Ok(res)
     }
 
@@ -492,7 +474,7 @@ impl SolverContext for SmtLibSolverCtx {
         self.write_cmd(None, &SmtCommand::Push(1))?;
         // Add new symbol table for context
         self.symbols.push(SymbolTable::default());
-        self.cached_exprs.push(FxHashMap::default());
+        self.expr_map.push(FxHashMap::default());
         self.stack_depth += 1;
         self.last_query_unsat = false;
         Ok(())
@@ -504,12 +486,9 @@ impl SolverContext for SmtLibSolverCtx {
             // Remove symbol table from old context
             self.symbols.pop();
 
-            // Clean poppped activation literals
-            for act in self.cached_exprs.last().unwrap().values() {
-                self.expr_map.remove(act);
-            }
+            // Clean popped activation literals
+            self.expr_map.pop();
 
-            self.cached_exprs.pop();
             self.stack_depth -= 1;
             self.last_query_unsat = false;
             Ok(())
@@ -552,11 +531,17 @@ impl SolverContext for SmtLibSolverCtx {
         // are not supported by solver
         if !self.supports_check_assuming_exprs() {
             for expr in core.iter_mut() {
-                if let Some(&orig) = self.expr_map.get(expr) {
+                if let Some(&orig) = self.expr_map.last().unwrap().get(expr) {
                     *expr = orig;
                 }
             }
         }
+
+        // Clear activation literals from current context
+        self.expr_map.last_mut().unwrap().clear();
+
+        // Reset UNSAT result flag
+        self.last_query_unsat = false;
 
         Ok(core)
     }
@@ -579,7 +564,7 @@ pub const YICES2: SmtLibSolver = SmtLibSolver {
     options: &["produce-unsat-assumptions"],
     supports_uf: false, // actually true, but ignoring for now
     supports_check_assuming: true,
-    supports_check_assuming_exprs: true,
+    supports_check_assuming_exprs: false,
     // see https://github.com/SRI-CSL/yices2/issues/110
     supports_const_array: false,
     supports_unsat_assumptions: true,
@@ -658,7 +643,7 @@ mod tests {
     #[test]
     fn test_check_sat_assuming() {
         let backend = solver_from_env();
-        if !backend.supports_check_assuming() || !backend.supports_check_assuming_exprs() {
+        if !backend.supports_check_assuming() {
             return;
         }
         let mut ctx = Context::default();
@@ -677,7 +662,7 @@ mod tests {
     #[test]
     fn test_unsat_assumptions_basic() {
         let backend = solver_from_env();
-        if !backend.supports_get_unsat_assumptions() || !backend.supports_check_assuming_exprs() {
+        if !backend.supports_get_unsat_assumptions() {
             return;
         }
         let mut ctx = Context::default();
@@ -702,7 +687,7 @@ mod tests {
     #[test]
     fn test_unsat_assumptions_false() {
         let backend = solver_from_env();
-        if !backend.supports_get_unsat_assumptions() || !backend.supports_check_assuming_exprs() {
+        if !backend.supports_get_unsat_assumptions() {
             return;
         }
         let mut ctx = Context::default();
@@ -729,7 +714,7 @@ mod tests {
     #[test]
     fn test_unsat_assumptions_subset() {
         let backend = solver_from_env();
-        if !backend.supports_get_unsat_assumptions() || !backend.supports_check_assuming_exprs() {
+        if !backend.supports_get_unsat_assumptions() {
             return;
         }
         let mut ctx = Context::default();
@@ -797,7 +782,7 @@ mod tests {
     #[test]
     fn test_unsat_assumptions_empty() {
         let backend = solver_from_env();
-        if !backend.supports_get_unsat_assumptions() || !backend.supports_check_assuming_exprs() {
+        if !backend.supports_get_unsat_assumptions() {
             return;
         }
         let mut ctx = Context::default();
@@ -830,7 +815,7 @@ mod tests {
     #[test]
     fn test_push_pop() {
         let backend = solver_from_env();
-        if !backend.supports_get_unsat_assumptions() || !backend.supports_check_assuming_exprs() {
+        if !backend.supports_get_unsat_assumptions() {
             return;
         }
         let mut ctx = Context::default();
@@ -967,7 +952,7 @@ mod tests {
     #[test]
     fn test_unsat_assumptions_fail() {
         let backend = solver_from_env();
-        if !backend.supports_get_unsat_assumptions() || !backend.supports_check_assuming_exprs() {
+        if !backend.supports_get_unsat_assumptions() {
             return;
         }
         let mut ctx = Context::default();
@@ -997,7 +982,7 @@ mod tests {
     #[test]
     fn test_assert_void_unsat() {
         let backend = solver_from_env();
-        if !backend.supports_get_unsat_assumptions() || !backend.supports_check_assuming_exprs() {
+        if !backend.supports_get_unsat_assumptions() {
             return;
         }
         let mut ctx = Context::default();
@@ -1057,5 +1042,29 @@ mod tests {
 
         // Popping contexts should fail
         assert!(solver.pop().is_err());
+
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 3);
+        let e = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+        solver.set_logic(Logic::QfBv).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+
+        solver.restart().unwrap();
+
+        // Must fail since old context was erased by restart
+        assert!(solver.check_sat_assuming(&mut ctx, [e]).is_err());
+
+        solver.restart().unwrap();
+
+        // Make sure that `(check-sat-assuming)` works normally after restart
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 3);
+        let e = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+        solver.set_logic(Logic::QfBv).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+        let res = solver.check_sat_assuming(&mut ctx, [e]);
+        assert_eq!(res.unwrap(), CheckSatResponse::Sat);
+        let value_of_a = solver.get_value(&mut ctx, a).unwrap();
+        assert_eq!(value_of_a, ctx.bit_vec_val(3, 3));
     }
 }
