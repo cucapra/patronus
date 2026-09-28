@@ -93,12 +93,19 @@ def test_transition_system_builder():
     sys = TransitionSystem("test")
     en, count_s = BitVec("en", 1), BitVec("count_s", 8)
     sys.inputs = [en]
+    array_count = Array("array_count", 3, 8)
     sys.states = [
         State(
             "count_s",
             init=BitVecVal(0, 8),
             next=If(en, count_s + BitVecVal(1, 8), count_s),
-        )
+        ),
+        State("array_zero", init=ConstArray(BitVecSort(3), BitVecVal(0, 8))),
+        State(
+            "array_count",
+            init=Array("array_zero", 3, 8),
+            next=Update(array_count, BitVecVal(1, 3), array_count[BitVecVal(1, 3)]),
+        ),
     ]
     sys.outputs = [Output("count", count_s)]
     # TODO: there is a big pitfall here: you cannot just `append` to the bad_states, inputs, etc. because we use
@@ -112,5 +119,13 @@ bad count_is_123 : bv<1> = eq(count, 8'b01111011)
 state count_s : bv<8>
   [init] 8'b00000000
   [next] ite(en, add(count, 8'b00000001), count)
+state array_zero : bv<3> -> bv<8>
+  [init] ([8'b00000000] x 2^3)
+state array_count : bv<3> -> bv<8>
+  [init] array_zero
+  [next] array_count[3'b001 := array_count[3'b001]]
     """
     assert str(sys).strip() == expected_system.strip()
+
+    # ensure it parser
+    _sys2 = parse_btor2_str(sys.to_btor2_str())
