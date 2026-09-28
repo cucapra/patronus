@@ -2,19 +2,18 @@
 // released under BSD 3-Clause License
 // author: Kevin Laeufer <laeufer@cornell.edu>
 
-use crate::TransitionSystem;
 use crate::ctx::{ContextGuardRead, ContextGuardWrite};
 use ::patronus::expr::SerializableIrNode;
 use baa::BitVecValue;
 use either::Either;
 use num_bigint::BigInt;
 use patronus::expr::{
-    ArrayType, Expr, ForEachChild, SparseExprMap, StringRef, Type, TypeCheck, WidthInt,
-    find_symbols,
+    ArrayType, Expr, ForEachChild, SparseExprMap, Type, TypeCheck, WidthInt, find_symbols,
 };
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::fmt::Display;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::DerefMut;
 use std::sync::{LazyLock, RwLock};
@@ -358,8 +357,8 @@ pub fn bit_vec_val(value: BigInt, width: WidthInt) -> ExprRef {
 }
 
 #[pyclass(from_py_object, eq)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BitVecSort(WidthInt);
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct BitVecSort(pub WidthInt);
 
 #[pymethods]
 impl BitVecSort {
@@ -374,12 +373,21 @@ impl BitVecSort {
 }
 
 #[pyclass(from_py_object, eq)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ArraySort(BitVecSort, BitVecSort);
 
 impl From<ArrayType> for ArraySort {
     fn from(value: ArrayType) -> Self {
         Self(BitVecSort(value.index_width), BitVecSort(value.data_width))
+    }
+}
+
+impl From<ArraySort> for ArrayType {
+    fn from(value: ArraySort) -> Self {
+        Self {
+            index_width: value.index_width(),
+            data_width: value.data_width(),
+        }
     }
 }
 
@@ -402,6 +410,57 @@ impl ArraySort {
 
     fn data_width(&self) -> WidthInt {
         self.1.0
+    }
+}
+
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum Sort {
+    A(ArraySort),
+    B(BitVecSort),
+}
+
+impl Display for Sort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.__str__())
+    }
+}
+
+impl Sort {
+    fn __str__(&self) -> String {
+        match self {
+            Sort::A(s) => s.__str__(),
+            Sort::B(s) => s.__str__(),
+        }
+    }
+}
+
+impl From<BitVecSort> for Sort {
+    fn from(value: BitVecSort) -> Self {
+        Self::B(value)
+    }
+}
+
+impl From<ArraySort> for Sort {
+    fn from(value: ArraySort) -> Self {
+        Self::A(value)
+    }
+}
+
+impl From<Type> for Sort {
+    fn from(value: Type) -> Self {
+        match value {
+            Type::BV(width) => Sort::B(BitVecSort(width)),
+            Type::Array(a) => Sort::A(a.into()),
+        }
+    }
+}
+
+impl From<Sort> for Type {
+    fn from(value: Sort) -> Self {
+        match value {
+            Sort::A(a) => Self::Array(a.into()),
+            Sort::B(BitVecSort(w)) => Self::BV(w),
+        }
     }
 }
 

@@ -12,16 +12,16 @@ mod smt;
 
 pub use ctx::Context;
 use ctx::{ContextGuardRead, ContextGuardWrite};
+use either::Either;
 pub use expr::*;
 pub use mc::*;
+use patronus::btor2;
+use patronus::expr::{SerializableIrNode, Type, TypeCheck, WidthInt};
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::prelude::*;
 pub use sim::{Simulator, interpreter};
 pub use smt::*;
 use std::path::PathBuf;
-
-use patronus::btor2;
-use patronus::expr::{SerializableIrNode, TypeCheck, WidthInt};
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
-use pyo3::prelude::*;
 
 #[pyclass(from_py_object)]
 #[derive(Clone)]
@@ -56,33 +56,40 @@ pub struct State(patronus::system::State);
 #[pymethods]
 impl State {
     #[new]
-    #[pyo3(signature = (name, width=None, init=None, next=None))]
+    #[pyo3(signature = (name, width_or_sort=None, init=None, next=None))]
     fn create(
         name: &str,
-        width: Option<WidthInt>,
+        width_or_sort: Option<Either<WidthInt, Either<BitVecSort, ArraySort>>>,
         init: Option<ExprRef>,
         next: Option<ExprRef>,
     ) -> PyResult<Self> {
         let mut ctx_guard = ContextGuardWrite::default();
         let ctx = ctx_guard.deref_mut();
-        let init_width = init.as_ref().and_then(|i| ctx[i.0].get_bv_type(ctx));
-        let next_width = next.as_ref().and_then(|n| ctx[n.0].get_bv_type(ctx));
-        let width = width.or(init_width).or(next_width);
-        if let Some(width) = width {
-            if let Some(iw) = init_width
-                && iw != width
+        let init_tpe: Option<Sort> = init.as_ref().map(|i| ctx[i.0].get_type(ctx).into());
+        let next_tpe: Option<Sort> = next.as_ref().map(|i| ctx[i.0].get_type(ctx).into());
+        let provided_tpe = width_or_sort.map(|ws| match ws {
+            Either::Left(w) => Sort::B(BitVecSort(w)),
+            Either::Right(Either::Left(s)) => s.into(),
+            Either::Right(Either::Right(s)) => s.into(),
+        });
+        let tpe = provided_tpe.or(init_tpe).or(next_tpe);
+        if let Some(tpe) = tpe {
+            if let Some(it) = init_tpe
+                && it != tpe
             {
                 Err(PyRuntimeError::new_err(format!(
-                    "Width of init expression ({iw}) does not match width of {name} ({width})"
+                    "Sort of init expression ({it}) does not match sort of {name} ({tpe})"
                 )))
-            } else if let Some(nw) = next_width
-                && nw != width
+            } else if let Some(nt) = next_tpe
+                && nt != tpe
             {
                 Err(PyRuntimeError::new_err(format!(
-                    "Width of next expression ({nw}) does not match width of {name} ({width})"
+                    "Sort of next expression ({nt}) does not match sort of {name} ({tpe})"
                 )))
             } else {
-                let symbol = ctx.bv_symbol(name, width);
+                let tpe: Type = tpe.into();
+                let name_id = ctx.string(name.into());
+                let symbol = ctx.symbol(name_id, tpe);
                 let state = patronus::system::State {
                     symbol,
                     init: init.map(|i| i.0),
@@ -91,7 +98,7 @@ impl State {
                 Ok(Self(state))
             }
         } else {
-            Err(PyRuntimeError::new_err("No width provided!"))
+            Err(PyRuntimeError::new_err("No sort provided!"))
         }
     }
 
