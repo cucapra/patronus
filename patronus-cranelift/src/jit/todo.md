@@ -38,6 +38,11 @@ analysis:
 codegen goes in order of walker
 
 
+to generate code for a given expr:
+- exprref
+- locations of its arguments
+- location of destination
+
 every codegen thing requires:
 - expression content and its type
 - input state slot address corresponding to the expr

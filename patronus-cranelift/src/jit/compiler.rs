@@ -6,7 +6,6 @@ use super::bv_codegen::{self, iconst};
 use super::expr_graph::*;
 use super::indep_gen::*;
 use super::slot_new::*;
-// use super::slot::{ExprLedge, StateBuffer};
 use patronus::expr::{self, ForEachChild, TypeCheck};
 use patronus::system::*;
 
@@ -68,15 +67,16 @@ impl JITCompiler {
             .iter()
             .filter_map(|state| state.next.map(|next| (next, state.symbol)))
             .unzip();
+        let slot_offset = Vec::from_iter(
+            states_expr
+                .into_iter()
+                .map(|sym| output_state_buffer.offset_query(sym).unwrap()),
+        );
         self.compile_batched_update_with_output_slots(
             expr_ctx,
             &next_expr_batch,
             input_state_buffer,
-            &Vec::from_iter(
-                states_expr
-                    .into_iter()
-                    .map(|sym| output_state_buffer.offset_query(sym).unwrap()),
-            ),
+            &slot_offset,
         )
     }
 
@@ -128,8 +128,10 @@ impl JITCompiler {
                     let param_offset = offset as u32;
 
                     // TODO: is this jank or is there really no better way to do this?
+                    // answer: probably jank? although heap values will probably require late binding
                     let output_buffer_address =
                         codegen_ctx.fn_builder.block_params(codegen_ctx.block_id)[1];
+
                     let data_type = expr.get_type(expr_ctx);
                     let dst_slot = codegen_ctx
                         .fn_builder
@@ -185,6 +187,7 @@ impl JITCompiler {
             input_state_buffer,
         };
         codegen_ctx.codegen(codegen_epilogue);
+        println!("BEGIN FUNC\n {} \n \n", cranelift_ctx.func);
 
         let function_id = self
             .module
@@ -201,8 +204,8 @@ impl JITCompiler {
 pub(super) struct CodeGenContext<'expr, 'ctx, 'engine> {
     pub(super) fn_builder: FunctionBuilder<'ctx>,
 
-    pub(super) expr_ctx: &'expr expr::Context, // TODO: effectively read-only, can be separated
-    input_state_buffer: &'engine StateBuf,     // TODO: effectively used once
+    pub(super) expr_ctx: &'expr expr::Context,
+    input_state_buffer: &'engine StateBuf,
     block_id: Block,
     expr_batch: &'engine [expr::ExprRef],
 }
@@ -238,7 +241,7 @@ impl CodeGenContext<'_, '_, '_> {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub(super) struct TaggedValue {
     pub(super) value: Value,
-    pub(super) data_type: expr::Type,
+    pub(super) width: expr::WidthInt,
 }
 
 impl std::ops::Deref for TaggedValue {
@@ -253,19 +256,11 @@ impl TaggedValue {
         false
     }
 
-    pub(super) fn expect_bv_type(&self) -> expr::WidthInt {
-        match self.data_type {
-            expr::Type::BV(tpe) => tpe,
-            _ => panic!("expect bitvec type"),
-        }
-    }
-
     pub(super) fn tag(value: Value, data_type: expr::Type) -> Self {
-        Self { value, data_type }
-    }
-
-    pub(super) fn tag_bv(value: Value, width: expr::WidthInt) -> Self {
-        Self::tag(value, expr::Type::BV(width))
+        let expr::Type::BV(width) = data_type else {
+            panic!("can't tag a non-bv")
+        };
+        Self { value, width }
     }
 }
 
@@ -298,7 +293,7 @@ impl CodeGenContext<'_, '_, '_> {
         use expr::Expr;
         let value = match &self.expr_ctx[expr] {
             Expr::BVIte { .. } => {
-                assert_eq!(args[1].data_type, args[2].data_type);
+                assert_eq!(args[1].width, args[2].width);
                 self.fn_builder.ins().select(*args[0], *args[1], *args[2])
             }
             Expr::ArraySymbol { .. }

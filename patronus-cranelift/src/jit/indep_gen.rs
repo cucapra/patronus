@@ -16,19 +16,6 @@ pub(crate) fn try_swap_compiled_code_ret_with_slot(
         store_thin_bv_at_slot(dst_slot, src, width, fn_build);
         return;
     }
-    // `src` is interpreted as slot address of long lived heap resources
-    swap_ptr_at_slot(fn_build, dst_slot, src);
-}
-
-pub(crate) fn swap_ptr_at_slot(fn_build: &mut FunctionBuilder, slot_a: Value, slot_b: Value) {
-    let ptr_a = fn_build
-        .ins()
-        .load(super::INT_T, MemFlags::trusted(), slot_a, 0);
-    let ptr_b = fn_build
-        .ins()
-        .load(super::INT_T, MemFlags::trusted(), slot_b, 0);
-    fn_build.ins().store(MemFlags::trusted(), ptr_b, slot_a, 0);
-    fn_build.ins().store(MemFlags::trusted(), ptr_a, slot_b, 0);
 }
 
 fn store_thin_bv_at_slot(

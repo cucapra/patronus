@@ -5,7 +5,6 @@ mod bv_codegen;
 mod compiler;
 mod expr_graph;
 mod indep_gen;
-// mod slot;
 mod slot_new;
 
 mod store;
@@ -18,7 +17,6 @@ use cranelift::module::ModuleError;
 use patronus::expr::{self, *};
 use patronus::system::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-// use slot::*;
 use slot_new::*;
 use std::cell::{Cell, RefCell};
 use std::sync::LazyLock;
@@ -69,6 +67,7 @@ impl JITBackend {
         entry: &mut u64,
     ) {
         let eval_fn = self.compiled_expr_eval.entry(expr).or_insert_with(|| {
+            println!("compiling {}", expr.serialize_to_str(ctx));
             self.compiler
                 .compile_batched_expr_eval(
                     ctx,
@@ -78,6 +77,7 @@ impl JITBackend {
                 )
                 .unwrap_or_else(|err| panic!("fail to compile: `{:?}` due to {:?}", ctx[expr], err))
         });
+        println!("evaluating {}", expr.serialize_to_str(ctx));
         // SAFETY: jit compiler has not been dropped
         unsafe {
             eval_fn.call(
@@ -94,7 +94,6 @@ impl JITBackend {
         input_state_buffer: &StateBuf,
     ) -> BitVecValue {
         let mut out_dest: u64 = 0;
-        // let mut ledge = ExprLedge::new_singleton(ctx, expr);
         self.eval_expr_with_output_slot(expr, ctx, input_state_buffer, &mut out_dest);
         BitVecValue::from_u64(out_dest, expr.get_bv_type(ctx).unwrap())
     }
@@ -109,6 +108,12 @@ impl JITBackend {
         let eval_fn = self
             .compiled_output_exprs_batched_update
             .get_or_insert_with(|| {
+                print!("batch compile:");
+                for e in output_exprs {
+                    print!("{}", e.serialize_to_str(ctx));
+                }
+                println!();
+
                 self.compiler
                     .compile_batched_expr_eval(
                         ctx,
@@ -120,6 +125,11 @@ impl JITBackend {
                         panic!("fail to compiled batched output exprs update, due to {err:?}")
                     })
             });
+        print!("batch:");
+        for e in output_exprs {
+            print!("{}", e.serialize_to_str(ctx));
+        }
+        println!();
         unsafe {
             eval_fn.call(
                 input_state_buffer.as_raw_data_slice(),
@@ -137,12 +147,14 @@ impl JITBackend {
     ) {
         // attempt compilation if transition sys has not been compiled yet, or otherwise use the existing result
         let eval_fn = self.compiled_transition_sys.get_or_insert_with(|| {
+            println!("compiling transition sys");
             self.compiler
                 .compile_transition_sys(ctx, sys, input_state_buffer, &*output_state_buffer)
                 .unwrap_or_else(|err| {
                     panic!("fail to compile transition step function, due to {err:?}")
                 })
         });
+        println!("evaluating transition sys");
 
         // SAFETY: jit compiler has not been dropped
         unsafe {

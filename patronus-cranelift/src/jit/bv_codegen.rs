@@ -36,8 +36,7 @@ impl BVWord {
 
     /// Unsigned extend input `value` to fit target width.
     pub(super) fn extend_to_fit(&self, value: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        debug_assert!(self.0 >= value.expect_bv_type());
-        let prev_type = select_container_primitive(value.expect_bv_type());
+        let prev_type = select_container_primitive(value.width);
         let target_type = select_container_primitive(self.0);
         if !prev_type.eq(&target_type) {
             ctx.fn_builder.ins().uextend(target_type, *value)
@@ -47,8 +46,7 @@ impl BVWord {
     }
 
     pub(super) fn truncate_to_fit(&self, value: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        debug_assert!(self.0 <= value.expect_bv_type());
-        let prev_type = select_container_primitive(value.expect_bv_type());
+        let prev_type = select_container_primitive(value.width);
         let target_type = select_container_primitive(self.0);
         if !prev_type.eq(&target_type) {
             ctx.fn_builder.ins().ireduce(target_type, *value)
@@ -78,7 +76,13 @@ impl BVWord {
     pub fn symbol(&self, arg: ExprRef, ctx: &mut CodeGenContext) -> Value {
         let value = ctx.load_input_state(arg);
         // TODO: currently bv symbol is always stored as `i64`
-        self.truncate_to_fit(TaggedValue::tag_bv(*value, 64), ctx)
+        self.truncate_to_fit(
+            TaggedValue {
+                value: *value,
+                width: 64,
+            },
+            ctx,
+        )
     }
 
     pub fn literal(&self, value: BitVecValueRef, ctx: &mut CodeGenContext) -> Value {
@@ -121,8 +125,7 @@ impl BVWord {
     }
     pub fn sign_extend(&self, arg: TaggedValue, _by: WidthInt, ctx: &mut CodeGenContext) -> Value {
         let mut ret = self.extend_to_fit(arg, ctx);
-        let num_leading_zeros =
-            select_container_primitive(self.0).bytes() * 8 - arg.expect_bv_type();
+        let num_leading_zeros = select_container_primitive(self.0).bytes() * 8 - arg.width;
         if num_leading_zeros != 0 {
             let shifted = ctx.fn_builder.ins().ishl_imm(ret, num_leading_zeros as i64);
             ret = ctx
@@ -141,10 +144,10 @@ impl BVWord {
     ) -> Value {
         assert!(!arg1.requires_bv_delegation());
         self.truncate_to_fit(
-            TaggedValue::tag_bv(
-                ctx.fn_builder.ins().ushr(*arg0, *arg1),
-                arg0.expect_bv_type(),
-            ),
+            TaggedValue {
+                value: ctx.fn_builder.ins().ushr(*arg0, *arg1),
+                width: arg0.width,
+            },
             ctx,
         )
     }
@@ -156,10 +159,10 @@ impl BVWord {
     ) -> Value {
         assert!(!arg1.requires_bv_delegation());
         self.truncate_to_fit(
-            TaggedValue::tag_bv(
-                ctx.fn_builder.ins().sshr(*arg0, *arg1),
-                arg0.expect_bv_type(),
-            ),
+            TaggedValue {
+                value: ctx.fn_builder.ins().sshr(*arg0, *arg1),
+                width: arg0.width,
+            },
             ctx,
         )
     }
@@ -199,7 +202,7 @@ impl BVWord {
     }
 
     pub fn concat(&self, hi: TaggedValue, lo: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        let lo_width = lo.expect_bv_type();
+        let lo_width = lo.width;
         let (hi, lo) = (self.extend_to_fit(hi, ctx), self.extend_to_fit(lo, ctx));
         let hi = ctx.fn_builder.ins().ishl_imm(hi, lo_width as i64);
         ctx.fn_builder.ins().bor(hi, lo)
@@ -215,10 +218,10 @@ impl BVWord {
         assert!(!value.requires_bv_delegation());
 
         let shifted = self.truncate_to_fit(
-            TaggedValue::tag_bv(
-                ctx.fn_builder.ins().ushr_imm(*value, lo as i64),
-                value.expect_bv_type(),
-            ),
+            TaggedValue {
+                value: ctx.fn_builder.ins().ushr_imm(*value, lo as i64),
+                width: value.width,
+            },
             ctx,
         );
         self.mask(shifted, hi - lo + 1, ctx)

@@ -10,7 +10,6 @@ pub struct StateBuf {
     types: Vec<expr::Type>,
 }
 
-// TODO: singleton ledger
 impl StateBuf {
     pub fn init(&mut self, g: &mut patronus::sim::InitValueGenerator) {
         for (idx, slot) in &mut self.data.iter_mut().enumerate() {
