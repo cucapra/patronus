@@ -1,3 +1,5 @@
+use crate::jit::bv_codegen::select_container_primitive;
+
 // Copyright 2025 Cornell University
 // released under BSD 3-Clause License
 // author: Zihan Li <zl2225@cornell.edu>
@@ -6,6 +8,7 @@ use super::bv_codegen::{self, iconst};
 use super::expr_graph::*;
 use super::indep_gen::*;
 use super::slot_new::*;
+use baa::BitVecOps;
 use patronus::expr::{self, ForEachChild, TypeCheck};
 use patronus::system::*;
 
@@ -218,14 +221,12 @@ impl CodeGenContext<'_, '_, '_> {
 
     /// returns a vec of addresses of generated functions
     fn mock_interpret(&mut self) -> Vec<Value> {
-        let mut evaluated: FxHashMap<expr::ExprRef, TaggedValue> = FxHashMap::default();
+        let mut evaluated: FxHashMap<expr::ExprRef, Value> = FxHashMap::default();
         let bottom_up_expr_graph =
             BottomUpExprGraph::from_top_down_graph(self.expr_ctx, self.expr_batch);
 
         let mut arguments = Vec::with_capacity(4);
-        // previously used to defer arraystores, now we ignore those anyway
-        let fringe_compare = |_: &expr::ExprRef, _: &expr::ExprRef| std::cmp::Ordering::Less;
-        let walker = bottom_up_expr_graph.walker_with_sorted_fringe(&fringe_compare);
+        let walker = bottom_up_expr_graph.walker();
         for e in walker {
             let expr = &self.expr_ctx[e];
             expr.for_each_child(|child| {
@@ -234,7 +235,7 @@ impl CodeGenContext<'_, '_, '_> {
             evaluated.insert(e, self.expr_codegen(e, &arguments));
             arguments.drain(..);
         }
-        self.expr_batch.iter().map(|e| *evaluated[e]).collect()
+        self.expr_batch.iter().map(|e| evaluated[e]).collect()
     }
 }
 
@@ -252,10 +253,6 @@ impl std::ops::Deref for TaggedValue {
 }
 
 impl TaggedValue {
-    pub(super) fn requires_bv_delegation(&self) -> bool {
-        false
-    }
-
     pub(super) fn tag(value: Value, data_type: expr::Type) -> Self {
         let expr::Type::BV(width) = data_type else {
             panic!("can't tag a non-bv")
@@ -266,16 +263,15 @@ impl TaggedValue {
 
 impl CodeGenContext<'_, '_, '_> {
     /// the meaning of the input state is polymorphic over bv/array
-    pub(super) fn load_input_state(&mut self, expr: expr::ExprRef) -> TaggedValue {
+    pub(super) fn load_input_state(&mut self, expr: expr::ExprRef) -> Value {
         let slot_address = self.input_state_slot(expr);
-        let value = self.fn_builder.ins().load(
-            INT_T,
+        self.fn_builder.ins().load(
+            select_container_primitive(slot_address.width),
             // buffer is allocated by Rust, therefore trusted
             ir::MemFlags::trusted(),
             *slot_address,
             0,
-        );
-        TaggedValue::tag(value, expr.get_type(self.expr_ctx))
+        )
     }
 
     fn input_state_slot(&mut self, expr: expr::ExprRef) -> TaggedValue {
@@ -289,71 +285,70 @@ impl CodeGenContext<'_, '_, '_> {
         TaggedValue::tag(slot_address, expr.get_type(self.expr_ctx))
     }
 
-    fn expr_codegen(&mut self, expr: expr::ExprRef, args: &[TaggedValue]) -> TaggedValue {
-        use expr::Expr;
-        let value = match &self.expr_ctx[expr] {
-            Expr::BVIte { .. } => {
-                assert_eq!(args[1].width, args[2].width);
-                self.fn_builder.ins().select(*args[0], *args[1], *args[2])
-            }
-            Expr::ArraySymbol { .. }
-            | Expr::ArrayConstant { .. }
-            | Expr::BVArrayRead { .. }
-            | Expr::ArrayStore { .. }
-            | Expr::ArrayIte { .. } => {
-                // declared new arrays
-                panic!("array operations are not supported")
-            }
-
-            _ => self.dispatch_bv_operation_codegen(expr, args),
-        };
-        TaggedValue::tag(value, expr.get_type(self.expr_ctx))
-    }
-
     // dispatch an operation
-    fn dispatch_bv_operation_codegen(
-        &mut self,
-        expr: expr::ExprRef,
-        args: &[TaggedValue],
-    ) -> Value {
+    // NOTE: this is kind of non-ideal, preferably find some alternate approach in the future
+    fn expr_codegen(&mut self, expr: expr::ExprRef, args: &[Value]) -> Value {
         // args are presumed not to require delegation
-        let width = expr.get_bv_type(self.expr_ctx).unwrap();
-        if width > 64 {
-            panic!("tried to generate code for a bitvec wider than 64b")
-        }
-        let vtable = bv_codegen::BVWord::new(width);
-
+        use bv_codegen::*;
         use expr::Expr;
+        let b = &mut self.fn_builder;
+
         match self.expr_ctx[expr] {
-            Expr::BVSymbol { .. } => vtable.symbol(expr, self),
-            Expr::BVLiteral(value) => vtable.literal(value.get(self.expr_ctx), self),
-            // unary
-            Expr::BVNot(..) => vtable.not(args[0], self),
-            Expr::BVNegate(..) => vtable.negate(args[0], self),
-            // no-op with current impl
-            Expr::BVZeroExt { by, .. } => vtable.zero_extend(args[0], by, self),
-            Expr::BVSignExt { by, .. } => vtable.sign_extend(args[0], by, self),
-            Expr::BVSlice { hi, lo, .. } => vtable.slice(args[0], hi, lo, self),
-            // binary
-            Expr::BVAdd(..) => vtable.add(args[0], args[1], self),
-            Expr::BVSub(..) => vtable.sub(args[0], args[1], self),
-            Expr::BVMul(..) => vtable.mul(args[0], args[1], self),
-            Expr::BVAnd(..) => vtable.and(args[0], args[1], self),
-            Expr::BVOr(..) => vtable.or(args[0], args[1], self),
-            Expr::BVXor(..) => vtable.xor(args[0], args[1], self),
-            Expr::BVEqual(..) => vtable.equal(args[0], args[1], self),
-            Expr::BVGreater(..) => vtable.gt(args[0], args[1], self),
-            Expr::BVGreaterEqual(..) => vtable.ge(args[0], args[1], self),
-            Expr::BVGreaterSigned(..) => vtable.gt_signed(args[0], args[1], self),
-            Expr::BVGreaterEqualSigned(..) => vtable.ge_signed(args[0], args[1], self),
-            Expr::BVShiftLeft(..) => vtable.shift_left(args[0], args[1], self),
-            Expr::BVShiftRight(..) => vtable.shift_right(args[0], args[1], self),
-            Expr::BVArithmeticShiftRight(..) => {
-                vtable.arithmetic_shift_right(args[0], args[1], self)
+            Expr::BVSymbol { .. } => self.load_input_state(expr),
+            Expr::BVLiteral(value) => {
+                let v = value.get(self.expr_ctx);
+                literal(b, v, v.width())
             }
-            Expr::BVConcat(..) => vtable.concat(args[0], args[1], self),
-            Expr::BVImplies(..) => vtable.implies(args[0], args[1], self),
-            _ => todo!("{:?}", self.expr_ctx[expr]),
+            // unary, includes dest width
+            Expr::BVNot(_, w) => not(b, args[0], w),
+            Expr::BVNegate(_, w) => negate(b, args[0], w),
+
+            // unary, includes source and dest width
+            Expr::BVZeroExt { by, width, .. } => zero_extend(b, args[0], by, width),
+            Expr::BVSignExt { by, width, .. } => sign_extend(b, args[0], by, width),
+            Expr::BVSlice { hi, lo, .. } => slice(b, args[0], hi, lo),
+
+            // binary which don't require width
+            Expr::BVEqual(..) => b.ins().icmp(IntCC::Equal, args[0], args[1]),
+            Expr::BVGreater(..) => b.ins().icmp(IntCC::UnsignedGreaterThan, args[0], args[1]),
+            Expr::BVGreaterEqual(..) => {
+                b.ins()
+                    .icmp(IntCC::UnsignedGreaterThanOrEqual, args[0], args[1])
+            }
+            Expr::BVGreaterSigned(..) => b.ins().icmp(IntCC::SignedGreaterThan, args[0], args[1]),
+            Expr::BVGreaterEqualSigned(..) => {
+                b.ins()
+                    .icmp(IntCC::SignedGreaterThanOrEqual, args[0], args[1])
+            }
+            Expr::BVAnd(..) => b.ins().band(args[0], args[1]),
+            Expr::BVOr(..) => b.ins().bor(args[0], args[1]),
+            Expr::BVXor(..) => b.ins().bxor(args[0], args[1]),
+
+            // doesn't have overflow width, needs it
+            Expr::BVImplies(e1, ..) => {
+                let out_w = e1.get_bv_type(self.expr_ctx).unwrap();
+                implies(b, args[0], args[1], out_w)
+            }
+
+            // binary
+
+            // these require an overflow guard
+            Expr::BVAdd(_, _, w) => add(b, args[0], args[1], w),
+            Expr::BVSub(_, _, w) => sub(b, args[0], args[1], w),
+            Expr::BVMul(_, _, w) => mul(b, args[0], args[1], w),
+
+            Expr::BVShiftLeft(_, _, w) => shift_left(b, args[0], args[1], w),
+            Expr::BVShiftRight(_, _, w) => shift_right(b, args[0], args[1], w),
+            Expr::BVArithmeticShiftRight(_, _, w) => arithmetic_shift_right(b, args[0], args[1], w),
+            Expr::BVConcat(e1, e2, _) => {
+                let w1 = e1.get_bv_type(self.expr_ctx).unwrap();
+                let w2 = e2.get_bv_type(self.expr_ctx).unwrap();
+                concat(b, args[0], w1, args[1], w2)
+            }
+
+            Expr::BVIte { .. } => b.ins().select(args[0], args[1], args[2]),
+
+            _ => panic!("unsupported op {:?}", self.expr_ctx[expr]),
         }
     }
 }

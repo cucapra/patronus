@@ -111,3 +111,27 @@ fn jit_swap() {
     assert_eq!(sim.get(a).try_into_u64().unwrap(), 0, "a@2");
     assert_eq!(sim.get(b).try_into_u64().unwrap(), 1, "b@2");
 }
+
+#[test]
+fn jit_goel() {
+    let (ctx, sys) = btor2::parse_file("../inputs/unittest/aman_goel_4bit.btor").unwrap();
+    let u = sys.get_state_by_name(&ctx, "u").unwrap().symbol;
+    let v = sys.get_state_by_name(&ctx, "v").unwrap().symbol;
+    let mut sim = JITEngine::new(&ctx, &sys);
+    sim.init(InitKind::Zero);
+
+    sim.step();
+    println!("c1");
+    println!("{}", sim.get(u).try_into_u64().unwrap());
+    println!("{}", sim.get(v).try_into_u64().unwrap());
+
+    sim.step();
+    println!("c2");
+    println!("{}", sim.get(u).try_into_u64().unwrap());
+    println!("{}", sim.get(v).try_into_u64().unwrap());
+
+    sim.step();
+    println!("c3");
+    println!("{}", sim.get(u).try_into_u64().unwrap());
+    println!("{}", sim.get(v).try_into_u64().unwrap());
+}

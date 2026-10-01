@@ -48,3 +48,14 @@ every codegen thing requires:
 - input state slot address corresponding to the expr
   - use get_state_offset
 - memory operations require more work
+
+---
+
+for every expression to evaluate:
+
+- traverse the graph in a certain order to hit all expressions
+- correspondance between exprref and addresses (Value)
+- the exprs which 'return' to top level have to have additional codegen to copy the value into the 'memory we own'
+
+
+we don't actually needd the args thing (?)

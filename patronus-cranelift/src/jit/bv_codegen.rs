@@ -6,11 +6,6 @@ use baa::{BitVecOps, BitVecValueRef};
 use cranelift::prelude::*;
 use patronus::expr::*;
 
-use super::compiler::{CodeGenContext, TaggedValue};
-
-/// Contains width of result bit vector type.
-pub(super) struct BVWord(pub(super) WidthInt);
-
 macro_rules! iconst {
     ($ctx: expr, $value: expr) => {
         $ctx.fn_builder.ins().iconst(INT_T, ($value) as i64)
@@ -29,206 +24,121 @@ pub(super) fn select_container_primitive(width: WidthInt) -> cranelift::prelude:
     }
 }
 
-impl BVWord {
-    pub(super) fn new(width: WidthInt) -> Self {
-        Self(width)
-    }
+// ensuring bitwidth correctness
+// - all inputs to codegen are of correct bitwidth
+// - all generated code will preserve correct bitwidth
+// - so, comparisons do not have to pad to bitwidth
+// also assuming that the frontend will check for invalid expressions
 
-    /// Unsigned extend input `value` to fit target width.
-    pub(super) fn extend_to_fit(&self, value: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        let prev_type = select_container_primitive(value.width);
-        let target_type = select_container_primitive(self.0);
-        if !prev_type.eq(&target_type) {
-            ctx.fn_builder.ins().uextend(target_type, *value)
-        } else {
-            *value
-        }
-    }
+// TODO: check if the signed ge / lt work
 
-    pub(super) fn truncate_to_fit(&self, value: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        let prev_type = select_container_primitive(value.width);
-        let target_type = select_container_primitive(self.0);
-        if !prev_type.eq(&target_type) {
-            ctx.fn_builder.ins().ireduce(target_type, *value)
-        } else {
-            *value
-        }
+/// Unsigned extend input `value` to fit target width.
+pub(super) fn extend_to_fit(
+    b: &mut FunctionBuilder,
+    value: Value,
+    src_width: WidthInt,
+    dest_width: WidthInt,
+) -> Value {
+    let prev_type = select_container_primitive(src_width);
+    let target_type = select_container_primitive(dest_width);
+    if !prev_type.eq(&target_type) {
+        b.ins().uextend(target_type, value)
+    } else {
+        value
     }
+}
 
-    fn overflow_guard(&self, value: Value, ctx: &mut CodeGenContext) -> Value {
-        self.mask(value, self.0, ctx)
+fn mask(b: &mut FunctionBuilder, value: Value, width: WidthInt) -> Value {
+    if width < 64 {
+        b.ins().band_imm(value, ((u64::MAX) >> (64 - width)) as i64)
+    } else {
+        value
     }
+}
 
-    fn mask(&self, value: Value, width: WidthInt, ctx: &mut CodeGenContext) -> Value {
-        if width < 64 {
-            ctx.fn_builder
-                .ins()
-                .band_imm(value, ((u64::MAX) >> (64 - width)) as i64)
-        } else {
-            value
-        }
-    }
+pub fn literal(b: &mut FunctionBuilder, value: BitVecValueRef, width: WidthInt) -> Value {
+    b.ins().iconst(
+        select_container_primitive(width),
+        value.to_u64().unwrap() as i64,
+    )
+}
 
-    fn cmp(&self, lhs: Value, rhs: Value, condcode: IntCC, ctx: &mut CodeGenContext) -> Value {
-        ctx.fn_builder.ins().icmp(condcode, lhs, rhs)
-    }
+pub fn add(b: &mut FunctionBuilder, lhs: Value, rhs: Value, width: WidthInt) -> Value {
+    let v1 = b.ins().iadd(lhs, rhs);
+    mask(b, v1, width)
+}
+pub fn sub(b: &mut FunctionBuilder, lhs: Value, rhs: Value, width: WidthInt) -> Value {
+    let v1 = b.ins().isub(lhs, rhs);
+    mask(b, v1, width)
+}
+pub fn mul(b: &mut FunctionBuilder, lhs: Value, rhs: Value, width: WidthInt) -> Value {
+    let v1 = b.ins().imul(lhs, rhs);
+    mask(b, v1, width)
+}
 
-    pub fn symbol(&self, arg: ExprRef, ctx: &mut CodeGenContext) -> Value {
-        let value = ctx.load_input_state(arg);
-        // TODO: currently bv symbol is always stored as `i64`
-        self.truncate_to_fit(
-            TaggedValue {
-                value: *value,
-                width: 64,
-            },
-            ctx,
-        )
-    }
+pub fn not(b: &mut FunctionBuilder, arg: Value, width: WidthInt) -> Value {
+    let tmp = b.ins().bnot(arg);
+    mask(b, tmp, width)
+}
+pub fn negate(b: &mut FunctionBuilder, arg: Value, width: WidthInt) -> Value {
+    let flipped = b.ins().bnot(arg);
+    let tmp = b.ins().iadd_imm(flipped, 1);
+    mask(b, tmp, width)
+}
 
-    pub fn literal(&self, value: BitVecValueRef, ctx: &mut CodeGenContext) -> Value {
-        ctx.fn_builder.ins().iconst(
-            select_container_primitive(self.0),
-            value.to_u64().unwrap() as i64,
-        )
+pub fn zero_extend(b: &mut FunctionBuilder, arg: Value, by: WidthInt, width: WidthInt) -> Value {
+    extend_to_fit(b, arg, width, width + by)
+}
+pub fn sign_extend(b: &mut FunctionBuilder, arg: Value, by: WidthInt, width: WidthInt) -> Value {
+    let mut ret = extend_to_fit(b, arg, width, width + by);
+    let num_leading_zeros = select_container_primitive(by + width).bytes() * 8 - width;
+    if num_leading_zeros != 0 {
+        let shifted = b.ins().ishl_imm(ret, num_leading_zeros as i64);
+        ret = b.ins().sshr_imm(shifted, num_leading_zeros as i64);
     }
+    mask(b, ret, width + by)
+}
 
-    pub fn add(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        self.overflow_guard(ctx.fn_builder.ins().iadd(*lhs, *rhs), ctx)
-    }
-    pub fn sub(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        self.overflow_guard(ctx.fn_builder.ins().isub(*lhs, *rhs), ctx)
-    }
-    pub fn mul(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        self.overflow_guard(ctx.fn_builder.ins().imul(*lhs, *rhs), ctx)
-    }
+pub fn shift_right(b: &mut FunctionBuilder, arg0: Value, arg1: Value, width: WidthInt) -> Value {
+    let v1 = b.ins().ushr(arg0, arg1);
+    mask(b, v1, width)
+}
+pub fn arithmetic_shift_right(
+    b: &mut FunctionBuilder,
+    arg0: Value,
+    arg1: Value,
+    width: WidthInt,
+) -> Value {
+    let v1 = b.ins().sshr(arg0, arg1);
+    mask(b, v1, width)
+}
+pub fn shift_left(b: &mut FunctionBuilder, arg0: Value, arg1: Value, width: WidthInt) -> Value {
+    let v1 = b.ins().ishl(arg0, arg1);
+    mask(b, v1, width)
+}
 
-    pub fn and(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        ctx.fn_builder.ins().band(*lhs, *rhs)
-    }
-    pub fn or(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        ctx.fn_builder.ins().bor(*lhs, *rhs)
-    }
-    pub fn xor(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        ctx.fn_builder.ins().bxor(*lhs, *rhs)
-    }
+pub fn concat(
+    b: &mut FunctionBuilder,
+    hi: Value,
+    hi_width: WidthInt,
+    lo: Value,
+    lo_width: WidthInt,
+) -> Value {
+    let tot_width = hi_width + lo_width;
+    let (hi, lo) = (
+        extend_to_fit(b, hi, hi_width, tot_width),
+        extend_to_fit(b, lo, lo_width, tot_width),
+    );
+    let hi = b.ins().ishl_imm(hi, lo_width as i64);
+    b.ins().bor(hi, lo)
+}
 
-    pub fn not(&self, arg: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        self.overflow_guard(ctx.fn_builder.ins().bnot(*arg), ctx)
-    }
-    pub fn negate(&self, arg: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        let flipped = ctx.fn_builder.ins().bnot(*arg);
-        self.overflow_guard(ctx.fn_builder.ins().iadd_imm(flipped, 1), ctx)
-    }
-
-    pub fn zero_extend(&self, arg: TaggedValue, _by: WidthInt, ctx: &mut CodeGenContext) -> Value {
-        self.extend_to_fit(arg, ctx)
-    }
-    pub fn sign_extend(&self, arg: TaggedValue, _by: WidthInt, ctx: &mut CodeGenContext) -> Value {
-        let mut ret = self.extend_to_fit(arg, ctx);
-        let num_leading_zeros = select_container_primitive(self.0).bytes() * 8 - arg.width;
-        if num_leading_zeros != 0 {
-            let shifted = ctx.fn_builder.ins().ishl_imm(ret, num_leading_zeros as i64);
-            ret = ctx
-                .fn_builder
-                .ins()
-                .sshr_imm(shifted, num_leading_zeros as i64);
-        }
-        self.overflow_guard(ret, ctx)
-    }
-
-    pub fn shift_right(
-        &self,
-        arg0: TaggedValue,
-        arg1: TaggedValue,
-        ctx: &mut CodeGenContext,
-    ) -> Value {
-        assert!(!arg1.requires_bv_delegation());
-        self.truncate_to_fit(
-            TaggedValue {
-                value: ctx.fn_builder.ins().ushr(*arg0, *arg1),
-                width: arg0.width,
-            },
-            ctx,
-        )
-    }
-    pub fn arithmetic_shift_right(
-        &self,
-        arg0: TaggedValue,
-        arg1: TaggedValue,
-        ctx: &mut CodeGenContext,
-    ) -> Value {
-        assert!(!arg1.requires_bv_delegation());
-        self.truncate_to_fit(
-            TaggedValue {
-                value: ctx.fn_builder.ins().sshr(*arg0, *arg1),
-                width: arg0.width,
-            },
-            ctx,
-        )
-    }
-    pub fn shift_left(
-        &self,
-        arg0: TaggedValue,
-        arg1: TaggedValue,
-        ctx: &mut CodeGenContext,
-    ) -> Value {
-        assert!(!arg1.requires_bv_delegation());
-        let arg0 = self.extend_to_fit(arg0, ctx);
-        self.overflow_guard(ctx.fn_builder.ins().ishl(arg0, *arg1), ctx)
-    }
-
-    pub fn equal(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        assert!(!lhs.requires_bv_delegation());
-
-        self.cmp(*lhs, *rhs, IntCC::Equal, ctx)
-    }
-    pub fn gt(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        assert!(!lhs.requires_bv_delegation());
-
-        self.cmp(*lhs, *rhs, IntCC::UnsignedGreaterThan, ctx)
-    }
-    pub fn ge(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        assert!(!lhs.requires_bv_delegation());
-        self.cmp(*lhs, *rhs, IntCC::UnsignedGreaterThanOrEqual, ctx)
-    }
-    pub fn gt_signed(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        assert!(!lhs.requires_bv_delegation());
-        self.cmp(*lhs, *rhs, IntCC::SignedGreaterThan, ctx)
-    }
-
-    pub fn ge_signed(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        assert!(!lhs.requires_bv_delegation());
-        self.cmp(*lhs, *rhs, IntCC::SignedGreaterThanOrEqual, ctx)
-    }
-
-    pub fn concat(&self, hi: TaggedValue, lo: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        let lo_width = lo.width;
-        let (hi, lo) = (self.extend_to_fit(hi, ctx), self.extend_to_fit(lo, ctx));
-        let hi = ctx.fn_builder.ins().ishl_imm(hi, lo_width as i64);
-        ctx.fn_builder.ins().bor(hi, lo)
-    }
-
-    pub fn slice(
-        &self,
-        value: TaggedValue,
-        hi: WidthInt,
-        lo: WidthInt,
-        ctx: &mut CodeGenContext,
-    ) -> Value {
-        assert!(!value.requires_bv_delegation());
-
-        let shifted = self.truncate_to_fit(
-            TaggedValue {
-                value: ctx.fn_builder.ins().ushr_imm(*value, lo as i64),
-                width: value.width,
-            },
-            ctx,
-        );
-        self.mask(shifted, hi - lo + 1, ctx)
-    }
-    pub fn implies(&self, lhs: TaggedValue, rhs: TaggedValue, ctx: &mut CodeGenContext) -> Value {
-        let lhs = ctx.fn_builder.ins().bnot(*lhs);
-        let ret = ctx.fn_builder.ins().bor(lhs, *rhs);
-        self.overflow_guard(ret, ctx)
-    }
+pub fn slice(b: &mut FunctionBuilder, value: Value, hi: WidthInt, lo: WidthInt) -> Value {
+    let shifted = b.ins().ushr_imm(value, lo as i64);
+    mask(b, shifted, hi - lo + 1)
+}
+pub fn implies(b: &mut FunctionBuilder, lhs: Value, rhs: Value, width: WidthInt) -> Value {
+    let lhs = b.ins().bnot(lhs);
+    let ret = b.ins().bor(lhs, rhs);
+    mask(b, ret, width)
 }
