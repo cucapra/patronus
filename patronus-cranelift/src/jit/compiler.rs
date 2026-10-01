@@ -70,17 +70,8 @@ impl JITCompiler {
             .iter()
             .filter_map(|state| state.next.map(|next| (next, state.symbol)))
             .unzip();
-        let slot_offset = Vec::from_iter(
-            states_expr
-                .into_iter()
-                .map(|sym| output_state_buffer.offset_query(sym).unwrap()),
-        );
-        self.compile_batched_update_with_output_slots(
-            expr_ctx,
-            &next_expr_batch,
-            input_state_buffer,
-            &slot_offset,
-        )
+        let slot_offset = output_state_buffer.batch_offsets(&states_expr);
+        self.compile_expr_batch(expr_ctx, &next_expr_batch, input_state_buffer, &slot_offset)
     }
 
     pub(super) fn compile_batched_expr_eval(
@@ -90,87 +81,41 @@ impl JITCompiler {
         input_state_buffer: &StateBuf,
         output_ledge: &mut StateBuf,
     ) -> JITResult<EvalBatchedExprWithUpdate> {
-        let slot_offset = Vec::from_iter(
-            expr_batch
-                .iter()
-                .map(|&sym| output_ledge.offset_query(sym).unwrap()),
-        );
-        self.compile_batched_update_with_output_slots(
-            expr_ctx,
-            expr_batch,
-            input_state_buffer,
-            &slot_offset,
-        )
+        let slot_offset = output_ledge.batch_offsets(expr_batch);
+        self.compile_expr_batch(expr_ctx, expr_batch, input_state_buffer, &slot_offset)
     }
 
-    pub(super) fn compile_batched_update_with_output_slots(
+    pub(super) fn compile_expr_batch(
         &mut self,
         expr_ctx: &expr::Context,
         expr_batch: &[expr::ExprRef],
         input_state_buffer: &StateBuf,
-        slot_offset: &[usize],
+        out_offsets: &[usize],
     ) -> JITResult<EvalBatchedExprWithUpdate> {
-        assert_eq!(expr_batch.len(), slot_offset.len());
+        assert_eq!(expr_batch.len(), out_offsets.len());
         let sig = Signature {
             params: vec![AbiParam::new(types::I64), AbiParam::new(types::I64)],
             returns: vec![],
             call_conv: isa::CallConv::SystemV,
         };
-        self.enter_compile_ctx_with(
-            sig,
-            expr_ctx,
-            expr_batch,
-            input_state_buffer,
-            // epilogue
-            |batch, mut codegen_ctx| {
-                // TODO: this is simply bad data structures
-                for ((&expr, &offset), ret_addr) in
-                    std::iter::zip(expr_batch.iter().zip(slot_offset), batch)
-                {
-                    // ret is the ret address
-                    let param_offset = offset as u32;
-
-                    // TODO: is this jank or is there really no better way to do this?
-                    // answer: probably jank? although heap values will probably require late binding
-                    let output_buffer_address =
-                        codegen_ctx.fn_builder.block_params(codegen_ctx.block_id)[1];
-
-                    let data_type = expr.get_type(expr_ctx);
-                    let dst_slot = codegen_ctx
-                        .fn_builder
-                        .ins()
-                        .iadd_imm(output_buffer_address, (param_offset * INT_T.bytes()) as i64);
-                    try_swap_compiled_code_ret_with_slot(
-                        dst_slot,
-                        ret_addr,
-                        data_type,
-                        &mut codegen_ctx.fn_builder,
-                    );
-                }
-                codegen_ctx.fn_builder.ins().return_(&[]);
-                codegen_ctx.fn_builder.finalize();
-            },
-        )
-        .map(|address| unsafe {
-            // SAFETY: upheld by the unsafeness of call method
-            EvalBatchedExprWithUpdate(std::mem::transmute::<
-                *const u8,
-                extern "C" fn(*const u64, *mut u64),
-            >(address))
-        })
+        self.enter_compile_ctx_with(sig, expr_ctx, expr_batch, input_state_buffer, out_offsets)
+            .map(|address| unsafe {
+                // SAFETY: upheld by the unsafeness of call method
+                EvalBatchedExprWithUpdate(std::mem::transmute::<
+                    *const u8,
+                    extern "C" fn(*const u64, *mut u64),
+                >(address))
+            })
     }
 
-    fn enter_compile_ctx_with<F>(
+    fn enter_compile_ctx_with(
         &mut self,
         sig: Signature,
         expr_ctx: &expr::Context,
         expr_batch: &[expr::ExprRef],
         input_state_buffer: &StateBuf,
-        codegen_epilogue: F,
-    ) -> JITResult<*const u8>
-    where
-        F: FnOnce(Vec<Value>, CodeGenContext),
-    {
+        out_offsets: &[usize],
+    ) -> JITResult<*const u8> {
         let mut cranelift_ctx = self.module.make_context();
         cranelift_ctx.func.signature = sig;
 
@@ -182,14 +127,19 @@ impl JITCompiler {
         fn_builder.switch_to_block(entry_block);
         fn_builder.seal_block(entry_block);
 
+        let entry_params = fn_builder.block_params(entry_block);
+        let in_addr = entry_params[0];
+        let out_addr = entry_params[1];
+
         let codegen_ctx = CodeGenContext {
             fn_builder,
-            block_id: entry_block,
+            in_addr,
+            out_addr,
             expr_ctx,
             expr_batch,
             input_state_buffer,
         };
-        codegen_ctx.codegen(codegen_epilogue);
+        codegen_ctx.codegen(out_offsets);
         println!("BEGIN FUNC\n {} \n \n", cranelift_ctx.func);
 
         let function_id = self
@@ -209,14 +159,22 @@ pub(super) struct CodeGenContext<'expr, 'ctx, 'engine> {
 
     pub(super) expr_ctx: &'expr expr::Context,
     input_state_buffer: &'engine StateBuf,
-    block_id: Block,
+    in_addr: Value,
+    out_addr: Value,
     expr_batch: &'engine [expr::ExprRef],
 }
 
 impl CodeGenContext<'_, '_, '_> {
-    fn codegen<F: FnOnce(Vec<Value>, Self)>(mut self, epilogue: F) {
+    fn codegen(mut self, out_offsets: &[usize]) {
         let ret = self.mock_interpret();
-        epilogue(ret, self);
+        for (idx, expr) in self.expr_batch.iter().enumerate() {
+            let t = expr.get_type(self.expr_ctx);
+            let loc = ret[idx];
+            let offset = out_offsets[idx] as u32;
+            self.output_state(t, loc, offset);
+        }
+        self.fn_builder.ins().return_(&[]);
+        self.fn_builder.finalize();
     }
 
     /// returns a vec of addresses of generated functions
@@ -237,52 +195,30 @@ impl CodeGenContext<'_, '_, '_> {
         }
         self.expr_batch.iter().map(|e| evaluated[e]).collect()
     }
-}
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub(super) struct TaggedValue {
-    pub(super) value: Value,
-    pub(super) width: expr::WidthInt,
-}
-
-impl std::ops::Deref for TaggedValue {
-    type Target = Value;
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
-}
-
-impl TaggedValue {
-    pub(super) fn tag(value: Value, data_type: expr::Type) -> Self {
-        let expr::Type::BV(width) = data_type else {
-            panic!("can't tag a non-bv")
-        };
-        Self { value, width }
-    }
-}
-
-impl CodeGenContext<'_, '_, '_> {
     /// the meaning of the input state is polymorphic over bv/array
     pub(super) fn load_input_state(&mut self, expr: expr::ExprRef) -> Value {
-        let slot_address = self.input_state_slot(expr);
+        let param_offset = self.input_state_buffer.offset_query(expr).unwrap() as u32;
+        let offset_const = iconst!(self, param_offset * INT_T.bytes());
+        let slot_address = self.fn_builder.ins().iadd(self.in_addr, offset_const);
+
+        let width = expr.get_bv_type(self.expr_ctx).unwrap();
         self.fn_builder.ins().load(
-            select_container_primitive(slot_address.width),
+            select_container_primitive(width),
             // buffer is allocated by Rust, therefore trusted
             ir::MemFlags::trusted(),
-            *slot_address,
+            slot_address,
             0,
         )
     }
 
-    fn input_state_slot(&mut self, expr: expr::ExprRef) -> TaggedValue {
-        let param_offset = self.input_state_buffer.offset_query(expr).unwrap() as u32;
-        let input_buffer_address = self.fn_builder.block_params(self.block_id)[0];
-        let param_offset = iconst!(self, param_offset * INT_T.bytes());
-        let slot_address = self
+    // generate code to perform the final state update for one given state
+    fn output_state(&mut self, ty: expr::Type, ret_loc: Value, out_offset: u32) {
+        let dst_slot = self
             .fn_builder
             .ins()
-            .iadd(input_buffer_address, param_offset);
-        TaggedValue::tag(slot_address, expr.get_type(self.expr_ctx))
+            .iadd_imm(self.out_addr, (out_offset * INT_T.bytes()) as i64);
+        try_swap_compiled_code_ret_with_slot(dst_slot, ret_loc, ty, &mut self.fn_builder);
     }
 
     // dispatch an operation

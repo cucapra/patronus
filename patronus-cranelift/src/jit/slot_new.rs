@@ -95,6 +95,10 @@ impl StateBuf {
             .cloned()
     }
 
+    pub fn batch_offsets(&self, batch: &[expr::ExprRef]) -> Vec<usize> {
+        Vec::from_iter(batch.iter().map(|&sym| self.offset_query(sym).unwrap()))
+    }
+
     pub fn contains(&self, expr: expr::ExprRef) -> bool {
         self.offsets.get(&expr).is_some()
     }
