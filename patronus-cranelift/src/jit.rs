@@ -34,10 +34,6 @@ impl From<ModuleError> for JITError {
         Self::CompileError(Box::new(value))
     }
 }
-
-/// Bit vector with width less than `THIN_BV_MAX_WIDTH` is stored as Rust primitive type.
-/// Otherwise, it is stored as `baa::BitVecValue`
-const THIN_BV_MAX_WIDTH: u32 = 64;
 /// Extra cranelift settings that will be directly passed to JIT compiler.
 /// This should be a colon separated key value pair joined by comma.
 static CRANELIFT_FLAGS: LazyLock<Option<String>> =
@@ -77,13 +73,10 @@ impl JITBackend {
                 )
                 .unwrap_or_else(|err| panic!("fail to compile: `{:?}` due to {:?}", ctx[expr], err))
         });
-        println!("evaluating {}", expr.serialize_to_str(ctx));
+        // println!("evaluating {}", expr.serialize_to_str(ctx));
         // SAFETY: jit compiler has not been dropped
         unsafe {
-            eval_fn.call(
-                input_state_buffer.as_raw_data_slice(),
-                std::slice::from_mut(entry),
-            );
+            eval_fn.call(input_state_buffer.as_slice(), std::slice::from_mut(entry));
         }
     }
 
@@ -108,11 +101,11 @@ impl JITBackend {
         let eval_fn = self
             .compiled_output_exprs_batched_update
             .get_or_insert_with(|| {
-                print!("batch compile:");
-                for e in output_exprs {
-                    print!("{}", e.serialize_to_str(ctx));
-                }
-                println!();
+                // print!("batch compile:");
+                // for e in output_exprs {
+                //     print!("{}", e.serialize_to_str(ctx));
+                // }
+                // println!();
 
                 self.compiler
                     .compile_batched_expr_eval(
@@ -125,15 +118,15 @@ impl JITBackend {
                         panic!("fail to compiled batched output exprs update, due to {err:?}")
                     })
             });
-        print!("batch:");
-        for e in output_exprs {
-            print!("{}", e.serialize_to_str(ctx));
-        }
-        println!();
+        // print!("batch:");
+        // for e in output_exprs {
+        //     print!("{}", e.serialize_to_str(ctx));
+        // }
+        // println!();
         unsafe {
             eval_fn.call(
-                input_state_buffer.as_raw_data_slice(),
-                output_state_buffer.as_mut_raw_data_slice(),
+                input_state_buffer.as_slice(),
+                output_state_buffer.as_mut_slice(),
             )
         }
     }
@@ -147,20 +140,20 @@ impl JITBackend {
     ) {
         // attempt compilation if transition sys has not been compiled yet, or otherwise use the existing result
         let eval_fn = self.compiled_transition_sys.get_or_insert_with(|| {
-            println!("compiling transition sys");
+            // println!("compiling transition sys");
             self.compiler
                 .compile_transition_sys(ctx, sys, input_state_buffer, &*output_state_buffer)
                 .unwrap_or_else(|err| {
                     panic!("fail to compile transition step function, due to {err:?}")
                 })
         });
-        println!("evaluating transition sys");
+        // println!("evaluating transition sys");
 
         // SAFETY: jit compiler has not been dropped
         unsafe {
             eval_fn.call(
-                input_state_buffer.as_raw_data_slice(),
-                output_state_buffer.as_mut_raw_data_slice(),
+                input_state_buffer.as_slice(),
+                output_state_buffer.as_mut_slice(),
             )
         }
     }
@@ -226,7 +219,7 @@ impl<'expr> JITEngine<'expr> {
             &self.state.in_state,
             &mut self.state.out_state,
         );
-        self.cached_states_shootdown();
+        self.output_up_to_date.set(false);
     }
 
     fn try_fetch_from_latest_outputs(&self, expr: ExprRef) -> Option<baa::Value> {
@@ -246,14 +239,6 @@ impl<'expr> JITEngine<'expr> {
             self.output_ledge.borrow().get_slot(expr),
         ))
     }
-
-    fn swap_state_buffer(&mut self) {
-        self.state.swap_states();
-    }
-
-    fn cached_states_shootdown(&mut self) {
-        self.output_up_to_date.set(false);
-    }
 }
 
 impl patronus::sim::Simulator for JITEngine<'_> {
@@ -269,13 +254,13 @@ impl patronus::sim::Simulator for JITEngine<'_> {
                 self.state.in_state.set_slot(offset, ret.words());
             }
         }
-        self.cached_states_shootdown();
+        self.output_up_to_date.set(false);
     }
 
     fn step(&mut self) {
         self.step_transition_sys();
+        self.state.swap_states();
 
-        self.swap_state_buffer();
         self.step_count += 1;
     }
 

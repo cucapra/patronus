@@ -8,7 +8,7 @@ use patronus::expr::*;
 
 macro_rules! iconst {
     ($ctx: expr, $value: expr) => {
-        $ctx.fn_builder.ins().iconst(INT_T, ($value) as i64)
+        $ctx.fn_builder.ins().iconst(types::I64, ($value) as i64)
     };
 }
 pub(super) use iconst;

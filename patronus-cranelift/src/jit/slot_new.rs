@@ -80,11 +80,11 @@ impl StateBuf {
         std::mem::swap(&mut self.data, &mut other.data)
     }
 
-    pub fn as_raw_data_slice(&self) -> &[u64] {
+    pub fn as_slice(&self) -> &[u64] {
         self.data.as_slice()
     }
 
-    pub fn as_mut_raw_data_slice(&mut self) -> &mut [u64] {
+    pub fn as_mut_slice(&mut self) -> &mut [u64] {
         self.data.as_mut_slice()
     }
 

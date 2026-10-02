@@ -24,8 +24,6 @@ pub(super) struct JITCompiler {
 
 pub(super) struct EvalBatchedExprWithUpdate(extern "C" fn(*const u64, *mut u64));
 
-pub(super) const INT_T: cranelift::prelude::Type = types::I64;
-
 impl EvalBatchedExprWithUpdate {
     /// # Safety
     /// caller should guarantee the memory allocated for compiled code has not been reclaimed
@@ -140,7 +138,7 @@ impl JITCompiler {
             input_state_buffer,
         };
         codegen_ctx.codegen(out_offsets);
-        println!("BEGIN FUNC\n {} \n \n", cranelift_ctx.func);
+        // println!("BEGIN FUNC\n {} \n \n", cranelift_ctx.func);
 
         let function_id = self
             .module
@@ -177,7 +175,7 @@ impl CodeGenContext<'_, '_, '_> {
         self.fn_builder.finalize();
     }
 
-    /// returns a vec of addresses of generated functions
+    /// returns a vec of destinations where each expr stores its result
     fn mock_interpret(&mut self) -> Vec<Value> {
         let mut evaluated: FxHashMap<expr::ExprRef, Value> = FxHashMap::default();
         let bottom_up_expr_graph =
@@ -199,7 +197,7 @@ impl CodeGenContext<'_, '_, '_> {
     /// the meaning of the input state is polymorphic over bv/array
     pub(super) fn load_input_state(&mut self, expr: expr::ExprRef) -> Value {
         let param_offset = self.input_state_buffer.offset_query(expr).unwrap() as u32;
-        let offset_const = iconst!(self, param_offset * INT_T.bytes());
+        let offset_const = iconst!(self, param_offset * types::I64.bytes());
         let slot_address = self.fn_builder.ins().iadd(self.in_addr, offset_const);
 
         let width = expr.get_bv_type(self.expr_ctx).unwrap();
@@ -217,7 +215,7 @@ impl CodeGenContext<'_, '_, '_> {
         let dst_slot = self
             .fn_builder
             .ins()
-            .iadd_imm(self.out_addr, (out_offset * INT_T.bytes()) as i64);
+            .iadd_imm(self.out_addr, (out_offset * types::I64.bytes()) as i64);
         try_swap_compiled_code_ret_with_slot(dst_slot, ret_loc, ty, &mut self.fn_builder);
     }
 
