@@ -196,6 +196,7 @@ impl Solver for SmtLibSolver {
             symbols: vec![SymbolTable::default()],
             next_act_id: 0,
             expr_map: FxHashMap::default(),
+            pending_disables: vec![],
             last_query_unsat: false,
         };
         for option in self.options.iter() {
@@ -235,21 +236,19 @@ pub struct SmtLibSolverCtx {
     symbols: Vec<SymbolTable>,
     /// Next ID for activation literals
     next_act_id: u64,
-    /// Map from activation literals of the last `check_sat_assuming` to their corresponding
-    /// expressions. They are retired by the next `check_sat_assuming` in that context;
-    /// cleared on `pop` since popped declarations are no longer valid.
+    /// Map from activation literals of the last [`Self::check_sat_assuming`] to their corresponding
+    /// expressions. They are disabled by the next [`Self::check_sat_assuming`] or [`Self::push`] in that context;
+    /// cleared on [`Self::pop`] since popped declarations are no longer valid.
     expr_map: FxHashMap<ExprRef, ExprRef>,
+    /// Pending activation literal disable commands
+    pending_disables: Vec<u8>,
     /// Flag for whether last query was `UNSAT`
     last_query_unsat: bool,
 }
 
 impl SmtLibSolverCtx {
     #[inline]
-    fn write_cmd(&mut self, ctx: Option<&Context>, cmd: &SmtCommand) -> Result<()> {
-        if let Some(rf) = self.replay_file.as_mut() {
-            serialize_cmd(rf, ctx, cmd)?;
-        }
-        serialize_cmd(&mut self.stdin, ctx, cmd)?;
+    fn flush_cmd(&mut self) -> Result<()> {
         if let Some(rf) = self.replay_file.as_mut() {
             rf.flush()?;
         }
@@ -266,6 +265,25 @@ impl SmtLibSolverCtx {
             Err(other) => Err(other.into()),
             Ok(_) => Ok(()),
         }
+    }
+
+    #[inline]
+    fn write_cmd(&mut self, ctx: Option<&Context>, cmd: &SmtCommand) -> Result<()> {
+        if let Some(rf) = self.replay_file.as_mut() {
+            serialize_cmd(rf, ctx, cmd)?;
+        }
+        serialize_cmd(&mut self.stdin, ctx, cmd)?;
+        self.flush_cmd()
+    }
+
+    /// Write serialized command to solver and replay file
+    #[inline]
+    fn write_raw(&mut self, bytes: &[u8]) -> Result<()> {
+        if let Some(rf) = self.replay_file.as_mut() {
+            rf.write_all(bytes)?;
+        }
+        self.stdin.write_all(bytes)?;
+        self.flush_cmd()
     }
 
     /// after this function executes, the result will be available in `self.result`.
@@ -318,6 +336,24 @@ impl SmtLibSolverCtx {
                 other.to_string(),
             )),
         }
+    }
+
+    /// Disable activation literals created by last [`Self::check_sat_assuming`] call.
+    /// Must be run before any [`Self::push`] so that disable assertion lives in same scope
+    /// as activation literal declaration.
+    fn disable_act_lits(&mut self) -> Result<()> {
+        self.expr_map.clear();
+        if self.pending_disables.is_empty() {
+            // No activation literals to disable: exit
+            return Ok(());
+        }
+
+        // Take serialized activation literal disable commands
+        // and send them to solver
+        let cmds = std::mem::take(&mut self.pending_disables);
+        self.write_raw(&cmds)?;
+        self.last_query_unsat = false;
+        Ok(())
     }
 }
 
@@ -399,6 +435,7 @@ impl SolverContext for SmtLibSolverCtx {
         self.stack_depth = 0;
         self.next_act_id = 0;
         self.expr_map.clear();
+        self.pending_disables.clear();
         Ok(())
     }
 
@@ -437,13 +474,8 @@ impl SolverContext for SmtLibSolverCtx {
     ) -> Result<CheckSatResponse> {
         let mut fin_props = vec![];
 
-        // Retire activation literals from the previous query in this context by asserting
-        // their negation, so the solver does not spend effort searching over them
-        let retired: Vec<ExprRef> = self.expr_map.drain().map(|(act, _)| act).collect();
-        for act in retired {
-            let not_act = ctx.not(act);
-            self.assert(ctx, not_act)?;
-        }
+        // Disable activation literals from last `check_sat_assuming` call
+        self.disable_act_lits()?;
 
         for prop in props {
             // Must create activation literal for compound formulas if they are not
@@ -456,6 +488,15 @@ impl SolverContext for SmtLibSolverCtx {
 
                 let imp = ctx.implies(act, prop);
                 self.assert(ctx, imp)?;
+
+                // Put activation literal disable command in buffer
+                let not_act = ctx.not(act);
+                serialize_cmd(
+                    &mut self.pending_disables,
+                    Some(ctx),
+                    &SmtCommand::Assert(not_act),
+                )?;
+
                 self.expr_map.insert(act, prop);
 
                 fin_props.push(act);
@@ -471,14 +512,17 @@ impl SolverContext for SmtLibSolverCtx {
     }
 
     fn check_sat(&mut self) -> Result<CheckSatResponse> {
+        // Disable activation literals from previous `check_sat_assuming`
+        self.disable_act_lits()?;
         self.write_cmd(None, &SmtCommand::CheckSat)?;
         let res = self.read_sat_response()?;
-        self.expr_map.clear();
         self.last_query_unsat = matches!(res, CheckSatResponse::Unsat);
         Ok(res)
     }
 
     fn push(&mut self) -> Result<()> {
+        // Make sure to disable activation literals before moving to new context
+        self.disable_act_lits()?;
         self.write_cmd(None, &SmtCommand::Push(1))?;
         // Add new symbol table for context
         self.symbols.push(SymbolTable::default());
@@ -492,8 +536,9 @@ impl SolverContext for SmtLibSolverCtx {
             self.write_cmd(None, &SmtCommand::Pop(1))?;
             // Remove symbol table from old context
             self.symbols.pop();
-            // Activation literals in the popped scope are now invalid
+            // Remove activation literals made in popped scope
             self.expr_map.clear();
+            self.pending_disables.clear();
             self.stack_depth -= 1;
             self.last_query_unsat = false;
             Ok(())
