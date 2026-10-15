@@ -195,7 +195,7 @@ impl Solver for SmtLibSolver {
             supports_get_unsat_assumptions: self.supports_unsat_assumptions,
             symbols: vec![SymbolTable::default()],
             next_act_id: 0,
-            expr_map: vec![FxHashMap::default()],
+            expr_map: FxHashMap::default(),
             last_query_unsat: false,
         };
         for option in self.options.iter() {
@@ -235,10 +235,10 @@ pub struct SmtLibSolverCtx {
     symbols: Vec<SymbolTable>,
     /// Next ID for activation literals
     next_act_id: u64,
-    /// Map from activation literals of the last `check_sat_assuming` in each context to their
-    /// corresponding expressions. They are retired by the next `check_sat_assuming` in that context.
-    /// **Representation invariant**: `expr_map.len() == stack_depth + 1`
-    expr_map: Vec<FxHashMap<ExprRef, ExprRef>>,
+    /// Map from activation literals of the last `check_sat_assuming` to their corresponding
+    /// expressions. They are retired by the next `check_sat_assuming` in that context;
+    /// cleared on `pop` since popped declarations are no longer valid.
+    expr_map: FxHashMap<ExprRef, ExprRef>,
     /// Flag for whether last query was `UNSAT`
     last_query_unsat: bool,
 }
@@ -398,7 +398,7 @@ impl SolverContext for SmtLibSolverCtx {
         self.last_query_unsat = false;
         self.stack_depth = 0;
         self.next_act_id = 0;
-        self.expr_map = vec![FxHashMap::default()];
+        self.expr_map.clear();
         Ok(())
     }
 
@@ -439,13 +439,7 @@ impl SolverContext for SmtLibSolverCtx {
 
         // Retire activation literals from the previous query in this context by asserting
         // their negation, so the solver does not spend effort searching over them
-        let retired: Vec<ExprRef> = self
-            .expr_map
-            .last_mut()
-            .unwrap()
-            .drain()
-            .map(|(act, _)| act)
-            .collect();
+        let retired: Vec<ExprRef> = self.expr_map.drain().map(|(act, _)| act).collect();
         for act in retired {
             let not_act = ctx.not(act);
             self.assert(ctx, not_act)?;
@@ -462,7 +456,7 @@ impl SolverContext for SmtLibSolverCtx {
 
                 let imp = ctx.implies(act, prop);
                 self.assert(ctx, imp)?;
-                self.expr_map.last_mut().unwrap().insert(act, prop);
+                self.expr_map.insert(act, prop);
 
                 fin_props.push(act);
             } else {
@@ -479,6 +473,7 @@ impl SolverContext for SmtLibSolverCtx {
     fn check_sat(&mut self) -> Result<CheckSatResponse> {
         self.write_cmd(None, &SmtCommand::CheckSat)?;
         let res = self.read_sat_response()?;
+        self.expr_map.clear();
         self.last_query_unsat = matches!(res, CheckSatResponse::Unsat);
         Ok(res)
     }
@@ -487,7 +482,6 @@ impl SolverContext for SmtLibSolverCtx {
         self.write_cmd(None, &SmtCommand::Push(1))?;
         // Add new symbol table for context
         self.symbols.push(SymbolTable::default());
-        self.expr_map.push(FxHashMap::default());
         self.stack_depth += 1;
         self.last_query_unsat = false;
         Ok(())
@@ -498,10 +492,8 @@ impl SolverContext for SmtLibSolverCtx {
             self.write_cmd(None, &SmtCommand::Pop(1))?;
             // Remove symbol table from old context
             self.symbols.pop();
-
-            // Clean popped activation literals
-            self.expr_map.pop();
-
+            // Activation literals in the popped scope are now invalid
+            self.expr_map.clear();
             self.stack_depth -= 1;
             self.last_query_unsat = false;
             Ok(())
@@ -544,7 +536,7 @@ impl SolverContext for SmtLibSolverCtx {
         // are not supported by solver
         if !self.supports_check_assuming_exprs() {
             for expr in core.iter_mut() {
-                if let Some(&orig) = self.expr_map.last().unwrap().get(expr) {
+                if let Some(&orig) = self.expr_map.get(expr) {
                     *expr = orig;
                 }
             }
@@ -1107,6 +1099,37 @@ mod tests {
         assert_eq!(res, CheckSatResponse::Unsat);
 
         // `eq3` gets a fresh activation literal and still maps back in the core
+        let res = solver.check_sat_assuming(&mut ctx, [eq3, eq4]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+        let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
+        assert_eq!(core.len(), 2);
+        assert!(core.contains(&eq3) && core.contains(&eq4));
+    }
+
+    /// Check that activation literals declared in a popped context are not retired by the
+    /// next query, since their declarations no longer exist in the solver
+    #[test]
+    fn test_retire_act_lits_after_pop() {
+        let backend = solver_from_env();
+        if !backend.supports_get_unsat_assumptions() || backend.supports_check_assuming_exprs() {
+            return;
+        }
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 3);
+        let eq3 = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+        let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
+
+        let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+
+        // Query in child context creates `__solver_act_0`, which is undeclared by the `pop`
+        solver.push().unwrap();
+        let res = solver.check_sat_assuming(&mut ctx, [eq3]).unwrap();
+        assert_eq!(res, CheckSatResponse::Sat);
+        solver.pop().unwrap();
+
+        // Retiring `__solver_act_0` here would reference an undefined symbol and error
         let res = solver.check_sat_assuming(&mut ctx, [eq3, eq4]).unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
