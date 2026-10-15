@@ -6,10 +6,6 @@ mod compiler;
 mod expr_graph;
 mod slot_new;
 
-mod store;
-
-use store::*;
-
 use baa::*;
 use compiler::*;
 use cranelift::module::ModuleError;
@@ -159,7 +155,9 @@ impl JITBackend {
 }
 
 pub struct JITEngine<'expr> {
-    state: JITState,
+    in_state: StateBuf,
+    out_state: StateBuf,
+    // state: JITState,
     /// Value placeholders for output expressions, including `output`, `bad` and `constraint`
     output_ledge: RefCell<StateBuf>,
     output_exprs: Vec<ExprRef>,
@@ -174,7 +172,8 @@ pub struct JITEngine<'expr> {
 
 impl<'expr> JITEngine<'expr> {
     pub fn new(ctx: &'expr expr::Context, sys: &'expr TransitionSystem) -> JITEngine<'expr> {
-        let state = JITState::new(ctx, sys);
+        let in_state = StateBuf::new(ctx, sys);
+        let out_state = in_state.clone();
 
         // create output ledger with associated offsets
         let output_exprs: Vec<_> = Vec::from_iter(
@@ -192,7 +191,8 @@ impl<'expr> JITEngine<'expr> {
 
         let engine = Self {
             backend: RefCell::new(JITBackend::with_compiler_flags(CRANELIFT_FLAGS.as_deref())),
-            state,
+            in_state,
+            out_state,
             output_ledge: RefCell::new(output_ledge),
             output_exprs,
             ctx,
@@ -208,15 +208,15 @@ impl<'expr> JITEngine<'expr> {
     fn eval_expr(&self, expr: ExprRef) -> baa::BitVecValue {
         self.backend
             .borrow_mut()
-            .eval_expr(expr, self.ctx, &self.state.in_state)
+            .eval_expr(expr, self.ctx, &self.in_state)
     }
 
     fn step_transition_sys(&mut self) {
         self.backend.borrow_mut().step_transition_sys(
             self.ctx,
             self.sys,
-            &self.state.in_state,
-            &mut self.state.out_state,
+            &self.in_state,
+            &mut self.out_state,
         );
         self.output_up_to_date.set(false);
     }
@@ -229,7 +229,7 @@ impl<'expr> JITEngine<'expr> {
             self.backend.borrow_mut().batched_eval_output_exprs(
                 self.ctx,
                 &self.output_exprs,
-                &self.state.in_state,
+                &self.in_state,
                 &mut self.output_ledge.borrow_mut(),
             );
             self.output_up_to_date.set(true);
@@ -244,13 +244,13 @@ impl patronus::sim::Simulator for JITEngine<'_> {
     type SnapshotId = u32;
     fn init(&mut self, kind: patronus::sim::InitKind) {
         let mut generator = patronus::sim::InitValueGenerator::from_kind(kind);
-        self.state.gen_init(&mut generator);
+        self.in_state.init(&mut generator);
 
         for state in &self.sys.states {
             if let Some(init) = state.init {
                 let ret = self.eval_expr(init);
-                let offset = self.state.in_state.offset_query(state.symbol).unwrap();
-                self.state.in_state.set_slot(offset, ret.words());
+                let offset = self.in_state.offset_query(state.symbol).unwrap();
+                self.in_state.set_slot(offset, ret.words());
             }
         }
         self.output_up_to_date.set(false);
@@ -258,7 +258,7 @@ impl patronus::sim::Simulator for JITEngine<'_> {
 
     fn step(&mut self) {
         self.step_transition_sys();
-        self.state.swap_states();
+        self.in_state.swap(&mut self.out_state);
 
         self.step_count += 1;
     }
@@ -268,15 +268,17 @@ impl patronus::sim::Simulator for JITEngine<'_> {
         // its change is reflected in both buffers.
 
         let vref = value.into();
-        self.state.set(expr, vref);
+        let offset = self.in_state.offset_query(expr).unwrap();
+        self.in_state.set_slot(offset, vref.words());
+        self.out_state.set_slot(offset, vref.words());
         self.output_up_to_date.set(false);
     }
 
     fn get(&self, expr: ExprRef) -> baa::Value {
         if let Some(data) = self.try_fetch_from_latest_outputs(expr) {
             data
-        } else if self.state.in_state.contains(expr) {
-            baa::Value::BitVec(self.state.in_state.get_slot(expr))
+        } else if self.in_state.contains(expr) {
+            baa::Value::BitVec(self.in_state.get_slot(expr))
         } else {
             baa::Value::BitVec(self.eval_expr(expr))
         }
@@ -288,11 +290,11 @@ impl patronus::sim::Simulator for JITEngine<'_> {
 
     fn take_snapshot(&mut self) -> Self::SnapshotId {
         let id = self.snapshots.len() as u32;
-        self.snapshots.push(self.state.in_state.clone());
+        self.snapshots.push(self.in_state.clone());
         id
     }
 
     fn restore_snapshot(&mut self, id: Self::SnapshotId) {
-        self.state.in_state = self.snapshots[id as usize].clone();
+        self.in_state = self.snapshots[id as usize].clone();
     }
 }
