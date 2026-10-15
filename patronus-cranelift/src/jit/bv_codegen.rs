@@ -6,13 +6,6 @@ use baa::{BitVecOps, BitVecValueRef};
 use cranelift::prelude::*;
 use patronus::expr::*;
 
-macro_rules! iconst {
-    ($ctx: expr, $value: expr) => {
-        $ctx.fn_builder.ins().iconst(types::I64, ($value) as i64)
-    };
-}
-pub(super) use iconst;
-
 /// Given width of a bit vec value, select the smallest primitive type that is able to represent it
 pub(super) fn select_container_primitive(width: WidthInt) -> cranelift::prelude::Type {
     match width {

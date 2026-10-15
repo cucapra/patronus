@@ -4,7 +4,6 @@
 mod bv_codegen;
 mod compiler;
 mod expr_graph;
-mod indep_gen;
 mod slot_new;
 
 mod store;

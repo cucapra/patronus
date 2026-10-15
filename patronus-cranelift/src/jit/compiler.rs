@@ -1,21 +1,20 @@
-use crate::jit::bv_codegen::select_container_primitive;
-
 // Copyright 2025 Cornell University
 // released under BSD 3-Clause License
 // author: Zihan Li <zl2225@cornell.edu>
 use super::JITResult;
-use super::bv_codegen::{self, iconst};
+use super::bv_codegen;
 use super::expr_graph::*;
-use super::indep_gen::*;
 use super::slot_new::*;
 use baa::BitVecOps;
 use patronus::expr::{self, ForEachChild, TypeCheck};
 use patronus::system::*;
 
-use cranelift::codegen::ir;
-use cranelift::jit::{JITBuilder, JITModule};
-use cranelift::module::Module;
-use cranelift::prelude::*;
+use cranelift::{
+    codegen::ir,
+    jit::{JITBuilder, JITModule},
+    module::Module,
+    prelude::*,
+};
 use rustc_hash::FxHashMap;
 
 pub(super) struct JITCompiler {
@@ -30,6 +29,12 @@ impl EvalBatchedExprWithUpdate {
     pub(super) unsafe fn call(&self, current_states: &[u64], next_states: &mut [u64]) {
         (self.0)(current_states.as_ptr(), next_states.as_mut_ptr())
     }
+}
+
+macro_rules! iconst {
+    ($ctx: expr, $value: expr) => {
+        $ctx.fn_builder.ins().iconst(types::I64, ($value) as i64)
+    };
 }
 
 impl JITCompiler {
@@ -129,15 +134,40 @@ impl JITCompiler {
         let in_addr = entry_params[0];
         let out_addr = entry_params[1];
 
-        let codegen_ctx = CodeGenContext {
+        let mut codegen_ctx = CodeGenContext {
             fn_builder,
             in_addr,
             out_addr,
-            expr_ctx,
-            expr_batch,
             input_state_buffer,
         };
-        codegen_ctx.codegen(out_offsets);
+
+        // keep track of where evaluated expressions store their results
+        let mut evaluated: FxHashMap<expr::ExprRef, Value> = FxHashMap::default();
+        let bottom_up_expr_graph = BottomUpExprGraph::from_top_down_graph(expr_ctx, expr_batch);
+
+        let mut arguments = Vec::with_capacity(4);
+        let walker = bottom_up_expr_graph.walker();
+        // walk graph bottom up
+        for e in walker {
+            // for each expression, generate code. its arguments should be in the evaluated map
+            let expr = &expr_ctx[e];
+            expr.for_each_child(|child| {
+                arguments.push(evaluated[child]);
+            });
+            evaluated.insert(e, codegen_ctx.expr_codegen(e, expr_ctx, &arguments));
+            arguments.clear();
+        }
+        // now, write outputs to the output location
+        let ret: Vec<_> = expr_batch.iter().map(|e| evaluated[e]).collect();
+        for (idx, expr) in expr_batch.iter().enumerate() {
+            let t = expr.get_type(expr_ctx);
+            let loc = ret[idx];
+            let offset = out_offsets[idx] as u32;
+            codegen_ctx.output_state(t, loc, offset);
+        }
+        codegen_ctx.fn_builder.ins().return_(&[]);
+        codegen_ctx.fn_builder.finalize();
+
         // println!("BEGIN FUNC\n {} \n \n", cranelift_ctx.func);
 
         let function_id = self
@@ -152,57 +182,27 @@ impl JITCompiler {
     }
 }
 
-pub(super) struct CodeGenContext<'expr, 'ctx, 'engine> {
+pub(super) struct CodeGenContext<'ctx, 'engine> {
     pub(super) fn_builder: FunctionBuilder<'ctx>,
-
-    pub(super) expr_ctx: &'expr expr::Context,
     input_state_buffer: &'engine StateBuf,
     in_addr: Value,
     out_addr: Value,
-    expr_batch: &'engine [expr::ExprRef],
 }
 
-impl CodeGenContext<'_, '_, '_> {
-    fn codegen(mut self, out_offsets: &[usize]) {
-        let ret = self.mock_interpret();
-        for (idx, expr) in self.expr_batch.iter().enumerate() {
-            let t = expr.get_type(self.expr_ctx);
-            let loc = ret[idx];
-            let offset = out_offsets[idx] as u32;
-            self.output_state(t, loc, offset);
-        }
-        self.fn_builder.ins().return_(&[]);
-        self.fn_builder.finalize();
-    }
-
-    /// returns a vec of destinations where each expr stores its result
-    fn mock_interpret(&mut self) -> Vec<Value> {
-        let mut evaluated: FxHashMap<expr::ExprRef, Value> = FxHashMap::default();
-        let bottom_up_expr_graph =
-            BottomUpExprGraph::from_top_down_graph(self.expr_ctx, self.expr_batch);
-
-        let mut arguments = Vec::with_capacity(4);
-        let walker = bottom_up_expr_graph.walker();
-        for e in walker {
-            let expr = &self.expr_ctx[e];
-            expr.for_each_child(|child| {
-                arguments.push(evaluated[child]);
-            });
-            evaluated.insert(e, self.expr_codegen(e, &arguments));
-            arguments.drain(..);
-        }
-        self.expr_batch.iter().map(|e| evaluated[e]).collect()
-    }
-
+impl CodeGenContext<'_, '_> {
     /// the meaning of the input state is polymorphic over bv/array
-    pub(super) fn load_input_state(&mut self, expr: expr::ExprRef) -> Value {
+    pub(super) fn load_input_state(
+        &mut self,
+        expr: expr::ExprRef,
+        expr_ctx: &expr::Context,
+    ) -> Value {
         let param_offset = self.input_state_buffer.offset_query(expr).unwrap() as u32;
         let offset_const = iconst!(self, param_offset * types::I64.bytes());
         let slot_address = self.fn_builder.ins().iadd(self.in_addr, offset_const);
 
-        let width = expr.get_bv_type(self.expr_ctx).unwrap();
+        let width = expr.get_bv_type(expr_ctx).unwrap();
         self.fn_builder.ins().load(
-            select_container_primitive(width),
+            bv_codegen::select_container_primitive(width),
             // buffer is allocated by Rust, therefore trusted
             ir::MemFlags::trusted(),
             slot_address,
@@ -211,26 +211,36 @@ impl CodeGenContext<'_, '_, '_> {
     }
 
     // generate code to perform the final state update for one given state
-    fn output_state(&mut self, ty: expr::Type, ret_loc: Value, out_offset: u32) {
-        let dst_slot = self
-            .fn_builder
+    fn output_state(&mut self, ty: expr::Type, mut ret_loc: Value, out_offset: u32) {
+        let fn_builder = &mut self.fn_builder;
+        let dst_slot = fn_builder
             .ins()
             .iadd_imm(self.out_addr, (out_offset * types::I64.bytes()) as i64);
-        try_swap_compiled_code_ret_with_slot(dst_slot, ret_loc, ty, &mut self.fn_builder);
+        let type_width = ty.get_bit_vector_width().unwrap();
+
+        // pad if required
+        ret_loc = bv_codegen::extend_to_fit(fn_builder, ret_loc, type_width, 64);
+        fn_builder
+            .ins()
+            .store(ir::MemFlags::trusted(), ret_loc, dst_slot, 0);
     }
 
-    // dispatch an operation
+    // generate code for an expression
     // NOTE: this is kind of non-ideal, preferably find some alternate approach in the future
-    fn expr_codegen(&mut self, expr: expr::ExprRef, args: &[Value]) -> Value {
-        // args are presumed not to require delegation
+    pub(super) fn expr_codegen(
+        &mut self,
+        expr: expr::ExprRef,
+        expr_ctx: &expr::Context,
+        args: &[Value],
+    ) -> Value {
         use bv_codegen::*;
         use expr::Expr;
         let b = &mut self.fn_builder;
 
-        match self.expr_ctx[expr] {
-            Expr::BVSymbol { .. } => self.load_input_state(expr),
+        match expr_ctx[expr] {
+            Expr::BVSymbol { .. } => self.load_input_state(expr, expr_ctx),
             Expr::BVLiteral(value) => {
-                let v = value.get(self.expr_ctx);
+                let v = value.get(expr_ctx);
                 literal(b, v, v.width())
             }
             // unary, includes dest width
@@ -260,7 +270,7 @@ impl CodeGenContext<'_, '_, '_> {
 
             // doesn't have overflow width, needs it
             Expr::BVImplies(e1, ..) => {
-                let out_w = e1.get_bv_type(self.expr_ctx).unwrap();
+                let out_w = e1.get_bv_type(expr_ctx).unwrap();
                 implies(b, args[0], args[1], out_w)
             }
 
@@ -275,14 +285,14 @@ impl CodeGenContext<'_, '_, '_> {
             Expr::BVShiftRight(_, _, w) => shift_right(b, args[0], args[1], w),
             Expr::BVArithmeticShiftRight(_, _, w) => arithmetic_shift_right(b, args[0], args[1], w),
             Expr::BVConcat(e1, e2, _) => {
-                let w1 = e1.get_bv_type(self.expr_ctx).unwrap();
-                let w2 = e2.get_bv_type(self.expr_ctx).unwrap();
+                let w1 = e1.get_bv_type(expr_ctx).unwrap();
+                let w2 = e2.get_bv_type(expr_ctx).unwrap();
                 concat(b, args[0], w1, args[1], w2)
             }
 
             Expr::BVIte { .. } => b.ins().select(args[0], args[1], args[2]),
 
-            _ => panic!("unsupported op {:?}", self.expr_ctx[expr]),
+            _ => panic!("unsupported op {:?}", expr_ctx[expr]),
         }
     }
 }
