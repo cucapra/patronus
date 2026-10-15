@@ -440,17 +440,19 @@ impl SolverContext for SmtLibSolverCtx {
     }
 
     fn set_logic(&mut self, logic: Logic) -> Result<()> {
+        self.last_query_unsat = false;
         self.write_cmd(None, &SmtCommand::SetLogic(logic))
     }
 
     fn assert(&mut self, ctx: &Context, e: ExprRef) -> Result<()> {
-        self.write_cmd(Some(ctx), &SmtCommand::Assert(e))?;
         self.last_query_unsat = false;
+        self.write_cmd(Some(ctx), &SmtCommand::Assert(e))?;
         Ok(())
     }
 
     fn declare_const(&mut self, ctx: &Context, symbol: ExprRef) -> Result<()> {
         // Add new constant into current context's symbol table
+        self.last_query_unsat = false;
         self.symbols
             .last_mut()
             .unwrap()
@@ -460,6 +462,7 @@ impl SolverContext for SmtLibSolverCtx {
 
     fn define_const(&mut self, ctx: &Context, symbol: ExprRef, expr: ExprRef) -> Result<()> {
         // Add new constant into current context's symbol table
+        self.last_query_unsat = false;
         self.symbols
             .last_mut()
             .unwrap()
@@ -472,10 +475,18 @@ impl SolverContext for SmtLibSolverCtx {
         ctx: &mut Context,
         props: impl IntoIterator<Item = ExprRef>,
     ) -> Result<CheckSatResponse> {
+        if !self.supports_check_assuming() {
+            return Err(Error::FromSolver(
+                self.name.clone(),
+                "(check-sat-assuming) not supported".into(),
+            ));
+        }
+
         let mut fin_props = vec![];
 
         // Disable activation literals from last `check_sat_assuming` call
         self.disable_act_lits()?;
+        self.last_query_unsat = false;
 
         for prop in props {
             // Must create activation literal for compound formulas if they are not
@@ -514,6 +525,7 @@ impl SolverContext for SmtLibSolverCtx {
     fn check_sat(&mut self) -> Result<CheckSatResponse> {
         // Disable activation literals from previous `check_sat_assuming`
         self.disable_act_lits()?;
+        self.last_query_unsat = false;
         self.write_cmd(None, &SmtCommand::CheckSat)?;
         let res = self.read_sat_response()?;
         self.last_query_unsat = matches!(res, CheckSatResponse::Unsat);
@@ -1151,10 +1163,10 @@ mod tests {
         assert!(core.contains(&eq3) && core.contains(&eq4));
     }
 
-    /// Check that activation literals declared in a popped context are not retired by the
+    /// Check that activation literals declared in a popped context are not disabled by the
     /// next query, since their declarations no longer exist in the solver
     #[test]
-    fn test_retire_act_lits_after_pop() {
+    fn test_disable_act_lits_after_pop() {
         let backend = solver_from_env();
         if !backend.supports_get_unsat_assumptions() || backend.supports_check_assuming_exprs() {
             return;
@@ -1174,11 +1186,42 @@ mod tests {
         assert_eq!(res, CheckSatResponse::Sat);
         solver.pop().unwrap();
 
-        // Retiring `__solver_act_0` here would reference an undefined symbol and error
+        // disabling `__solver_act_0` here would reference an undefined symbol and error
         let res = solver.check_sat_assuming(&mut ctx, [eq3, eq4]).unwrap();
         assert_eq!(res, CheckSatResponse::Unsat);
         let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
         assert_eq!(core.len(), 2);
         assert!(core.contains(&eq3) && core.contains(&eq4));
+    }
+
+    /// Check that activation literals are disabled before a `push`, so their disable assertion
+    /// lives in the same scope as their declaration and survives the matching `pop`
+    #[test]
+    fn test_disable_act_lits_before_push() {
+        let backend = solver_from_env();
+        if !backend.supports_get_unsat_assumptions() || backend.supports_check_assuming_exprs() {
+            return;
+        }
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 3);
+        let eq3 = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+
+        let mut solver = backend.start(None).unwrap();
+        solver.set_logic(Logic::QfBv).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+
+        // Query at depth 0 creates `__solver_act_0` for `eq3`
+        let res = solver.check_sat_assuming(&mut ctx, [eq3]).unwrap();
+        assert_eq!(res, CheckSatResponse::Sat);
+
+        // `push` must disable `__solver_act_0` at depth 0, before entering depth 1
+        solver.push().unwrap();
+        solver.pop().unwrap();
+
+        // Disable must have survived the `pop`, so assuming the literal directly is `UNSAT`
+        // (`SAT` with `a == 3` if it was disabled at depth 1 and popped)
+        let act0 = ctx.bv_symbol(&format!("{ACT_LIT_PREFIX}0"), 1);
+        let res = solver.check_sat_assuming(&mut ctx, [act0]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
     }
 }
