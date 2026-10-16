@@ -26,6 +26,8 @@ struct Args {
     trace_instructions: bool,
     #[arg(long, help = "prints out interpreter instructions before execution")]
     show_programs: bool,
+    #[arg(short, long)]
+    use_jit: bool,
     #[arg(
         long,
         value_enum,
