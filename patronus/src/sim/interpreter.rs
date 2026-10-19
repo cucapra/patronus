@@ -152,6 +152,10 @@ impl Simulator for Interpreter {
         self.data.update_bv(expr, value);
     }
 
+    fn set_array(&mut self, expr: ExprRef, value: ArrayValue) {
+        self.data.update_array(expr, value);
+    }
+
     fn get(&self, expr: ExprRef) -> Value {
         eval_expr(&self.ctx, &self.data, expr)
     }

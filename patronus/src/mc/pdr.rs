@@ -10,7 +10,7 @@ use crate::mc::{
 };
 use crate::smt::*;
 use crate::system::TransitionSystem;
-use baa::{BitVecOps, Value};
+use baa::{ArrayOps, BitVecOps, BitVecValue, Value};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BinaryHeap;
 use std::num::NonZeroUsize;
@@ -24,6 +24,9 @@ const MAX_FRAMES: usize = 1000;
 
 /// Activation literal prefix
 const ACT_LIT_PREFIX: &str = "__pdr_act_";
+
+/// Activation literal prefix for frames
+const FRAME_LIT_PREFIX: &str = "__pdr_frame_act_";
 
 // -------------------------------------------------------------------------------------------------
 // Core PDR data structures
@@ -201,7 +204,7 @@ fn get_bit_level_cube(
     enc: &mut PdrEncodingWrapper<impl TransitionSystemEncoding>,
     step: Step,
 ) -> Result<Cube> {
-    let mut literals = Vec::new();
+    let mut literals = vec![];
 
     // Get state values
     let vals = extract_state_values(ctx, smt_ctx, sys, enc, step)?;
@@ -215,8 +218,7 @@ fn get_bit_level_cube(
                 // Get bitvector width
                 let width = bv.width();
 
-                // Iterate through all bits of the bitvector
-                // and assign bit-level equalities to concrete value
+                // Push all bit-vector bits
                 for idx in 0..width {
                     let bit = ctx.slice(sym, idx, idx);
                     let lit = if bv.is_bit_set(idx) {
@@ -227,7 +229,35 @@ fn get_bit_level_cube(
                     literals.push(lit);
                 }
             }
-            Value::Array(_av) => todo!("Add array support"),
+            Value::Array(av) => {
+                let iw = av.index_width();
+                let dw = av.data_width();
+
+                // Make sure that no overflow occurs in iteration
+                assert!(iw < 64);
+
+                // Iterate over all array elements
+                for idx in 0u64..(1 << iw) {
+                    // Read bit-vector value
+                    let idx_val = BitVecValue::from_u64(idx, iw);
+                    let bv = av.select(&idx_val);
+
+                    // Read bit-vector symbol
+                    let idx_expr = ctx.bit_vec_val(idx, iw);
+                    let bv_expr = ctx.array_read(sym, idx_expr);
+
+                    // Push all bit-vector bits
+                    for idx in 0..dw {
+                        let bit = ctx.slice(bv_expr, idx, idx);
+                        let lit = if bv.is_bit_set(idx) {
+                            bit
+                        } else {
+                            ctx.not(bit)
+                        };
+                        literals.push(lit);
+                    }
+                }
+            }
         }
     }
 
@@ -301,8 +331,8 @@ impl<E: TransitionSystemEncoding> PdrEncodingWrapper<E> {
     /// Step all symbol leaves in SMT expressions
     ///
     /// # Precondition
-    /// All symbols in [expr] must be unstepped, and there must exist a stepped version of each
-    /// symbol at [step] (unrolled in the original [`TransitionSystemEncoding`])
+    /// All symbols in `expr` must be unstepped, and there must exist a stepped version of each
+    /// symbol at `step` (unrolled in the original [`TransitionSystemEncoding`])
     fn expr_at_step(&mut self, ctx: &mut Context, expr: ExprRef, step: Step) -> ExprRef {
         if let Some(&sym) = self.expr_cache.get(&(expr, step)) {
             // If stepped expression already exists in cache, return cached version
@@ -323,6 +353,47 @@ impl<E: TransitionSystemEncoding> PdrEncodingWrapper<E> {
         // Add final stepped expression to cache
         self.expr_cache.insert((expr, step), stepped);
         stepped
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Activation Literal Pool
+// -------------------------------------------------------------------------------------------------
+
+#[derive(Default)]
+struct ActLitPool {
+    /// Activation literal ID tracker
+    next_act_id: u64,
+    /// Cache for global (irrevocable) activation literals.
+    global_act_lit_cache: FxHashMap<ExprRef, ExprRef>,
+}
+
+impl ActLitPool {
+    /// Create a global, i.e., and irrevocable activation literal for the `expr` and register
+    /// it with the solver
+    fn global_act_lit(
+        &mut self,
+        ctx: &mut Context,
+        smt_ctx: &mut impl SolverContext,
+        expr: ExprRef,
+    ) -> Result<ExprRef> {
+        // Check cache for activation literal
+        if let Some(&act) = self.global_act_lit_cache.get(&expr) {
+            Ok(act)
+        } else {
+            // create activation literal
+            let act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}{}", self.next_act_id).as_str(), 1);
+            self.next_act_id += 1;
+            smt_ctx.declare_const(ctx, act)?;
+
+            // Create `act => stepped_lit` and assert in solver
+            let imp = ctx.implies(act, expr);
+            smt_ctx.assert(ctx, imp)?;
+
+            // update cache
+            self.global_act_lit_cache.insert(expr, act);
+            Ok(act)
+        }
     }
 }
 
@@ -364,8 +435,8 @@ struct BasePdr {
     /// Frame trace containing frames with blocked cubes
     frames: Vec<Frame>,
 
-    /// Incrementing counter for creating unique frame activation literal IDs
-    next_act_id: u64,
+    /// Activation literal pool
+    pool: ActLitPool,
 
     /// PDR runtime options
     opts: PdrOptions,
@@ -386,6 +457,8 @@ impl Index<FrameId> for BasePdr {
 }
 
 impl IndexMut<FrameId> for BasePdr {
+    /// # Panics
+    /// When indexing init frame
     fn index_mut(&mut self, index: FrameId) -> &mut Self::Output {
         match index {
             FrameId::Init => panic!("Cannot index init frame"), // Init frame doesn't explicitly exist
@@ -427,6 +500,9 @@ impl BasePdr {
 
         let mut init_cube = Cube::tru();
 
+        // Activation literal pool
+        let mut pool = ActLitPool::default();
+
         // Get all initial states from the system and create equalities between symbol
         // and initial values
         for state in &sys.states {
@@ -443,8 +519,6 @@ impl BasePdr {
         }
 
         // `FROM_STEP` bad state activation literal
-        let bad_act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}from_bad").as_str(), 1);
-
         let bad_from_expr = sys
             .bad_states
             .iter()
@@ -452,15 +526,9 @@ impl BasePdr {
             .collect::<Vec<_>>()
             .into_iter()
             .fold(ctx.get_false(), |acc, b| ctx.or(acc, b));
-        let bad_imp = ctx.implies(bad_act, bad_from_expr);
-
-        // Permanently assert in solver
-        smt_ctx.declare_const(ctx, bad_act)?;
-        smt_ctx.assert(ctx, bad_imp)?;
+        let bad_act = pool.global_act_lit(ctx, smt_ctx, bad_from_expr)?;
 
         // `TO_STEP` constraint activation literal
-        let cons_act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}to_cons").as_str(), 1);
-
         let cons_to_expr = sys
             .constraints
             .iter()
@@ -468,23 +536,12 @@ impl BasePdr {
             .collect::<Vec<_>>()
             .into_iter()
             .fold(ctx.get_true(), |acc, c| ctx.and(acc, c));
-        let cons_imp = ctx.implies(cons_act, cons_to_expr);
-
-        // Permanently assert in solver
-        smt_ctx.declare_const(ctx, cons_act)?;
-        smt_ctx.assert(ctx, cons_imp)?;
+        let cons_act = pool.global_act_lit(ctx, smt_ctx, cons_to_expr)?;
 
         // Initial frame activation literal
-        let init_act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}init").as_str(), 1);
-
-        // Create act_0 => init_cube, where init_cube is stepped to the before step
         let init_expr = init_cube.to_expr(ctx);
-        let init_expr = enc.expr_at_step(ctx, init_expr, FROM_STEP);
-        let init_imp = ctx.implies(init_act, init_expr);
-
-        // Permanently assert implication in solver
-        smt_ctx.declare_const(ctx, init_act)?;
-        smt_ctx.assert(ctx, init_imp)?;
+        let init_from_expr = enc.expr_at_step(ctx, init_expr, FROM_STEP);
+        let init_act = pool.global_act_lit(ctx, smt_ctx, init_from_expr)?;
 
         // Create infinite frame
         let inf_act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}inf").as_str(), 1);
@@ -501,7 +558,7 @@ impl BasePdr {
             init_frame: init_act,
             inf_frame,
             frames: vec![], // Index consistency taken care by indexing function
-            next_act_id: 0,
+            pool,
             opts: PdrOptions {
                 disable_unsat_cores,
             },
@@ -509,24 +566,9 @@ impl BasePdr {
     }
 
     /// # Returns
-    /// New activation literal
-    fn create_act_lit(
-        &mut self,
-        ctx: &mut Context,
-        smt_ctx: &mut impl SolverContext,
-    ) -> Result<ExprRef> {
-        let act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}{}", self.next_act_id).as_str(), 1);
-        self.next_act_id += 1;
-
-        smt_ctx.declare_const(ctx, act)?;
-
-        Ok(act)
-    }
-
-    /// # Returns
     /// SMT expression asserting over-approximation of states reachable in `frame` steps
     /// (i.e. state space of `frame`-th frame), stepped at pre-transition step
-    fn frame_assumptions(&self, ctx: &mut Context, frame_id: FrameId) -> ExprRef {
+    fn frame_assumptions(&mut self, ctx: &mut Context, frame_id: FrameId) -> ExprRef {
         assert!(
             frame_id == FrameId::Init
                 || frame_id <= self.frontier()
@@ -565,7 +607,7 @@ impl BasePdr {
     /// on non-intersection if `get_unsat_core` is true
     ///
     /// # Errors
-    /// Returns [`UnexpectedResponse`] if any SMT query returns `UNKNOWN`
+    /// Returns [`Error::UnexpectedResponse`] if any SMT query returns `UNKNOWN`
     fn intersects_init(
         &mut self,
         ctx: &mut Context,
@@ -640,24 +682,14 @@ impl BasePdr {
         // dropped during generalization
         let mut lit_map = FxHashMap::default();
         for lit in rm_lits {
-            // Create activation literal implication
-            let act = self.create_act_lit(ctx, smt_ctx)?;
+            // Create activation literal implication and add to mapping
             let expr_from = self.enc.expr_at_step(ctx, lit, FROM_STEP);
-            let imp = ctx.implies(act, expr_from);
-
-            // Assert in solver
-            smt_ctx.assert(ctx, imp)?;
-
-            // Add mapping
+            let act = self.pool.global_act_lit(ctx, smt_ctx, expr_from)?;
             lit_map.insert(act, lit);
         }
 
         // Flag for first iteration
         let mut first_iter = true;
-
-        // Original generalized cube at `FROM_STEP`
-        let cube_expr = gen_cube.to_expr(ctx);
-        let cube_from = self.enc.expr_at_step(ctx, cube_expr, FROM_STEP);
 
         loop {
             // Gather activation literals of original cube literals that could be dropped
@@ -669,12 +701,6 @@ impl BasePdr {
             let check_res = self.intersects_init(ctx, smt_ctx, sys, assumps, true)?;
 
             if check_res.0 && first_iter {
-                // Clean up activation literals
-                for &act in lit_map.keys() {
-                    let neg_act = ctx.not(act);
-                    smt_ctx.assert(ctx, neg_act)?;
-                }
-
                 // If first iteration, original cube must truly intersect with init frame
                 return Err(Error::UnexpectedResponse(
                     "`fix_gen_cube` in `BasePdr`".into(),
@@ -686,7 +712,7 @@ impl BasePdr {
             assert!(!check_res.0);
 
             // Store previous number of literals
-            let prev_acts = lit_map.keys().copied().collect::<Vec<_>>();
+            let num_prev_acts = lit_map.len();
 
             // Collect all literals in the UNSAT core
             let ex_cube = check_res.1.unwrap();
@@ -695,25 +721,10 @@ impl BasePdr {
             // Remove all candidate literals not in UNSAT core
             lit_map.retain(|e, _| gen_lits.contains(e));
 
-            // Permanently disable literals that were removed
-            for &act in &prev_acts {
-                if !lit_map.contains_key(&act) {
-                    let neg_act = ctx.not(act);
-                    smt_ctx.assert(ctx, neg_act)?;
-                }
-            }
-
-            if lit_map.len() == prev_acts.len() {
+            if lit_map.len() == num_prev_acts {
                 // If no literals are removed, then fixpoint reached
                 let mut fin_lits = gen_cube.literals;
                 fin_lits.extend(lit_map.values().copied());
-
-                // Clean up activation literals
-                for &act in lit_map.keys() {
-                    let neg_act = ctx.not(act);
-                    smt_ctx.assert(ctx, neg_act)?;
-                }
-
                 return Ok(Cube { literals: fin_lits });
             }
 
@@ -726,7 +737,7 @@ impl BasePdr {
     ///
     /// # Returns
     /// Query result and possibly a model for `SAT` cases, or a generalized cube if
-    /// `unsat_core_enabled` is set in [`GLOB_PDR_OPTS`]
+    /// `disable_unsat_cores` is not [`true`]
     fn rel_ind(
         &mut self,
         ctx: &mut Context,
@@ -736,7 +747,7 @@ impl BasePdr {
         query_type: RelIndType,
     ) -> Result<(CheckSatResponse, Option<Cube>)> {
         // Query assumptions
-        let mut assumptions = Vec::new();
+        let mut assumptions = vec![];
 
         // Get frame assumption
         let frame_assumption = self.frame_assumptions(ctx, cube.frame.decrement());
@@ -745,15 +756,9 @@ impl BasePdr {
         // Map between activation literal and original unstepped literal
         let mut lit_map = FxHashMap::default();
         for &lit in &cube.cube.literals {
-            // Activate `TO_STEP` literal
-            let act = self.create_act_lit(ctx, smt_ctx)?;
+            // Activate `TO_STEP` literal and add to mapping
             let expr_to = self.enc.expr_at_step(ctx, lit, TO_STEP);
-            let imp = ctx.implies(act, expr_to);
-
-            // Permanently assert in solver
-            smt_ctx.assert(ctx, imp)?;
-
-            // Add mapping
+            let act = self.pool.global_act_lit(ctx, smt_ctx, expr_to)?;
             lit_map.insert(act, lit);
         }
 
@@ -784,14 +789,14 @@ impl BasePdr {
         )?;
 
         // Extract candidate cube literals if generalized cube was created
-        let res = if smt_res.0 == CheckSatResponse::Unsat
+        if smt_res.0 == CheckSatResponse::Unsat
             && let Some(genr) = smt_res.1
         {
             // Literals in UNSAT core
             let gen_lits = genr
                 .literals
                 .iter()
-                .filter_map(|&lit| lit_map.get(&lit).copied())
+                .filter_map(|lit| lit_map.get(lit).copied())
                 .collect::<FxHashSet<_>>();
 
             // Literals not in UNSAT core
@@ -810,15 +815,7 @@ impl BasePdr {
             Ok((CheckSatResponse::Unsat, Some(fixed)))
         } else {
             Ok(smt_res)
-        };
-
-        // Disable all created activation literals as cleanup
-        for &act in lit_map.keys() {
-            let neg_act = ctx.not(act);
-            smt_ctx.assert(ctx, neg_act)?;
         }
-
-        res
     }
 
     /// Frame identifier for frontier frame
@@ -834,7 +831,7 @@ impl BasePdr {
     /// (i.e. `SAT?[R_N /\ \neg P]`)
     ///
     /// # Returns
-    /// [`Some(Cube)`] with violation, else [`None`]
+    /// `Some(Cube)` with violation, else [`None`]
     ///
     /// # Errors
     /// In cases of `Unknown` SMT queries, return [`Error::UnexpectedResponse`]
@@ -854,14 +851,16 @@ impl BasePdr {
         let neg_cons = ctx.not(self.to_step_constraints_active);
 
         // Run query SAT?[R_N /\ \neg P]
-        match query(
+        let res = query(
             ctx,
             smt_ctx,
             sys,
             &mut self.enc,
-            vec![front_assumption, self.from_step_bad_active, neg_cons], // Assert bad states at `FROM_STEP`
+            [front_assumption, self.from_step_bad_active, neg_cons], // Assert bad states at `FROM_STEP`
             false,
-        )? {
+        )?;
+
+        match res {
             (CheckSatResponse::Sat, Some(cube)) => {
                 // Safety property violation found: return witness cube
                 Ok(Some(cube))
@@ -881,7 +880,11 @@ impl BasePdr {
     /// Adds empty frame to frame trace
     fn add_frame(&mut self, ctx: &mut Context, smt_ctx: &mut impl SolverContext) -> Result<()> {
         // Create new activation literal for frame
-        let act = self.create_act_lit(ctx, smt_ctx)?;
+        let act = ctx.bv_symbol(
+            format!("{FRAME_LIT_PREFIX}{}", self.frames.len() + 1).as_str(),
+            1,
+        );
+        smt_ctx.declare_const(ctx, act)?;
 
         // Add new frame
         self.frames.push(Frame { act, cubes: vec![] });
@@ -904,7 +907,6 @@ impl BasePdr {
 
         // Add blocked cube to frame
         self[cube.frame].cubes.push(cube.cube);
-
         Ok(())
     }
 
@@ -1001,8 +1003,8 @@ impl BasePdr {
         let front = self.frontier();
 
         // Get identifiers for all finite frames (except the last, where a blocked cube
-        // cannot be propagated from a finite frame to an infinite frame)
-        let ids = self.iter().take_while(|id| id < &front).collect::<Vec<_>>();
+        // cannot be propagated relative to a finite frame to an infinite frame)
+        let ids = self.iter().take_while(|id| *id < front).collect::<Vec<_>>();
 
         // Try to propagate blocked cubes in each frame forward
         for id in ids {
@@ -1034,7 +1036,7 @@ impl BasePdr {
                 // Collect all frame IDs from this frame to just before infinite frame
                 let inv_ids = self
                     .iter()
-                    .filter(|iid| iid > &id && iid < &FrameId::Infinite)
+                    .filter(|iid| *iid > id && *iid < FrameId::Infinite)
                     .collect::<Vec<_>>();
 
                 // Add all learned invariants to infinite frame
@@ -1055,10 +1057,10 @@ impl BasePdr {
             }
         }
 
+        let inf_assump = self.frame_assumptions(ctx, FrameId::Infinite);
+
         // Try to propagate all blocked cubes in the last finite frame into the infinite frame
         for cube in std::mem::take(&mut self[front].cubes) {
-            let inf_assumption = self.frame_assumptions(ctx, FrameId::Infinite);
-
             let clause_expr = cube.negate(ctx);
             let clause_from = self.enc.expr_at_step(ctx, clause_expr, FROM_STEP);
 
@@ -1076,7 +1078,7 @@ impl BasePdr {
                 sys,
                 &mut self.enc,
                 vec![
-                    inf_assumption,
+                    inf_assump,
                     clause_from,
                     cube_to,
                     self.to_step_constraints_active,
@@ -1118,7 +1120,6 @@ pub fn pdr(
         (r, None) => return Ok(r),
         (_, Some(enc)) => enc,
     };
-
     // Initialize PDR
     let mut state = BasePdr::init(ctx, smt_ctx, enc, sys, disable_unsat_cores)?;
 

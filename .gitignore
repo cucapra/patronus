@@ -2,6 +2,7 @@ target/
 Cargo.lock
 .idea/
 /*.smt
+/*.smt2
 /*.wit
 /flamegraph.svg
 /perf.data
@@ -9,6 +10,7 @@ Cargo.lock
 replay.smt
 patronus/tests/patronus_out/*
 .jj/
+.DS_Store
 
 # Python
 __pycache__/

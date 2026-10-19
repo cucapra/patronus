@@ -82,7 +82,6 @@ fn run_pdr_str(
 }
 
 /// Run PDR on a BTOR file and possibly return the result if solver is compatible with options
-/// (e.g. YICES2 cannot be run with UNSAT cores enabled)
 fn run_pdr_file(
     solver: &SmtLibSolver,
     btor_file: &str,
@@ -130,7 +129,7 @@ fn validate_witness(ctx: &Context, sys: &TransitionSystem, wit: &Witness) {
     for (state, init_val) in sys.states.iter().zip(wit.init.iter()) {
         match init_val {
             InitValue::BitVec(bv) => sim.set(state.symbol, bv),
-            InitValue::Array(_av, _) => panic!("No array support"),
+            InitValue::Array(av, _) => sim.set_array(state.symbol, av.clone()),
             InitValue::None => {}
         }
     }
@@ -141,7 +140,7 @@ fn validate_witness(ctx: &Context, sys: &TransitionSystem, wit: &Witness) {
         for (inp_sym, inp_val) in sys.inputs.iter().zip(step_inputs.iter()) {
             match inp_val {
                 Some(Value::BitVec(bv)) => sim.set(*inp_sym, bv),
-                Some(Value::Array(_av)) => panic!("No array support"),
+                Some(Value::Array(av)) => sim.set_array(*inp_sym, av.clone()),
                 None => {}
             }
         }
@@ -312,6 +311,23 @@ fn case_dangling(solver: &SmtLibSolver) {
     }
 }
 
+fn case_const_array(solver: &SmtLibSolver) {
+    let Some((ctx, sys, res)) = run_pdr_file(
+        solver,
+        "../inputs/chiseltest/const_array_example.btor",
+        None,
+        false,
+    ) else {
+        return;
+    };
+
+    if let ModelCheckResult::Fail(wit) = res {
+        validate_witness(&ctx, &sys, &wit);
+    } else {
+        panic!("const_array failed");
+    }
+}
+
 fn case_delay(solver: &SmtLibSolver) {
     let Some((_, _, res)) = run_pdr_file(solver, "../inputs/verilog_tests/Delay.btor", None, false)
     else {
@@ -477,6 +493,11 @@ mod pdr {
     #[test]
     fn test_dangling() {
         case_dangling(&solver_from_env());
+    }
+
+    #[test]
+    fn test_const_array() {
+        case_const_array(&solver_from_env());
     }
 
     #[test]

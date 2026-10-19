@@ -5,15 +5,21 @@
 use crate::ctx::{ContextGuardRead, ContextGuardWrite};
 use ::patronus::expr::SerializableIrNode;
 use baa::BitVecValue;
+use either::Either;
 use num_bigint::BigInt;
-use patronus::expr::{SparseExprMap, TypeCheck, WidthInt};
+use patronus::expr::{
+    ArrayType, Expr, ForEachChild, SparseExprMap, Type, TypeCheck, WidthInt, find_symbols,
+};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::fmt::Display;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::DerefMut;
 use std::sync::{LazyLock, RwLock};
 
 #[pyclass(from_py_object)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ExprRef(pub(crate) patronus::expr::ExprRef);
 
 /// Helper for binary ops that require a and b to be bitvectors of the same width
@@ -117,6 +123,17 @@ impl ExprRef {
     //
     // }
 
+    fn __getitem__<'py>(&self, index: ExprRef) -> PyResult<Self> {
+        let mut guard = ContextGuardWrite::default();
+        let ctx = guard.deref_mut();
+        match self.0.get_type(ctx) {
+            Type::BV(_) => {
+                todo!("add support for bit vector slices")
+            }
+            Type::Array(_) => Ok(Self(ctx.array_read(self.0, index.0))),
+        }
+    }
+
     fn width(&self) -> Option<WidthInt> {
         let c = ContextGuardRead::default();
         c.deref()[self.0].get_bv_type(c.deref())
@@ -126,6 +143,183 @@ impl ExprRef {
     /// This is different from the Z3 API where `==` builds an SMT expressoion
     fn __eq__(&self, other: &Self) -> bool {
         self.0 == other.0
+    }
+
+    fn __hash__(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.0.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn op(&self) -> Op {
+        (&ContextGuardRead::default().deref()[self.0]).into()
+    }
+
+    fn args(&self) -> Vec<Self> {
+        let mut children = vec![];
+        ContextGuardRead::default().deref()[self.0].collect_children(&mut children);
+        children.into_iter().map(ExprRef).collect()
+    }
+
+    fn children(&self) -> Vec<Self> {
+        self.args()
+    }
+
+    fn name(&self) -> Option<String> {
+        ContextGuardRead::default()
+            .deref()
+            .get_symbol_name(self.0)
+            .map(|s| s.to_string())
+    }
+
+    fn symbols(&self) -> FxHashSet<Self> {
+        find_symbols(ContextGuardRead::default().deref(), self.0)
+            .into_iter()
+            .map(Self)
+            .collect()
+    }
+
+    fn replace(&self, map: FxHashMap<Self, Self>) -> Self {
+        let map: FxHashMap<_, _> = map.into_iter().map(|(k, v)| (k.0, v.0)).collect();
+        let e = patronus::expr::simple_transform_expr(
+            ContextGuardWrite::default().deref_mut(),
+            self.0,
+            |_, e, _| map.get(&e).cloned(),
+        );
+        Self(e)
+    }
+
+    fn sort(&self) -> Either<BitVecSort, ArraySort> {
+        match self.0.get_type(ContextGuardRead::default().deref()) {
+            Type::BV(width) => Either::Left(BitVecSort(width)),
+            Type::Array(a) => Either::Right(a.into()),
+        }
+    }
+}
+
+#[pyclass(eq, eq_int)]
+#[derive(PartialEq)]
+pub enum Op {
+    BVSymbol,
+    BVLiteral,
+    BVZeroExt,
+    BVSignExt,
+    BVSlice,
+    BVNot,
+    BVNegate,
+    BVEqual,
+    BVImplies,
+    BVGreater,
+    BVGreaterSigned,
+    BVGreaterEqual,
+    BVGreaterEqualSigned,
+    BVConcat,
+    BVAnd,
+    BVOr,
+    BVXor,
+    BVShiftLeft,
+    BVArithmeticShiftRight,
+    BVShiftRight,
+    BVAdd,
+    BVMul,
+    BVSignedDiv,
+    BVUnsignedDiv,
+    BVSignedMod,
+    BVSignedRem,
+    BVUnsignedRem,
+    BVSub,
+    BVArrayRead,
+    BVIte,
+    ArraySymbol,
+    ArrayConstant,
+    ArrayEqual,
+    ArrayStore,
+    ArrayIte,
+}
+
+impl From<&patronus::expr::Expr> for Op {
+    fn from(value: &Expr) -> Self {
+        match value {
+            Expr::BVSymbol { .. } => Op::BVSymbol,
+            Expr::BVLiteral(_) => Op::BVLiteral,
+            Expr::BVZeroExt { .. } => Op::BVZeroExt,
+            Expr::BVSignExt { .. } => Op::BVSignExt,
+            Expr::BVSlice { .. } => Op::BVSlice,
+            Expr::BVNot(_, _) => Op::BVNot,
+            Expr::BVNegate(_, _) => Op::BVNegate,
+            Expr::BVEqual(_, _) => Op::BVEqual,
+            Expr::BVImplies(_, _) => Op::BVImplies,
+            Expr::BVGreater(_, _) => Op::BVGreater,
+            Expr::BVGreaterSigned(_, _, _) => Op::BVGreaterSigned,
+            Expr::BVGreaterEqual(_, _) => Op::BVGreaterEqual,
+            Expr::BVGreaterEqualSigned(_, _, _) => Op::BVGreaterEqualSigned,
+            Expr::BVConcat(_, _, _) => Op::BVConcat,
+            Expr::BVAnd(_, _, _) => Op::BVAnd,
+            Expr::BVOr(_, _, _) => Op::BVOr,
+            Expr::BVXor(_, _, _) => Op::BVXor,
+            Expr::BVShiftLeft(_, _, _) => Op::BVShiftLeft,
+            Expr::BVArithmeticShiftRight(_, _, _) => Op::BVArithmeticShiftRight,
+            Expr::BVShiftRight(_, _, _) => Op::BVShiftRight,
+            Expr::BVAdd(_, _, _) => Op::BVAdd,
+            Expr::BVMul(_, _, _) => Op::BVMul,
+            Expr::BVSignedDiv(_, _, _) => Op::BVSignedDiv,
+            Expr::BVUnsignedDiv(_, _, _) => Op::BVUnsignedDiv,
+            Expr::BVSignedMod(_, _, _) => Op::BVSignedMod,
+            Expr::BVSignedRem(_, _, _) => Op::BVSignedRem,
+            Expr::BVUnsignedRem(_, _, _) => Op::BVUnsignedRem,
+            Expr::BVSub(_, _, _) => Op::BVSub,
+            Expr::BVArrayRead { .. } => Op::BVArrayRead,
+            Expr::BVIte { .. } => Op::BVIte,
+            Expr::ArraySymbol { .. } => Op::ArraySymbol,
+            Expr::ArrayConstant { .. } => Op::ArrayConstant,
+            Expr::ArrayEqual(_, _) => Op::ArrayEqual,
+            Expr::ArrayStore { .. } => Op::ArrayStore,
+            Expr::ArrayIte { .. } => Op::ArrayIte,
+        }
+    }
+}
+
+#[pymethods]
+impl Op {
+    fn snake_case(&self) -> String {
+        let cc = match self {
+            Op::BVSymbol => "bv_symbol",
+            Op::BVLiteral => "bv_literal",
+            Op::BVZeroExt => "bv_zero_ext",
+            Op::BVSignExt => "bv_sign_ext",
+            Op::BVSlice => "bv_slice",
+            Op::BVNot => "bv_not",
+            Op::BVNegate => "bv_negate",
+            Op::BVEqual => "bv_equal",
+            Op::BVImplies => "bv_implies",
+            Op::BVGreater => "bv_greater",
+            Op::BVGreaterSigned => "bv_greater_signed",
+            Op::BVGreaterEqual => "bv_greater_equal",
+            Op::BVGreaterEqualSigned => "bv_greater_equal_signed",
+            Op::BVConcat => "bv_concat",
+            Op::BVAnd => "bv_and",
+            Op::BVOr => "bv_or",
+            Op::BVXor => "bv_xor",
+            Op::BVShiftLeft => "bv_shift_left",
+            Op::BVArithmeticShiftRight => "bv_arithmetic_shift_right",
+            Op::BVShiftRight => "bv_shift_right",
+            Op::BVAdd => "bv_add",
+            Op::BVMul => "bv_mul",
+            Op::BVSignedDiv => "bv_signed_div",
+            Op::BVUnsignedDiv => "bv_unsigned_div",
+            Op::BVSignedMod => "bv_signed_mod",
+            Op::BVSignedRem => "bv_signed_rem",
+            Op::BVUnsignedRem => "bv_unsigned_rem",
+            Op::BVSub => "bv_sub",
+            Op::BVArrayRead => "bv_array_read",
+            Op::BVIte => "bv_ite",
+            Op::ArraySymbol => "array_symbol",
+            Op::ArrayConstant => "array_constant",
+            Op::ArrayEqual => "array_equal",
+            Op::ArrayStore => "array_store",
+            Op::ArrayIte => "array_ite",
+        };
+        cc.into()
     }
 }
 
@@ -162,6 +356,152 @@ pub fn bit_vec_val(value: BigInt, width: WidthInt) -> ExprRef {
     ExprRef(ContextGuardWrite::default().deref_mut().bv_lit(&value))
 }
 
+#[pyclass(from_py_object, eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct BitVecSort(pub WidthInt);
+
+#[pymethods]
+impl BitVecSort {
+    #[new]
+    fn create(width: WidthInt) -> Self {
+        Self(width)
+    }
+
+    fn __str__(&self) -> String {
+        format!("BitVec({})", self.0)
+    }
+}
+
+#[pyclass(from_py_object, eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ArraySort(BitVecSort, BitVecSort);
+
+impl From<ArrayType> for ArraySort {
+    fn from(value: ArrayType) -> Self {
+        Self(BitVecSort(value.index_width), BitVecSort(value.data_width))
+    }
+}
+
+impl From<ArraySort> for ArrayType {
+    fn from(value: ArraySort) -> Self {
+        Self {
+            index_width: value.index_width(),
+            data_width: value.data_width(),
+        }
+    }
+}
+
+#[pymethods]
+impl ArraySort {
+    #[new]
+    fn create(index: Either<WidthInt, BitVecSort>, data: Either<WidthInt, BitVecSort>) -> Self {
+        let index_width: WidthInt = index.map_right(|s| s.0).either_into();
+        let data_width: WidthInt = data.map_right(|s| s.0).either_into();
+        Self(BitVecSort(index_width), BitVecSort(data_width))
+    }
+
+    fn __str__(&self) -> String {
+        format!("Array({}, {})", self.0.__str__(), self.1.__str__())
+    }
+
+    fn index_width(&self) -> WidthInt {
+        self.0.0
+    }
+
+    fn data_width(&self) -> WidthInt {
+        self.1.0
+    }
+}
+
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum Sort {
+    A(ArraySort),
+    B(BitVecSort),
+}
+
+impl Display for Sort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.__str__())
+    }
+}
+
+impl Sort {
+    fn __str__(&self) -> String {
+        match self {
+            Sort::A(s) => s.__str__(),
+            Sort::B(s) => s.__str__(),
+        }
+    }
+}
+
+impl From<BitVecSort> for Sort {
+    fn from(value: BitVecSort) -> Self {
+        Self::B(value)
+    }
+}
+
+impl From<ArraySort> for Sort {
+    fn from(value: ArraySort) -> Self {
+        Self::A(value)
+    }
+}
+
+impl From<Type> for Sort {
+    fn from(value: Type) -> Self {
+        match value {
+            Type::BV(width) => Sort::B(BitVecSort(width)),
+            Type::Array(a) => Sort::A(a.into()),
+        }
+    }
+}
+
+impl From<Sort> for Type {
+    fn from(value: Sort) -> Self {
+        match value {
+            Sort::A(a) => Self::Array(a.into()),
+            Sort::B(BitVecSort(w)) => Self::BV(w),
+        }
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "BoolSort")]
+pub fn bool_sort() -> BitVecSort {
+    BitVecSort(1)
+}
+
+#[pyfunction]
+#[pyo3(name = "Array")]
+pub fn array(
+    name: &str,
+    index: Either<WidthInt, BitVecSort>,
+    data: Either<WidthInt, BitVecSort>,
+) -> ExprRef {
+    let tpe = ArraySort::create(index, data);
+    ExprRef(ContextGuardWrite::default().deref_mut().array_symbol(
+        name,
+        tpe.index_width(),
+        tpe.data_width(),
+    ))
+}
+
+#[pyfunction]
+#[pyo3(name = "ConstArray")]
+pub fn const_array(index: Either<WidthInt, BitVecSort>, data: ExprRef) -> ExprRef {
+    let index_width = index.map_right(|s| s.0).either_into();
+    ExprRef(
+        ContextGuardWrite::default()
+            .deref_mut()
+            .array_const(data.0, index_width),
+    )
+}
+
+#[pyfunction]
+#[pyo3(name = "K")]
+pub fn const_array_z3_alias(index: Either<WidthInt, BitVecSort>, data: ExprRef) -> ExprRef {
+    const_array(index, data)
+}
+
 #[pyfunction]
 #[pyo3(name = "If")]
 pub fn if_expr(cond: ExprRef, tru: ExprRef, fals: ExprRef) -> ExprRef {
@@ -170,6 +510,28 @@ pub fn if_expr(cond: ExprRef, tru: ExprRef, fals: ExprRef) -> ExprRef {
             .deref_mut()
             .ite(cond.0, tru.0, fals.0),
     )
+}
+
+#[pyfunction]
+#[pyo3(name = "Store")]
+pub fn array_store(array: ExprRef, index: ExprRef, data: ExprRef) -> ExprRef {
+    ExprRef(
+        ContextGuardWrite::default()
+            .deref_mut()
+            .array_store(array.0, index.0, data.0),
+    )
+}
+
+#[pyfunction]
+#[pyo3(name = "Update")]
+pub fn array_store_alias(array: ExprRef, index: ExprRef, data: ExprRef) -> ExprRef {
+    array_store(array, index, data)
+}
+
+#[pyfunction]
+#[pyo3(name = "Select")]
+pub fn array_select(array: ExprRef, index: ExprRef) -> ExprRef {
+    array.__getitem__(index).unwrap()
 }
 
 #[pyfunction]

@@ -9,7 +9,7 @@ import pytest
 from pypatronus import *
 
 
-repo_root = (pathlib.Path(__file__) / '..' / '..' / '..').resolve()
+repo_root = (pathlib.Path(__file__) / ".." / ".." / "..").resolve()
 
 COUNT_2 = """
 1 sort bitvec 3
@@ -25,6 +25,7 @@ COUNT_2 = """
 11 bad 10
 """
 
+
 def test_parse_and_serialize_count2():
     sys = parse_btor2_str(COUNT_2, "count2")
     assert sys.name == "count2"
@@ -38,10 +39,12 @@ state _state_0 : bv<3>
     """
     assert expected_system.strip() == str(sys).strip()
 
+
 @pytest.mark.skip(reason="btor2 serialization is not yet implemented in paronus")
 def btor2_serialize():
     sys = parse_btor2_str(COUNT_2, "count2")
     assert sys.to_btor2_str().strip() == COUNT_2.strip()
+
 
 def test_transition_system_fields():
     sys = parse_btor2_str(COUNT_2, "count2")
@@ -59,20 +62,55 @@ def test_transition_system_fields():
 
 def test_expression_builder():
     # we are emulating the Z3 API as much as possible
-    a = BitVec('a', 3)
-    b = BitVec('b', 3)
+    a = BitVec("a", 3)
+    b = BitVec("b", 3)
     assert str(a < b) == "sgt(b, a)"
+
+    # z3-style array constant
+    x = Array("x", a.sort(), BitVecSort(8))
+    # alternative
+    x1 = Array("x", 3, 8)
+    assert x == x1
+    assert x1.sort() == ArraySort(BitVecSort(3), BitVecSort(8))
+
+    x_of_a = x[a]
+    assert str(x_of_a) == "x[a]"
+    assert x[a] == Select(x, a)
+
+    x_with_3_at_a = Store(x, a, BitVecVal(3, 8))
+    assert str(x_with_3_at_a) == "x[a := 8'b00000011]"
+    assert str(x_with_3_at_a[a]) == "x[a := 8'b00000011][a]"
+    assert Update(x, a, BitVecVal(3, 8)) == x_with_3_at_a
+
+    # constant array
+    all_zero = ConstArray(BitVecSort(3), BitVecVal(0, 8))
+    assert all_zero.sort() == x.sort()
+    assert all_zero == K(BitVecSort(3), BitVecVal(0, 8)), "K is what the z3 API uses"
+    assert str(all_zero) == "([8'b00000000] x 2^3)"
 
 
 def test_transition_system_builder():
     sys = TransitionSystem("test")
-    en, count_s = BitVec('en', 1), BitVec('count_s', 8)
+    en, count_s = BitVec("en", 1), BitVec("count_s", 8)
     sys.inputs = [en]
-    sys.states = [State('count_s', init=BitVecVal(0, 8), next=If(en, count_s + BitVecVal(1, 8), count_s))]
-    sys.outputs = [Output('count', count_s)]
+    array_count = Array("array_count", 3, 8)
+    sys.states = [
+        State(
+            "count_s",
+            init=BitVecVal(0, 8),
+            next=If(en, count_s + BitVecVal(1, 8), count_s),
+        ),
+        State("array_zero", init=ConstArray(BitVecSort(3), BitVecVal(0, 8))),
+        State(
+            "array_count",
+            init=Array("array_zero", 3, 8),
+            next=Update(array_count, BitVecVal(1, 3), array_count[BitVecVal(1, 3)]),
+        ),
+    ]
+    sys.outputs = [Output("count", count_s)]
     # TODO: there is a big pitfall here: you cannot just `append` to the bad_states, inputs, etc. because we use
     #       a getter / setter approach
-    sys.add_bad_state('count_is_123', count_s.equals(BitVecVal(123, 8)))
+    sys.add_bad_state("count_is_123", count_s.equals(BitVecVal(123, 8)))
     expected_system = """
 test
 input en : bv<1>
@@ -81,7 +119,13 @@ bad count_is_123 : bv<1> = eq(count, 8'b01111011)
 state count_s : bv<8>
   [init] 8'b00000000
   [next] ite(en, add(count, 8'b00000001), count)
+state array_zero : bv<3> -> bv<8>
+  [init] ([8'b00000000] x 2^3)
+state array_count : bv<3> -> bv<8>
+  [init] array_zero
+  [next] array_count[3'b001 := array_count[3'b001]]
     """
     assert str(sys).strip() == expected_system.strip()
 
-
+    # ensure it parser
+    _sys2 = parse_btor2_str(sys.to_btor2_str())
