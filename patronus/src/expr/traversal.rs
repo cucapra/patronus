@@ -143,3 +143,22 @@ pub fn top_down(
         }
     }
 }
+/// Visits expression from top to bottom. Halts exploration if a false is returned or expression has been visited before.
+#[inline]
+pub fn top_down_without_reentry(
+    ctx: &Context,
+    exprs: &[ExprRef],
+    mut f: impl FnMut(&Context, ExprRef) -> TraversalCmd,
+) {
+    let mut visited = rustc_hash::FxHashSet::default();
+    let mut todo = exprs.to_vec();
+    while let Some(e) = todo.pop() {
+        if !visited.insert(e) {
+            continue;
+        }
+        let do_continue = f(ctx, e) == TraversalCmd::Continue;
+        if do_continue {
+            ctx[e].for_each_child(|&c| todo.push(c));
+        }
+    }
+}

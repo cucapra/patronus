@@ -1,0 +1,16 @@
+[package]
+name = "patronus-cranelift"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+patronus.workspace = true
+baa.workspace = true
+rustc-hash.workspace = true
+cranelift = { version = "0.125.4", features = ["jit", "module"]}
+
