@@ -1,3 +1,7 @@
+// Copyright 2026 Cornell University
+// released under BSD 3-Clause License
+// author: Willow Ge <lg634@cornell.edu>
+
 use baa::BitVecValue;
 use patronus::expr::{self, TypeCheck};
 use patronus::system;

@@ -1,6 +1,7 @@
-// Copyright 2025 Cornell University
+// Copyright 2025-2026 Cornell University
 // released under BSD 3-Clause License
 // author: Zihan Li <zl2225@cornell.edu>
+// author: Willow Ge <lg634@cornell.edu>
 mod bv_codegen;
 mod compiler;
 mod expr_graph;
@@ -272,6 +273,10 @@ impl patronus::sim::Simulator for JITEngine<'_> {
         self.in_state.set_slot(offset, vref.words());
         self.out_state.set_slot(offset, vref.words());
         self.output_up_to_date.set(false);
+    }
+
+    fn set_array(&mut self, _expr: ExprRef, _value: ArrayValue) {
+        panic!("using array values in cranelift backend")
     }
 
     fn get(&self, expr: ExprRef) -> baa::Value {

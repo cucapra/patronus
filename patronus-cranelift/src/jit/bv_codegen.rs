@@ -1,6 +1,7 @@
-// Copyright 2025 Cornell University
+// Copyright 2025-2026 Cornell University
 // released under BSD 3-Clause License
 // author: Zihan Li <zl2225@cornell.edu>
+// author: Willow Ge <lg634@cornell.edu>
 
 use baa::{BitVecOps, BitVecValueRef};
 use cranelift::prelude::*;

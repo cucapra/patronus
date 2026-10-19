@@ -1,3 +1,8 @@
+// Copyright 2025-2026 Cornell University
+// released under BSD 3-Clause License
+// author: Zihan Li <zl2225@cornell.edu>
+// author: Willow Ge <lg634@cornell.edu>
+
 use patronus::expr::{traversal, *};
 use rustc_hash::FxHashMap;
 use std::collections::{VecDeque, hash_map};

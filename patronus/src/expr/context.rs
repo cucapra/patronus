@@ -111,10 +111,6 @@ impl Context {
         index.into()
     }
 
-    pub fn num_exprs(&self) -> usize {
-        self.exprs.len()
-    }
-
     pub fn string(&mut self, value: std::borrow::Cow<str>) -> StringRef {
         if let Some(index) = self.strings.get_index_of(value.as_ref()) {
             StringRef::from_index(index)

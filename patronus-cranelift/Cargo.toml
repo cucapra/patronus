@@ -13,5 +13,4 @@ patronus.workspace = true
 baa.workspace = true
 rustc-hash.workspace = true
 cranelift = { version = "0.125.4", features = ["jit", "module"]}
-fixedbitset = "0.5.7"
 
