@@ -132,7 +132,8 @@ pub struct SmtLibSolver {
     options: &'static [&'static str],
     supports_uf: bool,
     supports_check_assuming: bool,
-    /// Needed for determining whether activation literals are needed in `check_sat_assuming`
+    /// Needed for determining whether activation literals
+    /// are needed for compound formulas in `check_sat_assuming`
     supports_check_assuming_exprs: bool,
     supports_const_array: bool,
 }
@@ -516,7 +517,8 @@ impl SolverContext for SmtLibSolverCtx {
 
         let mut core = parse_get_unsat_assumptions_response(ctx, &st, response.as_bytes())?;
 
-        // If activation literal has mapping to expression, replace it in `(get-unsat-assumptions)`
+        // If solver does not support compound formula assumptions in `check_sat_assuming`,
+        // replace activation literals with original formulas
         if !self.supports_check_assuming_exprs() {
             for expr in core.iter_mut() {
                 if let Some(&orig) = self.expr_map.get(expr) {
