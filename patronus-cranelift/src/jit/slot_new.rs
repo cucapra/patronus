@@ -7,7 +7,7 @@ use patronus::expr::{self, TypeCheck};
 use patronus::system;
 use rustc_hash::FxHashMap;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StateBuf {
     offsets: FxHashMap<expr::ExprRef, usize>,
     data: Vec<u64>,
@@ -15,6 +15,17 @@ pub struct StateBuf {
 }
 
 impl StateBuf {
+    pub fn add_exprs(&mut self, ctx: &expr::Context, exprs: &Vec<expr::ExprRef>) {
+        // data is zero initialised
+        let new_data = vec![0; exprs.len()];
+        let new_dtypes: Vec<_> = exprs.iter().map(|&e| e.get_type(ctx)).collect();
+        let start_len = self.data.len();
+        for (i, eref) in exprs.iter().enumerate() {
+            self.offsets.insert(*eref, start_len + i);
+        }
+        self.data.extend(new_data);
+        self.types.extend(new_dtypes);
+    }
     pub fn init(&mut self, g: &mut patronus::sim::InitValueGenerator) {
         for (idx, slot) in &mut self.data.iter_mut().enumerate() {
             let init_value = g.generate(self.types[idx]);
@@ -77,15 +88,6 @@ impl StateBuf {
             exprs.push(e);
         }
         Self::new_exprset(ctx, &exprs, offset_map)
-    }
-
-    pub fn swap(&mut self, other: &mut Self) {
-        debug_assert!(self.types == other.types);
-        std::mem::swap(&mut self.data, &mut other.data)
-    }
-
-    pub fn as_slice(&self) -> &[u64] {
-        self.data.as_slice()
     }
 
     pub fn as_mut_slice(&mut self) -> &mut [u64] {

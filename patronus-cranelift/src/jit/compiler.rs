@@ -23,13 +23,14 @@ pub(super) struct JITCompiler {
     module: JITModule,
 }
 
-pub(super) struct EvalBatchedExprWithUpdate(extern "C" fn(*const u64, *mut u64));
+// a function that evaluates a certain set of expressions
+pub(super) struct EvalFun(extern "C" fn(*mut u64));
 
-impl EvalBatchedExprWithUpdate {
+impl EvalFun {
     /// # Safety
     /// caller should guarantee the memory allocated for compiled code has not been reclaimed
-    pub(super) unsafe fn call(&self, current_states: &[u64], next_states: &mut [u64]) {
-        (self.0)(current_states.as_ptr(), next_states.as_mut_ptr())
+    pub(super) unsafe fn call(&self, state_ptr: &mut [u64]) {
+        (self.0)(state_ptr.as_mut_ptr())
     }
 }
 
@@ -69,7 +70,7 @@ impl JITCompiler {
         sys: &TransitionSystem,
         input_state_buffer: &StateBuf,
         output_state_buffer: &StateBuf,
-    ) -> JITResult<EvalBatchedExprWithUpdate> {
+    ) -> JITResult<EvalFun> {
         let (next_expr_batch, states_expr): (Vec<_>, Vec<_>) = sys
             .states
             .iter()
@@ -83,11 +84,10 @@ impl JITCompiler {
         &mut self,
         expr_ctx: &expr::Context,
         expr_batch: &[expr::ExprRef],
-        input_state_buffer: &StateBuf,
-        output_ledge: &mut StateBuf,
-    ) -> JITResult<EvalBatchedExprWithUpdate> {
-        let slot_offset = output_ledge.batch_offsets(expr_batch);
-        self.compile_expr_batch(expr_ctx, expr_batch, input_state_buffer, &slot_offset)
+        state: &mut StateBuf,
+    ) -> JITResult<EvalFun> {
+        let slot_offset = state.batch_offsets(expr_batch);
+        self.compile_expr_batch(expr_ctx, expr_batch, state, &slot_offset)
     }
 
     pub(super) fn compile_expr_batch(
@@ -96,7 +96,7 @@ impl JITCompiler {
         expr_batch: &[expr::ExprRef],
         input_state_buffer: &StateBuf,
         out_offsets: &[usize],
-    ) -> JITResult<EvalBatchedExprWithUpdate> {
+    ) -> JITResult<EvalFun> {
         assert_eq!(expr_batch.len(), out_offsets.len());
         let sig = Signature {
             params: vec![AbiParam::new(types::I64), AbiParam::new(types::I64)],
@@ -106,10 +106,9 @@ impl JITCompiler {
         self.enter_compile_ctx_with(sig, expr_ctx, expr_batch, input_state_buffer, out_offsets)
             .map(|address| unsafe {
                 // SAFETY: upheld by the unsafeness of call method
-                EvalBatchedExprWithUpdate(std::mem::transmute::<
-                    *const u8,
-                    extern "C" fn(*const u64, *mut u64),
-                >(address))
+                EvalFun(std::mem::transmute::<*const u8, extern "C" fn(*mut u64)>(
+                    address,
+                ))
             })
     }
 
