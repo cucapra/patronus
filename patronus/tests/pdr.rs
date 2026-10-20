@@ -3,7 +3,7 @@ use patronus::btor2;
 use patronus::expr::Context;
 use patronus::mc::{InitValue, ModelCheckResult, Witness, pdr};
 use patronus::sim::{InitKind, Interpreter, Simulator};
-use patronus::smt::{SmtLibSolver, Solver, SolverMetaData, solver_from_env};
+use patronus::smt::{SmtLibSolver, Solver, solver_from_env};
 use patronus::system::TransitionSystem;
 use std::path::Path;
 

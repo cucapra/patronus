@@ -311,6 +311,12 @@ impl SmtLibSolverCtx {
             )),
         }
     }
+
+    /// Reset state associated with solver-generated activation literals
+    fn clear_act_lits(&mut self) {
+        self.expr_map.clear();
+        self.last_assuming_query_unsat = false;
+    }
 }
 
 impl Drop for SmtLibSolverCtx {
@@ -383,8 +389,7 @@ impl SolverContext for SmtLibSolverCtx {
             self.write_cmd(None, &SmtCommand::SetOption(option, "true".to_string()))?;
         }
         self.symbols = vec![SymbolTable::default()];
-        self.expr_map.clear();
-        self.last_assuming_query_unsat = false;
+        self.clear_act_lits();
         Ok(())
     }
 
@@ -427,29 +432,36 @@ impl SolverContext for SmtLibSolverCtx {
             ));
         }
 
-        // Always clear activation literal-expression map from last `check_sat_assuming`
-        self.expr_map.clear();
+        // If solver does not support compound formulas as assumptions for `(check-sat-assuming)`,
+        // then we need to check for compound formulas and abstract them as activation literals
+        let fin_props = if !self.supports_check_assuming_exprs() {
+            // Always reset activation literal state from last `check_sat_assuming`
+            self.clear_act_lits();
 
-        let mut fin_props: Vec<ExprRef> = vec![];
-        for prop in props {
-            // If solver cannot accept compound formulas as assumptions and `prop`
-            // is a compound formula, create an activation literal for `prop`
-            if !self.supports_check_assuming_exprs() && !is_atomic_expr(ctx, prop) {
-                // Create activation literal for `prop`
-                let act =
-                    ctx.bv_symbol(format!("{ACT_LIT_PREFIX}{}", self.next_act_id).as_str(), 1);
-                self.next_act_id += 1;
-                self.declare_const(ctx, act)?;
-                let imp = ctx.implies(act, prop);
-                self.assert(ctx, imp)?;
+            let mut fin_props: Vec<ExprRef> = vec![];
+            for prop in props {
+                // If formula is a compound formula, create an activation literal for it
+                if !is_atomic_expr(ctx, prop) {
+                    // Create activation literal for `prop`
+                    let act =
+                        ctx.bv_symbol(format!("{ACT_LIT_PREFIX}{}", self.next_act_id).as_str(), 1);
+                    self.next_act_id += 1;
+                    self.declare_const(ctx, act)?;
+                    let imp = ctx.implies(act, prop);
+                    self.assert(ctx, imp)?;
 
-                // Create mapping between activation literal and original expression
-                self.expr_map.insert(act, prop);
-                fin_props.push(act);
-            } else {
-                fin_props.push(prop);
+                    // Create mapping between activation literal and original expression
+                    self.expr_map.insert(act, prop);
+                    fin_props.push(act);
+                } else {
+                    fin_props.push(prop);
+                }
             }
-        }
+            fin_props
+        } else {
+            // Else, we can just use the original formulas
+            props.into_iter().collect()
+        };
 
         self.write_cmd(Some(ctx), &SmtCommand::CheckSatAssuming(fin_props))?;
         let res = self.read_sat_response()?;
@@ -460,7 +472,7 @@ impl SolverContext for SmtLibSolverCtx {
     fn check_sat(&mut self) -> Result<CheckSatResponse> {
         self.write_cmd(None, &SmtCommand::CheckSat)?;
         let res = self.read_sat_response()?;
-        self.last_assuming_query_unsat = false;
+        self.clear_act_lits();
         Ok(res)
     }
 
@@ -468,7 +480,7 @@ impl SolverContext for SmtLibSolverCtx {
         self.write_cmd(None, &SmtCommand::Push(1))?;
         // Add new symbol table for context
         self.symbols.push(SymbolTable::default());
-        self.last_assuming_query_unsat = false;
+        self.clear_act_lits();
         self.stack_depth += 1;
         Ok(())
     }
@@ -478,7 +490,7 @@ impl SolverContext for SmtLibSolverCtx {
             self.write_cmd(None, &SmtCommand::Pop(1))?;
             // Remove symbol table from old context
             self.symbols.pop();
-            self.last_assuming_query_unsat = false;
+            self.clear_act_lits();
             self.stack_depth -= 1;
             Ok(())
         } else {
@@ -531,8 +543,8 @@ impl SolverContext for SmtLibSolverCtx {
             }
         }
 
-        // Reset query result flag and activation literal map
-        self.last_assuming_query_unsat = false;
+        // Reset activation literal state for next `(check-sat-assuming)`
+        self.clear_act_lits();
         Ok(core)
     }
 }
