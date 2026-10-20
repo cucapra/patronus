@@ -191,7 +191,7 @@ impl Solver for SmtLibSolver {
             symbols: vec![SymbolTable::default()],
             next_act_id: 0,
             expr_map: FxHashMap::default(),
-            last_query_unsat: false,
+            last_assuming_query_unsat: false,
         };
         for option in self.options.iter() {
             solver.write_cmd(
@@ -231,8 +231,8 @@ pub struct SmtLibSolverCtx {
     next_act_id: u64,
     /// Map from activation literals to original expressions (for [`Self::get_unsat_assumptions`] recovery)
     expr_map: FxHashMap<ExprRef, ExprRef>,
-    /// Flag for whether last query was `UNSAT`
-    last_query_unsat: bool,
+    /// Flag for whether last `check_sat_assuming` call was `UNSAT`
+    last_assuming_query_unsat: bool,
 }
 
 impl SmtLibSolverCtx {
@@ -384,7 +384,7 @@ impl SolverContext for SmtLibSolverCtx {
         }
         self.symbols = vec![SymbolTable::default()];
         self.expr_map.clear();
-        self.last_query_unsat = false;
+        self.last_assuming_query_unsat = false;
         Ok(())
     }
 
@@ -453,14 +453,14 @@ impl SolverContext for SmtLibSolverCtx {
 
         self.write_cmd(Some(ctx), &SmtCommand::CheckSatAssuming(fin_props))?;
         let res = self.read_sat_response()?;
-        self.last_query_unsat = matches!(res, CheckSatResponse::Unsat);
+        self.last_assuming_query_unsat = matches!(res, CheckSatResponse::Unsat);
         Ok(res)
     }
 
     fn check_sat(&mut self) -> Result<CheckSatResponse> {
         self.write_cmd(None, &SmtCommand::CheckSat)?;
         let res = self.read_sat_response()?;
-        self.last_query_unsat = matches!(res, CheckSatResponse::Unsat);
+        self.last_assuming_query_unsat = false;
         Ok(res)
     }
 
@@ -468,8 +468,7 @@ impl SolverContext for SmtLibSolverCtx {
         self.write_cmd(None, &SmtCommand::Push(1))?;
         // Add new symbol table for context
         self.symbols.push(SymbolTable::default());
-        self.expr_map.clear();
-        self.last_query_unsat = false;
+        self.last_assuming_query_unsat = false;
         self.stack_depth += 1;
         Ok(())
     }
@@ -479,7 +478,7 @@ impl SolverContext for SmtLibSolverCtx {
             self.write_cmd(None, &SmtCommand::Pop(1))?;
             // Remove symbol table from old context
             self.symbols.pop();
-            self.last_query_unsat = false;
+            self.last_assuming_query_unsat = false;
             self.stack_depth -= 1;
             Ok(())
         } else {
@@ -497,10 +496,15 @@ impl SolverContext for SmtLibSolverCtx {
     }
 
     fn get_unsat_assumptions(&mut self, ctx: &mut Context) -> Result<Vec<ExprRef>> {
-        if !self.last_query_unsat {
+        if !self.last_assuming_query_unsat {
             return Err(Error::FromSolver(
                 self.name.clone(),
                 "Previous query not UNSAT".into(),
+            ));
+        } else if !self.supports_check_assuming() {
+            return Err(Error::FromSolver(
+                self.name.clone(),
+                "`(get-unsat-assumptions)` not supported".into(),
             ));
         }
 
@@ -528,7 +532,7 @@ impl SolverContext for SmtLibSolverCtx {
         }
 
         // Reset query result flag and activation literal map
-        self.last_query_unsat = false;
+        self.last_assuming_query_unsat = false;
         Ok(core)
     }
 }
