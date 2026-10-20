@@ -38,7 +38,7 @@ struct JITBackend {
     compiler: JITCompiler,
     compiled_transition_sys: Option<EvalFun>,
     compiled_expr_eval: FxHashMap<ExprRef, EvalFun>,
-    compiled_output_exprs_batched_update: Option<EvalFun>,
+    out_exprs_fun: Option<EvalFun>,
 }
 
 impl JITBackend {
@@ -47,26 +47,7 @@ impl JITBackend {
             compiler: JITCompiler::new(flags),
             compiled_transition_sys: None,
             compiled_expr_eval: FxHashMap::default(),
-            compiled_output_exprs_batched_update: None,
-        }
-    }
-
-    fn eval_expr_with_output_slot(
-        &mut self,
-        expr: ExprRef,
-        ctx: &expr::Context,
-        buf: &mut StateBuf,
-    ) {
-        let eval_fn = self.compiled_expr_eval.entry(expr).or_insert_with(|| {
-            println!("compiling {}", expr.serialize_to_str(ctx));
-            self.compiler
-                .compile_batched_expr_eval(ctx, &[expr], buf)
-                .unwrap_or_else(|err| panic!("fail to compile: `{:?}` due to {:?}", ctx[expr], err))
-        });
-        // println!("evaluating {}", expr.serialize_to_str(ctx));
-        // SAFETY: jit compiler has not been dropped
-        unsafe {
-            eval_fn.call(buf.as_mut_slice());
+            out_exprs_fun: None,
         }
     }
 
@@ -76,7 +57,17 @@ impl JITBackend {
         ctx: &expr::Context,
         state_buf: &mut StateBuf,
     ) -> BitVecValue {
-        self.eval_expr_with_output_slot(expr, ctx, state_buf);
+        let eval_fn = self.compiled_expr_eval.entry(expr).or_insert_with(|| {
+            println!("compiling {}", expr.serialize_to_str(ctx));
+            self.compiler
+                .compile_batched_expr_eval(ctx, &[expr], state_buf)
+                .unwrap_or_else(|err| panic!("fail to compile: `{:?}` due to {:?}", ctx[expr], err))
+        });
+        // println!("evaluating {}", expr.serialize_to_str(ctx));
+        // SAFETY: jit compiler has not been dropped
+        unsafe {
+            eval_fn.call(state_buf.as_mut_slice());
+        }
         state_buf.get_slot(expr)
     }
 
@@ -86,21 +77,19 @@ impl JITBackend {
         output_exprs: &[ExprRef],
         state_buf: &mut StateBuf,
     ) {
-        let eval_fn = self
-            .compiled_output_exprs_batched_update
-            .get_or_insert_with(|| {
-                // print!("batch compile:");
-                // for e in output_exprs {
-                //     print!("{}", e.serialize_to_str(ctx));
-                // }
-                // println!();
+        let eval_fn = self.out_exprs_fun.get_or_insert_with(|| {
+            // print!("batch compile:");
+            // for e in output_exprs {
+            //     print!("{}", e.serialize_to_str(ctx));
+            // }
+            // println!();
 
-                self.compiler
-                    .compile_batched_expr_eval(ctx, output_exprs, state_buf)
-                    .unwrap_or_else(|err| {
-                        panic!("fail to compiled batched output exprs update, due to {err:?}")
-                    })
-            });
+            self.compiler
+                .compile_batched_expr_eval(ctx, output_exprs, state_buf)
+                .unwrap_or_else(|err| {
+                    panic!("fail to compiled batched output exprs update, due to {err:?}")
+                })
+        });
         // print!("batch:");
         // for e in output_exprs {
         //     print!("{}", e.serialize_to_str(ctx));
@@ -113,8 +102,7 @@ impl JITBackend {
         &mut self,
         ctx: &expr::Context,
         sys: &TransitionSystem,
-        state_buf: &mut StateBuf, // input_state_buffer: &StateBuf,
-                                  // output_state_buffer: &mut StateBuf,
+        state_buf: &mut StateBuf,
     ) {
         // attempt compilation if transition sys has not been compiled yet, or otherwise use the existing result
         let eval_fn = self.compiled_transition_sys.get_or_insert_with(|| {
@@ -134,8 +122,6 @@ impl JITBackend {
 
 pub struct JITEngine<'expr> {
     in_state: RefCell<StateBuf>,
-    // out_state: StateBuf,
-    /// Value placeholders for output expressions, including `output`, `bad` and `constraint`
     output_exprs: Vec<ExprRef>,
     ctx: &'expr expr::Context,
     sys: &'expr TransitionSystem,
@@ -148,8 +134,15 @@ pub struct JITEngine<'expr> {
 
 impl<'expr> JITEngine<'expr> {
     pub fn new(ctx: &'expr expr::Context, sys: &'expr TransitionSystem) -> JITEngine<'expr> {
-        let mut in_state = StateBuf::new(ctx, sys);
-        // let out_state = in_state.clone();
+        let mut in_state = StateBuf::default();
+
+        let base_exprs: Vec<_> = sys
+            .states
+            .iter()
+            .map(|s| s.symbol)
+            .chain(sys.inputs.clone())
+            .collect();
+        in_state.add_exprs(ctx, &base_exprs);
 
         // create output ledger with associated offsets
         let output_exprs: Vec<_> = Vec::from_iter(
@@ -192,8 +185,6 @@ impl<'expr> JITEngine<'expr> {
     }
 
     fn try_fetch_from_latest_outputs(&self, expr: ExprRef) -> Option<baa::Value> {
-        println!("{:?}", expr);
-        // TODO: combine output expression ledger and the input expressions ledger, so that offsetting will be consistent
         if !self.in_state.borrow().contains(expr) {
             return None;
         }
@@ -227,8 +218,6 @@ impl patronus::sim::Simulator for JITEngine<'_> {
 
     fn step(&mut self) {
         self.step_transition_sys();
-        // self.in_state.swap(&mut self.out_state);
-
         self.step_count += 1;
     }
 
@@ -239,7 +228,6 @@ impl patronus::sim::Simulator for JITEngine<'_> {
         let vref = value.into();
         let offset = self.in_state.borrow().offset_query(expr).unwrap();
         self.in_state.borrow_mut().set_slot(offset, vref.words());
-        // self.out_state.set_slot(offset, vref.words());
         self.output_up_to_date.set(false);
     }
 
