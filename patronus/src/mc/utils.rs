@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 
 #[inline]
 pub fn check_assuming(
-    ctx: &Context,
+    ctx: &mut Context,
     smt_ctx: &mut impl SolverContext,
     props: impl IntoIterator<Item = ExprRef>,
 ) -> crate::mc::types::Result<CheckSatResponse> {

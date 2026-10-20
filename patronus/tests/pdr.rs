@@ -56,7 +56,7 @@ fn run_pdr_str(
     out_file: Option<&str>,
     disable_unsat_cores: bool,
 ) -> Option<(Context, TransitionSystem, ModelCheckResult)> {
-    if !solver.supports_get_unsat_assumptions() && !disable_unsat_cores {
+    if !disable_unsat_cores {
         return None;
     }
 
@@ -88,7 +88,7 @@ fn run_pdr_file(
     out_file: Option<&str>,
     disable_unsat_cores: bool,
 ) -> Option<(Context, TransitionSystem, ModelCheckResult)> {
-    if !solver.supports_get_unsat_assumptions() && !disable_unsat_cores {
+    if !disable_unsat_cores {
         return None;
     }
 
