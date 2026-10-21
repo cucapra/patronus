@@ -12,9 +12,10 @@ use compiler::*;
 use cranelift::module::ModuleError;
 use patronus::expr::{self, *};
 use patronus::system::*;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 use slot_new::*;
 use std::cell::{Cell, RefCell};
+use std::ops::Index;
 use std::sync::LazyLock;
 
 type JITResult<T> = Result<T, JITError>;
@@ -37,7 +38,6 @@ static CRANELIFT_FLAGS: LazyLock<Option<String>> =
 struct JITBackend {
     compiler: JITCompiler,
     compiled_transition_sys: Option<EvalFun>,
-    compiled_expr_eval: FxHashMap<ExprRef, EvalFun>,
     out_exprs_fun: Option<EvalFun>,
 }
 
@@ -46,29 +46,8 @@ impl JITBackend {
         Self {
             compiler: JITCompiler::new(flags),
             compiled_transition_sys: None,
-            compiled_expr_eval: FxHashMap::default(),
             out_exprs_fun: None,
         }
-    }
-
-    fn eval_expr(
-        &mut self,
-        expr: ExprRef,
-        ctx: &expr::Context,
-        state_buf: &mut StateBuf,
-    ) -> BitVecValue {
-        let eval_fn = self.compiled_expr_eval.entry(expr).or_insert_with(|| {
-            println!("compiling {}", expr.serialize_to_str(ctx));
-            self.compiler
-                .compile_batched_expr_eval(ctx, &[expr], state_buf)
-                .unwrap_or_else(|err| panic!("fail to compile: `{:?}` due to {:?}", ctx[expr], err))
-        });
-        // println!("evaluating {}", expr.serialize_to_str(ctx));
-        // SAFETY: jit compiler has not been dropped
-        unsafe {
-            eval_fn.call(state_buf.as_mut_slice());
-        }
-        state_buf.get_slot(expr)
     }
 
     fn batched_eval_output_exprs(
@@ -168,13 +147,6 @@ impl<'expr> JITEngine<'expr> {
         engine
     }
 
-    fn eval_expr(&self, expr: ExprRef) -> baa::BitVecValue {
-        self.in_state.borrow_mut().add_exprs(self.ctx, &vec![expr]);
-        self.backend
-            .borrow_mut()
-            .eval_expr(expr, self.ctx, &mut self.in_state.borrow_mut())
-    }
-
     fn step_transition_sys(&mut self) {
         self.backend.borrow_mut().step_transition_sys(
             self.ctx,
@@ -208,9 +180,13 @@ impl patronus::sim::Simulator for JITEngine<'_> {
 
         for state in &self.sys.states {
             if let Some(init) = state.init {
-                let ret = self.eval_expr(init);
+                let backing_ex = self.ctx.index(init);
+                let Expr::BVLiteral(b) = backing_ex else {
+                    panic!("backing expression is non-trivial. unimplemented")
+                };
+                let v = b.get(self.ctx);
                 let offset = self.in_state.borrow().offset_query(state.symbol).unwrap();
-                self.in_state.borrow_mut().set_slot(offset, ret.words());
+                self.in_state.borrow_mut().set_slot(offset, v.words());
             }
         }
         self.output_up_to_date.set(false);
@@ -241,7 +217,8 @@ impl patronus::sim::Simulator for JITEngine<'_> {
         } else if self.in_state.borrow().contains(expr) {
             baa::Value::BitVec(self.in_state.borrow().get_slot(expr))
         } else {
-            baa::Value::BitVec(self.eval_expr(expr))
+            let backing_ex = self.ctx.index(expr);
+            panic!("can't get value for {:?}", backing_ex)
         }
     }
 

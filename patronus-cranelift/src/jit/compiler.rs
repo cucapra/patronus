@@ -103,23 +103,6 @@ impl JITCompiler {
             returns: vec![],
             call_conv: isa::CallConv::SystemV,
         };
-        self.enter_compile_ctx_with(sig, expr_ctx, expr_batch, input_state_buffer, out_offsets)
-            .map(|address| unsafe {
-                // SAFETY: upheld by the unsafeness of call method
-                EvalFun(std::mem::transmute::<*const u8, extern "C" fn(*mut u64)>(
-                    address,
-                ))
-            })
-    }
-
-    fn enter_compile_ctx_with(
-        &mut self,
-        sig: Signature,
-        expr_ctx: &expr::Context,
-        expr_batch: &[expr::ExprRef],
-        input_state_buffer: &StateBuf,
-        out_offsets: &[usize],
-    ) -> JITResult<*const u8> {
         let mut cranelift_ctx = self.module.make_context();
         cranelift_ctx.func.signature = sig;
 
@@ -159,10 +142,9 @@ impl JITCompiler {
             arguments.clear();
         }
         // now, write outputs to the output location
-        let ret: Vec<_> = expr_batch.iter().map(|e| evaluated[e]).collect();
         for (idx, expr) in expr_batch.iter().enumerate() {
             let t = expr.get_type(expr_ctx);
-            let loc = ret[idx];
+            let loc = evaluated[expr];
             let offset = out_offsets[idx] as u32;
             codegen_ctx.output_state(t, loc, offset);
         }
@@ -179,7 +161,15 @@ impl JITCompiler {
         self.module.clear_context(&mut cranelift_ctx);
         self.module.finalize_definitions()?;
 
-        Ok(self.module.get_finalized_function(function_id))
+        let fn_addr = self.module.get_finalized_function(function_id);
+
+        let res = unsafe {
+            // SAFETY: upheld by the unsafeness of call method
+            EvalFun(std::mem::transmute::<*const u8, extern "C" fn(*mut u64)>(
+                fn_addr,
+            ))
+        };
+        Ok(res)
     }
 }
 
