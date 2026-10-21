@@ -3,7 +3,7 @@ use patronus::btor2;
 use patronus::expr::Context;
 use patronus::mc::{InitValue, ModelCheckResult, Witness, pdr};
 use patronus::sim::{InitKind, Interpreter, Simulator};
-use patronus::smt::{SmtLibSolver, Solver, SolverMetaData, solver_from_env};
+use patronus::smt::{SmtLibSolver, Solver, solver_from_env};
 use patronus::system::TransitionSystem;
 use std::path::Path;
 
@@ -56,7 +56,7 @@ fn run_pdr_str(
     out_file: Option<&str>,
     disable_unsat_cores: bool,
 ) -> Option<(Context, TransitionSystem, ModelCheckResult)> {
-    if !solver.supports_get_unsat_assumptions() && !disable_unsat_cores {
+    if !disable_unsat_cores {
         return None;
     }
 
@@ -88,7 +88,7 @@ fn run_pdr_file(
     out_file: Option<&str>,
     disable_unsat_cores: bool,
 ) -> Option<(Context, TransitionSystem, ModelCheckResult)> {
-    if !solver.supports_get_unsat_assumptions() && !disable_unsat_cores {
+    if !disable_unsat_cores {
         return None;
     }
 

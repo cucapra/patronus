@@ -131,11 +131,10 @@ fn main() {
         ),
         ModelCheckEngine::Pdr => {
             // Automatically disable UNSAT core generalization if solver does not support `(get-unsat-assumptions)`
-            let disable_unsat_cores =
-                args.disable_unsat_cores || !solver.supports_get_unsat_assumptions();
+            let disable_unsat_cores = args.disable_unsat_cores || !solver.supports_check_assuming();
 
             // Print out message in verbose mode to remind client
-            if args.verbose && !solver.supports_get_unsat_assumptions() {
+            if args.verbose && !solver.supports_check_assuming() {
                 eprintln!(
                     "{} does not support `(get-unsat-assumptions)`; disabling UNSAT core generalization...",
                     solver.name()
