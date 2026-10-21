@@ -12,10 +12,16 @@ use compiler::*;
 use cranelift::module::ModuleError;
 use patronus::expr::{self, *};
 use patronus::system::*;
+<<<<<<< HEAD
 use rustc_hash::FxHashSet;
 use slot_new::*;
 use std::cell::{Cell, Ref, RefCell};
 use std::ops::Index;
+=======
+use rustc_hash::{FxHashMap, FxHashSet};
+use slot_new::*;
+use std::cell::{Cell, RefCell};
+>>>>>>> a3b17debde7669d0fa51defd26cba7ffaccc9ca7
 use std::sync::LazyLock;
 
 type JITResult<T> = Result<T, JITError>;
@@ -37,8 +43,14 @@ static CRANELIFT_FLAGS: LazyLock<Option<String>> =
     LazyLock::new(|| std::env::var("CRANELIFT_FLAGS").ok());
 struct JITBackend {
     compiler: JITCompiler,
+<<<<<<< HEAD
     compiled_transition_sys: Option<EvalFun>,
     out_exprs_fun: Option<EvalFun>,
+=======
+    compiled_transition_sys: Option<EvalBatchedExprWithUpdate>,
+    compiled_expr_eval: FxHashMap<ExprRef, EvalBatchedExprWithUpdate>,
+    compiled_output_exprs_batched_update: Option<EvalBatchedExprWithUpdate>,
+>>>>>>> a3b17debde7669d0fa51defd26cba7ffaccc9ca7
 }
 
 impl JITBackend {
@@ -46,14 +58,59 @@ impl JITBackend {
         Self {
             compiler: JITCompiler::new(flags),
             compiled_transition_sys: None,
+<<<<<<< HEAD
             out_exprs_fun: None,
         }
     }
 
+=======
+            compiled_expr_eval: FxHashMap::default(),
+            compiled_output_exprs_batched_update: None,
+        }
+    }
+
+    fn eval_expr_with_output_slot(
+        &mut self,
+        expr: ExprRef,
+        ctx: &expr::Context,
+        input_state_buffer: &StateBuf,
+        entry: &mut u64,
+    ) {
+        let eval_fn = self.compiled_expr_eval.entry(expr).or_insert_with(|| {
+            println!("compiling {}", expr.serialize_to_str(ctx));
+            self.compiler
+                .compile_batched_expr_eval(
+                    ctx,
+                    &[expr],
+                    input_state_buffer,
+                    &mut StateBuf::new_singleton(ctx, expr),
+                )
+                .unwrap_or_else(|err| panic!("fail to compile: `{:?}` due to {:?}", ctx[expr], err))
+        });
+        // println!("evaluating {}", expr.serialize_to_str(ctx));
+        // SAFETY: jit compiler has not been dropped
+        unsafe {
+            eval_fn.call(input_state_buffer.as_slice(), std::slice::from_mut(entry));
+        }
+    }
+
+    fn eval_expr(
+        &mut self,
+        expr: ExprRef,
+        ctx: &expr::Context,
+        input_state_buffer: &StateBuf,
+    ) -> BitVecValue {
+        let mut out_dest: u64 = 0;
+        self.eval_expr_with_output_slot(expr, ctx, input_state_buffer, &mut out_dest);
+        BitVecValue::from_u64(out_dest, expr.get_bv_type(ctx).unwrap())
+    }
+
+>>>>>>> a3b17debde7669d0fa51defd26cba7ffaccc9ca7
     fn batched_eval_output_exprs(
         &mut self,
         ctx: &expr::Context,
         output_exprs: &[ExprRef],
+<<<<<<< HEAD
         state_buf: &mut StateBuf,
     ) {
         let eval_fn = self.out_exprs_fun.get_or_insert_with(|| {
@@ -69,25 +126,68 @@ impl JITBackend {
                     panic!("fail to compiled batched output exprs update, due to {err:?}")
                 })
         });
+=======
+        input_state_buffer: &StateBuf,
+        output_state_buffer: &mut StateBuf,
+    ) {
+        let eval_fn = self
+            .compiled_output_exprs_batched_update
+            .get_or_insert_with(|| {
+                // print!("batch compile:");
+                // for e in output_exprs {
+                //     print!("{}", e.serialize_to_str(ctx));
+                // }
+                // println!();
+
+                self.compiler
+                    .compile_batched_expr_eval(
+                        ctx,
+                        output_exprs,
+                        input_state_buffer,
+                        output_state_buffer,
+                    )
+                    .unwrap_or_else(|err| {
+                        panic!("fail to compiled batched output exprs update, due to {err:?}")
+                    })
+            });
+>>>>>>> a3b17debde7669d0fa51defd26cba7ffaccc9ca7
         // print!("batch:");
         // for e in output_exprs {
         //     print!("{}", e.serialize_to_str(ctx));
         // }
         // println!();
+<<<<<<< HEAD
         unsafe { eval_fn.call(state_buf.as_mut_slice()) }
+=======
+        unsafe {
+            eval_fn.call(
+                input_state_buffer.as_slice(),
+                output_state_buffer.as_mut_slice(),
+            )
+        }
+>>>>>>> a3b17debde7669d0fa51defd26cba7ffaccc9ca7
     }
 
     fn step_transition_sys(
         &mut self,
         ctx: &expr::Context,
         sys: &TransitionSystem,
+<<<<<<< HEAD
         state_buf: &mut StateBuf,
+=======
+        input_state_buffer: &StateBuf,
+        output_state_buffer: &mut StateBuf,
+>>>>>>> a3b17debde7669d0fa51defd26cba7ffaccc9ca7
     ) {
         // attempt compilation if transition sys has not been compiled yet, or otherwise use the existing result
         let eval_fn = self.compiled_transition_sys.get_or_insert_with(|| {
             // println!("compiling transition sys");
             self.compiler
+<<<<<<< HEAD
                 .compile_transition_sys(ctx, sys, state_buf, state_buf)
+=======
+                .compile_transition_sys(ctx, sys, input_state_buffer, &*output_state_buffer)
+>>>>>>> a3b17debde7669d0fa51defd26cba7ffaccc9ca7
                 .unwrap_or_else(|err| {
                     panic!("fail to compile transition step function, due to {err:?}")
                 })
@@ -95,12 +195,29 @@ impl JITBackend {
         // println!("evaluating transition sys");
 
         // SAFETY: jit compiler has not been dropped
+<<<<<<< HEAD
         unsafe { eval_fn.call(state_buf.as_mut_slice()) }
+=======
+        unsafe {
+            eval_fn.call(
+                input_state_buffer.as_slice(),
+                output_state_buffer.as_mut_slice(),
+            )
+        }
+>>>>>>> a3b17debde7669d0fa51defd26cba7ffaccc9ca7
     }
 }
 
 pub struct JITEngine<'expr> {
+<<<<<<< HEAD
     in_state: RefCell<StateBuf>,
+=======
+    in_state: StateBuf,
+    out_state: StateBuf,
+    // state: JITState,
+    /// Value placeholders for output expressions, including `output`, `bad` and `constraint`
+    output_ledge: RefCell<StateBuf>,
+>>>>>>> a3b17debde7669d0fa51defd26cba7ffaccc9ca7
     output_exprs: Vec<ExprRef>,
     ctx: &'expr expr::Context,
     sys: &'expr TransitionSystem,
@@ -151,7 +268,6 @@ impl<'expr> JITEngine<'expr> {
         self.backend.borrow_mut().step_transition_sys(
             self.ctx,
             self.sys,
-            &mut self.in_state.borrow_mut(),
         );
         self.output_up_to_date.set(false);
     }
