@@ -2,6 +2,8 @@
 // released under BSD 3-Clause License
 // author: Willow Ge <lg634@cornell.edu>
 
+use std::cell::Ref;
+
 use baa::BitVecValue;
 use patronus::expr::{self, TypeCheck};
 use rustc_hash::FxHashMap;
@@ -60,5 +62,17 @@ impl StateBuf {
         let offset = self.offset_query(expr).unwrap();
         let dtype = self.types[offset];
         BitVecValue::from_u64(self.data[offset], dtype.get_bit_vector_width().unwrap())
+    }
+}
+
+impl patronus::expr::GetExprValue for StateBuf {
+    fn get_bv(&self, _ctx: &expr::Context, symbol: expr::ExprRef) -> Option<BitVecValue> {
+        if self.contains(symbol) {
+            return Some(self.get_slot(symbol));
+        }
+        None
+    }
+    fn get_array(&self, _ctx: &expr::Context, _symbol: expr::ExprRef) -> Option<baa::ArrayValue> {
+        panic!("arrays are unsupported")
     }
 }

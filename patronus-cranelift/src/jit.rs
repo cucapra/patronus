@@ -14,7 +14,7 @@ use patronus::expr::{self, *};
 use patronus::system::*;
 use rustc_hash::FxHashSet;
 use slot_new::*;
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, Ref, RefCell};
 use std::ops::Index;
 use std::sync::LazyLock;
 
@@ -181,12 +181,23 @@ impl patronus::sim::Simulator for JITEngine<'_> {
         for state in &self.sys.states {
             if let Some(init) = state.init {
                 let backing_ex = self.ctx.index(init);
-                let Expr::BVLiteral(b) = backing_ex else {
-                    panic!("backing expression is non-trivial. unimplemented")
-                };
-                let v = b.get(self.ctx);
                 let offset = self.in_state.borrow().offset_query(state.symbol).unwrap();
-                self.in_state.borrow_mut().set_slot(offset, v.words());
+
+                match backing_ex {
+                    Expr::BVLiteral(b) => {
+                        let r = b.get(self.ctx);
+                        self.in_state.borrow_mut().set_slot(offset, r.words());
+                    }
+                    _ => {
+                        let state_ref = self.in_state.get_mut();
+                        let res = eval_expr(self.ctx, state_ref, init);
+                        if let Value::BitVec(i) = res {
+                            self.in_state.borrow_mut().set_slot(offset, i.words())
+                        } else {
+                            panic!("got array out of evaluation")
+                        }
+                    }
+                };
             }
         }
         self.output_up_to_date.set(false);
@@ -217,8 +228,9 @@ impl patronus::sim::Simulator for JITEngine<'_> {
         } else if self.in_state.borrow().contains(expr) {
             baa::Value::BitVec(self.in_state.borrow().get_slot(expr))
         } else {
-            let backing_ex = self.ctx.index(expr);
-            panic!("can't get value for {:?}", backing_ex)
+            // NOTE: this is extremely dumb, but is the only way i could find to work around the refcell containing InState
+            let state_ref = self.in_state.borrow().clone();
+            eval_expr(self.ctx, &state_ref, expr)
         }
     }
 
