@@ -977,7 +977,7 @@ mod tests {
         assert!(core.contains(&eq3));
         assert!(core.contains(&eq4));
 
-        // Check that (not __solver_act_0) was deactivated
+        // Check that (not __solver_act_0) was asserted (i.e. the activation literal was deactivated)
         let act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}0").as_str(), 1);
         solver.assert(&ctx, act).unwrap();
         let res = solver.check_sat().unwrap();
