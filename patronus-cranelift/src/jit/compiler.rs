@@ -23,13 +23,16 @@ pub(super) struct JITCompiler {
     module: JITModule,
 }
 
-pub(super) struct EvalBatchedExprWithUpdate(extern "C" fn(*const u64, *mut u64));
+// a function that evaluates a certain set of expressions
+// the pointer argument points to a u64 array containing the state data for the design under simulation.
+// this is usually given by StateBuf.as_mut_slice()
+pub(super) struct EvalFun(extern "C" fn(*mut u64));
 
-impl EvalBatchedExprWithUpdate {
+impl EvalFun {
     /// # Safety
     /// caller should guarantee the memory allocated for compiled code has not been reclaimed
-    pub(super) unsafe fn call(&self, current_states: &[u64], next_states: &mut [u64]) {
-        (self.0)(current_states.as_ptr(), next_states.as_mut_ptr())
+    pub(super) unsafe fn call(&self, state_ptr: &mut [u64]) {
+        (self.0)(state_ptr.as_mut_ptr())
     }
 }
 
@@ -69,7 +72,7 @@ impl JITCompiler {
         sys: &TransitionSystem,
         input_state_buffer: &StateBuf,
         output_state_buffer: &StateBuf,
-    ) -> JITResult<EvalBatchedExprWithUpdate> {
+    ) -> JITResult<EvalFun> {
         let (next_expr_batch, states_expr): (Vec<_>, Vec<_>) = sys
             .states
             .iter()
@@ -83,11 +86,10 @@ impl JITCompiler {
         &mut self,
         expr_ctx: &expr::Context,
         expr_batch: &[expr::ExprRef],
-        input_state_buffer: &StateBuf,
-        output_ledge: &mut StateBuf,
-    ) -> JITResult<EvalBatchedExprWithUpdate> {
-        let slot_offset = output_ledge.batch_offsets(expr_batch);
-        self.compile_expr_batch(expr_ctx, expr_batch, input_state_buffer, &slot_offset)
+        state: &mut StateBuf,
+    ) -> JITResult<EvalFun> {
+        let slot_offset = state.batch_offsets(expr_batch);
+        self.compile_expr_batch(expr_ctx, expr_batch, state, &slot_offset)
     }
 
     pub(super) fn compile_expr_batch(
@@ -96,31 +98,13 @@ impl JITCompiler {
         expr_batch: &[expr::ExprRef],
         input_state_buffer: &StateBuf,
         out_offsets: &[usize],
-    ) -> JITResult<EvalBatchedExprWithUpdate> {
+    ) -> JITResult<EvalFun> {
         assert_eq!(expr_batch.len(), out_offsets.len());
         let sig = Signature {
             params: vec![AbiParam::new(types::I64), AbiParam::new(types::I64)],
             returns: vec![],
             call_conv: isa::CallConv::SystemV,
         };
-        self.enter_compile_ctx_with(sig, expr_ctx, expr_batch, input_state_buffer, out_offsets)
-            .map(|address| unsafe {
-                // SAFETY: upheld by the unsafeness of call method
-                EvalBatchedExprWithUpdate(std::mem::transmute::<
-                    *const u8,
-                    extern "C" fn(*const u64, *mut u64),
-                >(address))
-            })
-    }
-
-    fn enter_compile_ctx_with(
-        &mut self,
-        sig: Signature,
-        expr_ctx: &expr::Context,
-        expr_batch: &[expr::ExprRef],
-        input_state_buffer: &StateBuf,
-        out_offsets: &[usize],
-    ) -> JITResult<*const u8> {
         let mut cranelift_ctx = self.module.make_context();
         cranelift_ctx.func.signature = sig;
 
@@ -156,20 +140,22 @@ impl JITCompiler {
             expr.for_each_child(|child| {
                 arguments.push(evaluated[child]);
             });
-            evaluated.insert(e, codegen_ctx.expr_codegen(e, expr_ctx, &arguments));
+            let r = codegen_ctx.expr_codegen(e, expr_ctx, &arguments);
+            // println!("{:?}", r);
+            evaluated.insert(e, r);
             arguments.clear();
         }
         // now, write outputs to the output location
-        let ret: Vec<_> = expr_batch.iter().map(|e| evaluated[e]).collect();
         for (idx, expr) in expr_batch.iter().enumerate() {
             let t = expr.get_type(expr_ctx);
-            let loc = ret[idx];
+            let loc = evaluated[expr];
             let offset = out_offsets[idx] as u32;
             codegen_ctx.output_state(t, loc, offset);
         }
         codegen_ctx.fn_builder.ins().return_(&[]);
         codegen_ctx.fn_builder.finalize();
 
+        // println!("{}", cranelift_ctx.func);
         // println!("BEGIN FUNC\n {} \n \n", cranelift_ctx.func);
 
         let function_id = self
@@ -180,7 +166,15 @@ impl JITCompiler {
         self.module.clear_context(&mut cranelift_ctx);
         self.module.finalize_definitions()?;
 
-        Ok(self.module.get_finalized_function(function_id))
+        let fn_addr = self.module.get_finalized_function(function_id);
+
+        let res = unsafe {
+            // SAFETY: upheld by the unsafeness of call method
+            EvalFun(std::mem::transmute::<*const u8, extern "C" fn(*mut u64)>(
+                fn_addr,
+            ))
+        };
+        Ok(res)
     }
 }
 
@@ -238,6 +232,7 @@ impl CodeGenContext<'_, '_> {
         use bv_codegen::*;
         use expr::Expr;
         let b = &mut self.fn_builder;
+        // println!("generating code for {:?} {:?}", expr_ctx[expr], args);
 
         match expr_ctx[expr] {
             Expr::BVSymbol { .. } => self.load_input_state(expr, expr_ctx),
@@ -252,7 +247,10 @@ impl CodeGenContext<'_, '_> {
             // unary, includes source and dest width
             Expr::BVZeroExt { by, width, .. } => zero_extend(b, args[0], by, width),
             Expr::BVSignExt { by, width, .. } => sign_extend(b, args[0], by, width),
-            Expr::BVSlice { hi, lo, .. } => slice(b, args[0], hi, lo),
+            Expr::BVSlice { hi, lo, e } => {
+                let v = e.get_bv_type(expr_ctx).unwrap();
+                slice(b, args[0], hi, lo, v)
+            }
 
             // binary which don't require width
             Expr::BVEqual(..) => b.ins().icmp(IntCC::Equal, args[0], args[1]),
