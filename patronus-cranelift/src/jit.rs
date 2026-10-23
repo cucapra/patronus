@@ -90,7 +90,7 @@ impl JITBackend {
             self.compiler
                 .compile_transition_sys(ctx, sys, state_buf, state_buf)
                 .unwrap_or_else(|err| {
-                    panic!("fail to compile transition step function, due to {err:?}")
+                    panic!("fail to compile transition step function, due to {err:#?}")
                 })
         });
         // println!("evaluating transition sys");

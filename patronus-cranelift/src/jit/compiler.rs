@@ -24,6 +24,8 @@ pub(super) struct JITCompiler {
 }
 
 // a function that evaluates a certain set of expressions
+// the pointer argument points to a u64 array containing the state data for the design under simulation.
+// this is usually given by StateBuf.as_mut_slice()
 pub(super) struct EvalFun(extern "C" fn(*mut u64));
 
 impl EvalFun {
@@ -138,7 +140,9 @@ impl JITCompiler {
             expr.for_each_child(|child| {
                 arguments.push(evaluated[child]);
             });
-            evaluated.insert(e, codegen_ctx.expr_codegen(e, expr_ctx, &arguments));
+            let r = codegen_ctx.expr_codegen(e, expr_ctx, &arguments);
+            // println!("{:?}", r);
+            evaluated.insert(e, r);
             arguments.clear();
         }
         // now, write outputs to the output location
@@ -151,6 +155,7 @@ impl JITCompiler {
         codegen_ctx.fn_builder.ins().return_(&[]);
         codegen_ctx.fn_builder.finalize();
 
+        // println!("{}", cranelift_ctx.func);
         // println!("BEGIN FUNC\n {} \n \n", cranelift_ctx.func);
 
         let function_id = self
@@ -227,6 +232,7 @@ impl CodeGenContext<'_, '_> {
         use bv_codegen::*;
         use expr::Expr;
         let b = &mut self.fn_builder;
+        // println!("generating code for {:?} {:?}", expr_ctx[expr], args);
 
         match expr_ctx[expr] {
             Expr::BVSymbol { .. } => self.load_input_state(expr, expr_ctx),
@@ -241,7 +247,10 @@ impl CodeGenContext<'_, '_> {
             // unary, includes source and dest width
             Expr::BVZeroExt { by, width, .. } => zero_extend(b, args[0], by, width),
             Expr::BVSignExt { by, width, .. } => sign_extend(b, args[0], by, width),
-            Expr::BVSlice { hi, lo, .. } => slice(b, args[0], hi, lo),
+            Expr::BVSlice { hi, lo, e } => {
+                let v = e.get_bv_type(expr_ctx).unwrap();
+                slice(b, args[0], hi, lo, v)
+            }
 
             // binary which don't require width
             Expr::BVEqual(..) => b.ins().icmp(IntCC::Equal, args[0], args[1]),

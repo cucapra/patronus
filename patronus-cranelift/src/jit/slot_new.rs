@@ -2,8 +2,6 @@
 // released under BSD 3-Clause License
 // author: Willow Ge <lg634@cornell.edu>
 
-use std::cell::Ref;
-
 use baa::BitVecValue;
 use patronus::expr::{self, TypeCheck};
 use rustc_hash::FxHashMap;
@@ -31,7 +29,9 @@ impl StateBuf {
     pub fn init(&mut self, g: &mut patronus::sim::InitValueGenerator) {
         for (idx, slot) in &mut self.data.iter_mut().enumerate() {
             let init_value = g.generate(self.types[idx]);
-            *slot = init_value.try_into_u64().unwrap();
+            *slot = init_value
+                .try_into_u64()
+                .expect("can't express a value as u64");
         }
     }
 
