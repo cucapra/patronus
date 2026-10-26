@@ -313,9 +313,20 @@ impl SmtLibSolverCtx {
     }
 
     /// Reset state associated with solver-generated activation literals
-    fn clear_act_lits(&mut self) {
+    /// and disable stale activation literals (if [`Context`] is provided)
+    fn clear_act_lits(&mut self, ctx: Option<&mut Context>) -> Result<()> {
+        // Check if `Context` was provided and disable activation literals if so
+        if let Some(ctx) = ctx {
+            let act_lits: Vec<ExprRef> = self.expr_map.keys().copied().collect();
+            for act in act_lits {
+                let neg_act = ctx.not(act);
+                self.assert(ctx, neg_act)?;
+            }
+        }
+
         self.expr_map.clear();
         self.last_assuming_query_unsat = false;
+        Ok(())
     }
 }
 
@@ -389,8 +400,7 @@ impl SolverContext for SmtLibSolverCtx {
             self.write_cmd(None, &SmtCommand::SetOption(option, "true".to_string()))?;
         }
         self.symbols = vec![SymbolTable::default()];
-        self.clear_act_lits();
-        Ok(())
+        self.clear_act_lits(None)
     }
 
     fn set_logic(&mut self, logic: Logic) -> Result<()> {
@@ -436,7 +446,7 @@ impl SolverContext for SmtLibSolverCtx {
         // then we need to check for compound formulas and abstract them as activation literals
         let fin_props = if !self.supports_check_assuming_exprs() {
             // Always reset activation literal state from last `check_sat_assuming`
-            self.clear_act_lits();
+            self.clear_act_lits(Some(ctx))?;
 
             let mut fin_props: Vec<ExprRef> = vec![];
             for prop in props {
@@ -470,27 +480,27 @@ impl SolverContext for SmtLibSolverCtx {
     }
 
     fn check_sat(&mut self) -> Result<CheckSatResponse> {
+        self.clear_act_lits(None)?;
         self.write_cmd(None, &SmtCommand::CheckSat)?;
         let res = self.read_sat_response()?;
-        self.clear_act_lits();
         Ok(res)
     }
 
     fn push(&mut self) -> Result<()> {
+        self.clear_act_lits(None)?;
         self.write_cmd(None, &SmtCommand::Push(1))?;
         // Add new symbol table for context
         self.symbols.push(SymbolTable::default());
-        self.clear_act_lits();
         self.stack_depth += 1;
         Ok(())
     }
 
     fn pop(&mut self) -> Result<()> {
         if self.stack_depth > 0 {
+            self.clear_act_lits(None)?;
             self.write_cmd(None, &SmtCommand::Pop(1))?;
             // Remove symbol table from old context
             self.symbols.pop();
-            self.clear_act_lits();
             self.stack_depth -= 1;
             Ok(())
         } else {
@@ -544,7 +554,7 @@ impl SolverContext for SmtLibSolverCtx {
         }
 
         // Reset activation literal state for next `(check-sat-assuming)`
-        self.clear_act_lits();
+        self.clear_act_lits(Some(ctx))?;
         Ok(core)
     }
 }
@@ -940,5 +950,37 @@ mod tests {
         let _res = solver.check_sat().unwrap();
         let value_of_a = solver.get_value(&mut ctx, a).unwrap();
         assert_eq!(value_of_a, four);
+    }
+
+    #[test]
+    fn test_act_lit_disable_basic() {
+        let mut solver = solver_from_env().start(None).unwrap();
+        if solver.supports_check_assuming_exprs() {
+            // Activation literal only apply to solvers that _do not_
+            // support compound formula assumptions
+            return;
+        }
+
+        let mut ctx = Context::default();
+        let a = ctx.bv_symbol("a", 3);
+        let eq3 = ctx.build(|c| c.equal(a, c.bit_vec_val(3, 3)));
+        let eq4 = ctx.build(|c| c.equal(a, c.bit_vec_val(4, 3)));
+
+        solver.set_logic(Logic::QfBv).unwrap();
+        solver.declare_const(&ctx, a).unwrap();
+
+        let res = solver.check_sat_assuming(&mut ctx, [eq3, eq4]).unwrap();
+        assert_eq!(res, CheckSatResponse::Unsat);
+
+        let core = solver.get_unsat_assumptions(&mut ctx).unwrap();
+        assert_eq!(core.len(), 2);
+        assert!(core.contains(&eq3));
+        assert!(core.contains(&eq4));
+
+        // Check that (not __solver_act_0) was asserted (i.e. the activation literal was deactivated)
+        let act = ctx.bv_symbol(format!("{ACT_LIT_PREFIX}0").as_str(), 1);
+        solver.assert(&ctx, act).unwrap();
+        let res = solver.check_sat().unwrap();
+        assert!(matches!(res, CheckSatResponse::Unsat));
     }
 }

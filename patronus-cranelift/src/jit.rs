@@ -95,7 +95,6 @@ impl JITBackend {
 }
 
 pub struct JITEngine<'expr> {
-    // output_exprs: Vec<ExprRef>,
     ctx: &'expr expr::Context,
     sys: &'expr TransitionSystem,
     /// Interior mutability for lazy compilation triggered by `Simulator::get`
@@ -120,7 +119,6 @@ impl<'expr> JITEngine<'expr> {
 
     fn step_transition_sys(&mut self) {
         self.backend.borrow_mut().step_transition_sys();
-
         self.output_up_to_date.set(false);
     }
 
