@@ -9,6 +9,7 @@ use patronus::expr::*;
 use patronus::sim::*;
 use patronus::system::*;
 use patronus::*;
+use patronus_cranelift::JITEngine;
 use rustc_hash::FxHashMap;
 use std::io::BufRead;
 
@@ -59,12 +60,26 @@ fn main() {
 
     // start execution
     let start_load = std::time::Instant::now();
-    let mut sim = if args.trace_instructions {
-        Interpreter::new_with_trace(&ctx, &sys)
-    } else {
-        Interpreter::new(&ctx, &sys)
-    };
 
+    if args.use_jit {
+        let mut e = JITEngine::new(&ctx, &sys);
+        do_sim(&mut e, args, start_load, &ctx, &sys);
+    } else {
+        if args.trace_instructions {
+            Interpreter::new_with_trace(&ctx, &sys)
+        } else {
+            Interpreter::new(&ctx, &sys)
+        };
+    }
+}
+
+fn do_sim(
+    sim: &mut impl Simulator,
+    args: Args,
+    start_time: std::time::Instant,
+    ctx: &Context,
+    sys: &TransitionSystem,
+) {
     if args.show_programs {
         println!("The interpreter no longer compiles to an internal program representation");
         //sim.print_programs();
@@ -78,7 +93,7 @@ fn main() {
             sim.init(InitKind::Random(123));
         }
     }
-    let delta_load = std::time::Instant::now() - start_load;
+    let delta_load = std::time::Instant::now() - start_time;
     println!("Loaded the design into the interpreter in {:?}", delta_load);
 
     let testbench_file = match args.testbench {
@@ -115,14 +130,7 @@ fn main() {
 
     let start_exec = std::time::Instant::now();
     for (step_id, line) in tb.lines().flatten().enumerate() {
-        do_step(
-            step_id,
-            &mut sim,
-            &line,
-            &inputs,
-            &outputs,
-            &signals_to_print,
-        );
+        do_step(step_id, sim, &line, &inputs, &outputs, &signals_to_print);
     }
     let delta_exec = std::time::Instant::now() - start_exec;
     println!("Executed {} steps in {:?}", sim.step_count(), delta_exec);

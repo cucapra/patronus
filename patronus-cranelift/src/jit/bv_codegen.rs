@@ -81,11 +81,11 @@ pub fn negate(b: &mut FunctionBuilder, arg: Value, width: WidthInt) -> Value {
 }
 
 pub fn zero_extend(b: &mut FunctionBuilder, arg: Value, by: WidthInt, width: WidthInt) -> Value {
-    extend_to_fit(b, arg, width, width + by)
+    extend_to_fit(b, arg, width - by, width)
 }
 pub fn sign_extend(b: &mut FunctionBuilder, arg: Value, by: WidthInt, width: WidthInt) -> Value {
-    let mut ret = extend_to_fit(b, arg, width, width + by);
-    let num_leading_zeros = select_container_primitive(by + width).bytes() * 8 - width;
+    let mut ret = extend_to_fit(b, arg, width - by, width);
+    let num_leading_zeros = select_container_primitive(width).bytes() * 8 - width;
     if num_leading_zeros != 0 {
         let shifted = b.ins().ishl_imm(ret, num_leading_zeros as i64);
         ret = b.ins().sshr_imm(shifted, num_leading_zeros as i64);
@@ -127,9 +127,23 @@ pub fn concat(
     b.ins().bor(hi, lo)
 }
 
-pub fn slice(b: &mut FunctionBuilder, value: Value, hi: WidthInt, lo: WidthInt) -> Value {
+pub fn slice(
+    b: &mut FunctionBuilder,
+    value: Value,
+    hi: WidthInt,
+    lo: WidthInt,
+    tot_width: WidthInt,
+) -> Value {
     let shifted = b.ins().ushr_imm(value, lo as i64);
-    mask(b, shifted, hi - lo + 1)
+    let tmp = mask(b, shifted, hi - lo + 1);
+
+    let orig_t = select_container_primitive(tot_width);
+    let new_t = select_container_primitive(hi - lo + 1);
+    if !orig_t.eq(&new_t) {
+        b.ins().ireduce(new_t, tmp)
+    } else {
+        tmp // no need to reduce
+    }
 }
 pub fn implies(b: &mut FunctionBuilder, lhs: Value, rhs: Value, width: WidthInt) -> Value {
     let lhs = b.ins().bnot(lhs);
