@@ -20,6 +20,7 @@ regex = "1.12.4"
 boolean_expression = "0.4.4"
 clap =  { version = "4.*", features = ["derive"] }
 patronus = {path = "patronus"}
+patronus-cranelift = {path = "patronus-cranelift"}
 thiserror = "2.0.18"
 rand = { version = "0.10", features = [] }
 

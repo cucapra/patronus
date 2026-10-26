@@ -11,6 +11,7 @@ rust-version.workspace = true
 
 [dependencies]
 patronus.workspace = true
+patronus-cranelift.workspace = true
 clap.workspace = true
 rustc-hash.workspace = true
 baa.workspace = true

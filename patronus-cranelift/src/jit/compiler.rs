@@ -32,6 +32,7 @@ impl EvalFun {
     /// # Safety
     /// caller should guarantee the memory allocated for compiled code has not been reclaimed
     pub(super) unsafe fn call(&self, state_ptr: &mut [u64]) {
+        // println!("calling {:?} with {:?}", self.0, state_ptr.as_mut_ptr());
         (self.0)(state_ptr.as_mut_ptr())
     }
 }
@@ -101,7 +102,7 @@ impl JITCompiler {
     ) -> JITResult<EvalFun> {
         assert_eq!(expr_batch.len(), out_offsets.len());
         let sig = Signature {
-            params: vec![AbiParam::new(types::I64), AbiParam::new(types::I64)],
+            params: vec![AbiParam::new(types::I64)],
             returns: vec![],
             call_conv: isa::CallConv::SystemV,
         };
@@ -118,7 +119,7 @@ impl JITCompiler {
 
         let entry_params = fn_builder.block_params(entry_block);
         let in_addr = entry_params[0];
-        let out_addr = entry_params[1];
+        let out_addr = entry_params[0];
 
         let mut codegen_ctx = CodeGenContext {
             fn_builder,
@@ -174,6 +175,7 @@ impl JITCompiler {
                 fn_addr,
             ))
         };
+        // println!("finished with compilation");
         Ok(res)
     }
 }

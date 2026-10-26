@@ -57,7 +57,7 @@ impl JITBackend {
         state_buf: &mut StateBuf,
     ) {
         let eval_fn = self.out_exprs_fun.get_or_insert_with(|| {
-            // print!("batch compile:");
+            print!("batch compile:");
             // for e in output_exprs {
             //     print!("{}", e.serialize_to_str(ctx));
             // }
@@ -86,11 +86,11 @@ impl JITBackend {
     ) {
         // attempt compilation if transition sys has not been compiled yet, or otherwise use the existing result
         let eval_fn = self.compiled_transition_sys.get_or_insert_with(|| {
-            // println!("compiling transition sys");
+            println!("compiling transition sys");
             self.compiler
                 .compile_transition_sys(ctx, sys, state_buf, state_buf)
                 .unwrap_or_else(|err| {
-                    panic!("fail to compile transition step function, due to {err:#?}")
+                    panic!("fail to compiled batched output exprs update, due to {err:?}")
                 })
         });
         // println!("evaluating transition sys");
@@ -154,6 +154,7 @@ impl<'expr> JITEngine<'expr> {
             self.sys,
             &mut self.in_state.borrow_mut(),
         );
+
         self.output_up_to_date.set(false);
     }
 
