@@ -36,14 +36,15 @@ impl From<ModuleError> for JITError {
 static CRANELIFT_FLAGS: LazyLock<Option<String>> =
     LazyLock::new(|| std::env::var("CRANELIFT_FLAGS").ok());
 
-struct JITBackend {
-    // compiler: JITCompiler,
+// the set of core 'things' necessary to simulate the btor design,
+// packaged into one structure to make interior mutability more convenient.
+struct SimAssets {
     transition_fun: EvalFun,
     output_fun: EvalFun,
     state_buf: StateBuf,
 }
 
-impl JITBackend {
+impl SimAssets {
     fn init_and_comp(flags: Option<&str>, ctx: &expr::Context, sys: &TransitionSystem) -> Self {
         let mut state_buf = StateBuf::default();
 
@@ -64,20 +65,28 @@ impl JITBackend {
                 .collect::<FxHashSet<_>>(),
         );
         state_buf.add_exprs(ctx, &output_exprs);
-        let mut compiler = JITCompiler::new(flags);
 
-        let output_fun = compiler
-            .compile_batched_expr_eval(ctx, &output_exprs, &mut state_buf)
+        /*
+            a note on memory management:
+
+            JITCompiler contains a Box for the heap memory where compiled functions / data go. this should not be deallocated at runtime!
+
+            so far, the compiler is able to keep that memory alive until this struct goes out of scope. the documentation for cranelift JITModule's get_finalized_function reflects that: the pointer remains valid until JITModule::free_memory is called.
+
+            in case it mysteriously fails in the future, that's why
+        */
+        use compiler::module_helpers::*;
+
+        let mut jit_m = new_m(flags);
+        let output_fun = compile_expr_batch(&mut jit_m, ctx, &output_exprs, &mut state_buf)
             .unwrap_or_else(|err| {
                 panic!("fail to compiled batched output exprs update, due to {err:?}")
             });
-        let transition_fun = compiler
-            .compile_transition_sys(ctx, sys, &state_buf, &state_buf)
+        let transition_fun = compile_transition_sys(&mut jit_m, ctx, sys, &state_buf, &state_buf)
             .unwrap_or_else(|err| {
                 panic!("fail to compiled batched output exprs update, due to {err:?}")
             });
         Self {
-            // compiler,
             output_fun,
             transition_fun,
             state_buf,
@@ -98,7 +107,7 @@ pub struct JITEngine<'expr> {
     ctx: &'expr expr::Context,
     sys: &'expr TransitionSystem,
     /// Interior mutability for lazy compilation triggered by `Simulator::get`
-    backend: RefCell<JITBackend>,
+    backend: RefCell<SimAssets>,
     step_count: u64,
     snapshots: Vec<StateBuf>,
     output_up_to_date: Cell<bool>,
@@ -106,7 +115,7 @@ pub struct JITEngine<'expr> {
 
 impl<'expr> JITEngine<'expr> {
     pub fn new(ctx: &'expr expr::Context, sys: &'expr TransitionSystem) -> JITEngine<'expr> {
-        let back = JITBackend::init_and_comp(CRANELIFT_FLAGS.as_deref(), ctx, sys);
+        let back = SimAssets::init_and_comp(CRANELIFT_FLAGS.as_deref(), ctx, sys);
         Self {
             backend: RefCell::new(back),
             ctx,
