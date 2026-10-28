@@ -69,11 +69,11 @@ impl SimAssets {
         /*
             a note on memory management:
 
-            JITCompiler contains a Box for the heap memory where compiled functions / data go. this should not be deallocated at runtime!
+            cranelift's JITModule boxes the heap memory where compiled functions / data go. Function pointers obtained using `get_finalized_function` (like the `compile_*` functions do) point to this heap space.
 
-            so far, the compiler is able to keep that memory alive until this struct goes out of scope. the documentation for cranelift JITModule's get_finalized_function reflects that: the pointer remains valid until JITModule::free_memory is called.
+            at time of writing, the Rust compiler is able to keep those pointers valid even though the surrounding JITModule is dropped.
 
-            in case it mysteriously fails in the future, that's why
+            the cranelift documentation says that the heap memory used by a JITModule is only freed with an explicit call to `JITModule::free_memory`. we don't call this anywhere, so the memory currently leaks.
         */
         use compiler::module_helpers::*;
 
