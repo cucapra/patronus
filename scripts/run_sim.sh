@@ -41,7 +41,7 @@ function run_tests() {
 
 
 
-if [ $1 = "jit" ]; then
+if [ "$1" = "jit" ]; then
   args="--use-jit"
   run_tests JIT args
 else
