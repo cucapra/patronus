@@ -35,86 +35,18 @@ impl From<ModuleError> for JITError {
 /// This should be a colon separated key value pair joined by comma.
 static CRANELIFT_FLAGS: LazyLock<Option<String>> =
     LazyLock::new(|| std::env::var("CRANELIFT_FLAGS").ok());
-struct JITBackend {
-    compiler: JITCompiler,
-    compiled_transition_sys: Option<EvalFun>,
-    out_exprs_fun: Option<EvalFun>,
+
+// the set of core 'things' necessary to simulate the btor design,
+// packaged into one structure to make interior mutability more convenient.
+struct SimAssets {
+    transition_fun: EvalFun,
+    output_fun: EvalFun,
+    state_buf: StateBuf,
 }
 
-impl JITBackend {
-    fn with_compiler_flags(flags: Option<&str>) -> Self {
-        Self {
-            compiler: JITCompiler::new(flags),
-            compiled_transition_sys: None,
-            out_exprs_fun: None,
-        }
-    }
-
-    fn batched_eval_output_exprs(
-        &mut self,
-        ctx: &expr::Context,
-        output_exprs: &[ExprRef],
-        state_buf: &mut StateBuf,
-    ) {
-        let eval_fn = self.out_exprs_fun.get_or_insert_with(|| {
-            print!("batch compile:");
-            // for e in output_exprs {
-            //     print!("{}", e.serialize_to_str(ctx));
-            // }
-            // println!();
-
-            self.compiler
-                .compile_batched_expr_eval(ctx, output_exprs, state_buf)
-                .unwrap_or_else(|err| {
-                    panic!("fail to compiled batched output exprs update, due to {err:?}")
-                })
-        });
-        // print!("batch:");
-        // for e in output_exprs {
-        //     print!("{}", e.serialize_to_str(ctx));
-        // }
-        // println!();
-
-        unsafe { eval_fn.call(state_buf.as_mut_slice()) }
-    }
-
-    fn step_transition_sys(
-        &mut self,
-        ctx: &expr::Context,
-        sys: &TransitionSystem,
-        state_buf: &mut StateBuf,
-    ) {
-        // attempt compilation if transition sys has not been compiled yet, or otherwise use the existing result
-        let eval_fn = self.compiled_transition_sys.get_or_insert_with(|| {
-            println!("compiling transition sys");
-            self.compiler
-                .compile_transition_sys(ctx, sys, state_buf, state_buf)
-                .unwrap_or_else(|err| {
-                    panic!("fail to compiled batched output exprs update, due to {err:?}")
-                })
-        });
-        // println!("evaluating transition sys");
-
-        // SAFETY: jit compiler has not been dropped
-        unsafe { eval_fn.call(state_buf.as_mut_slice()) }
-    }
-}
-
-pub struct JITEngine<'expr> {
-    in_state: RefCell<StateBuf>,
-    output_exprs: Vec<ExprRef>,
-    ctx: &'expr expr::Context,
-    sys: &'expr TransitionSystem,
-    /// Interior mutability for lazy compilation triggered by `Simulator::get`
-    backend: RefCell<JITBackend>,
-    step_count: u64,
-    snapshots: Vec<StateBuf>,
-    output_up_to_date: Cell<bool>,
-}
-
-impl<'expr> JITEngine<'expr> {
-    pub fn new(ctx: &'expr expr::Context, sys: &'expr TransitionSystem) -> JITEngine<'expr> {
-        let mut in_state = StateBuf::default();
+impl SimAssets {
+    fn init_and_comp(flags: Option<&str>, ctx: &expr::Context, sys: &TransitionSystem) -> Self {
+        let mut state_buf = StateBuf::default();
 
         let base_exprs: Vec<_> = sys
             .states
@@ -122,7 +54,7 @@ impl<'expr> JITEngine<'expr> {
             .map(|s| s.symbol)
             .chain(sys.inputs.clone())
             .collect();
-        in_state.add_exprs(ctx, &base_exprs);
+        state_buf.add_exprs(ctx, &base_exprs);
 
         // create output ledger with associated offsets
         let output_exprs: Vec<_> = Vec::from_iter(
@@ -132,45 +64,87 @@ impl<'expr> JITEngine<'expr> {
                 .chain(sys.bad_states.iter().chain(&sys.constraints).copied())
                 .collect::<FxHashSet<_>>(),
         );
-        in_state.add_exprs(ctx, &output_exprs);
+        state_buf.add_exprs(ctx, &output_exprs);
 
-        let engine = Self {
-            backend: RefCell::new(JITBackend::with_compiler_flags(CRANELIFT_FLAGS.as_deref())),
-            in_state: RefCell::new(in_state),
-            output_exprs,
+        /*
+            a note on memory management:
+
+            cranelift's JITModule boxes the heap memory where compiled functions / data go. Function pointers obtained using `get_finalized_function` (like the `compile_*` functions do) point to this heap space.
+
+            at time of writing, the Rust compiler is able to keep those pointers valid even though the surrounding JITModule is dropped.
+
+            the cranelift documentation says that the heap memory used by a JITModule is only freed with an explicit call to `JITModule::free_memory`. we don't call this anywhere, so the memory currently leaks.
+        */
+        use compiler::module_helpers::*;
+
+        let mut jit_m = new_m(flags);
+        let output_fun = compile_expr_batch(&mut jit_m, ctx, &output_exprs, &mut state_buf)
+            .unwrap_or_else(|err| {
+                panic!("fail to compiled batched output exprs update, due to {err:?}")
+            });
+        let transition_fun = compile_transition_sys(&mut jit_m, ctx, sys, &state_buf, &state_buf)
+            .unwrap_or_else(|err| {
+                panic!("fail to compiled batched output exprs update, due to {err:?}")
+            });
+        Self {
+            output_fun,
+            transition_fun,
+            state_buf,
+        }
+    }
+
+    fn batched_eval_output_exprs(&mut self) {
+        unsafe { self.output_fun.call(self.state_buf.as_mut_slice()) }
+    }
+
+    fn step_transition_sys(&mut self) {
+        // SAFETY: jit compiler has not been dropped
+        unsafe { self.transition_fun.call(self.state_buf.as_mut_slice()) }
+    }
+}
+
+pub struct JITEngine<'expr> {
+    ctx: &'expr expr::Context,
+    sys: &'expr TransitionSystem,
+    /// Interior mutability for lazy compilation triggered by `Simulator::get`
+    backend: RefCell<SimAssets>,
+    step_count: u64,
+    snapshots: Vec<StateBuf>,
+    output_up_to_date: Cell<bool>,
+}
+
+impl<'expr> JITEngine<'expr> {
+    pub fn new(ctx: &'expr expr::Context, sys: &'expr TransitionSystem) -> JITEngine<'expr> {
+        let back = SimAssets::init_and_comp(CRANELIFT_FLAGS.as_deref(), ctx, sys);
+        Self {
+            backend: RefCell::new(back),
             ctx,
             sys,
             step_count: 0,
             snapshots: Vec::default(),
             output_up_to_date: Cell::new(false),
-        };
-
-        engine
+        }
     }
 
     fn step_transition_sys(&mut self) {
-        self.backend.borrow_mut().step_transition_sys(
-            self.ctx,
-            self.sys,
-            &mut self.in_state.borrow_mut(),
-        );
-
+        self.backend.borrow_mut().step_transition_sys();
         self.output_up_to_date.set(false);
     }
 
     fn try_fetch_from_latest_outputs(&self, expr: ExprRef) -> Option<baa::Value> {
-        if !self.in_state.borrow().contains(expr) {
-            return None;
+        {
+            let b = &self.backend.borrow().state_buf;
+            if !b.contains(expr) {
+                return None;
+            }
         }
+
         if !self.output_up_to_date.get() {
-            self.backend.borrow_mut().batched_eval_output_exprs(
-                self.ctx,
-                &self.output_exprs,
-                &mut self.in_state.borrow_mut(),
-            );
+            self.backend.borrow_mut().batched_eval_output_exprs();
             self.output_up_to_date.set(true);
         }
-        Some(baa::Value::BitVec(self.in_state.borrow().get_slot(expr)))
+        let b = &self.backend.borrow().state_buf;
+        Some(baa::Value::BitVec(b.get_slot(expr)))
     }
 }
 
@@ -178,23 +152,23 @@ impl patronus::sim::Simulator for JITEngine<'_> {
     type SnapshotId = u32;
     fn init(&mut self, kind: patronus::sim::InitKind) {
         let mut generator = patronus::sim::InitValueGenerator::from_kind(kind);
-        self.in_state.borrow_mut().init(&mut generator);
+        let state_r = &mut self.backend.borrow_mut().state_buf;
+        state_r.init(&mut generator);
 
         for state in &self.sys.states {
             if let Some(init) = state.init {
                 let backing_ex = self.ctx.index(init);
-                let offset = self.in_state.borrow().offset_query(state.symbol).unwrap();
+                let offset = state_r.offset_query(state.symbol).unwrap();
 
                 match backing_ex {
                     Expr::BVLiteral(b) => {
                         let r = b.get(self.ctx);
-                        self.in_state.borrow_mut().set_slot(offset, r.words());
+                        state_r.set_slot(offset, r.words());
                     }
                     _ => {
-                        let state_ref = self.in_state.get_mut();
-                        let res = eval_expr(self.ctx, state_ref, init);
+                        let res = eval_expr(self.ctx, state_r, init);
                         if let Value::BitVec(i) = res {
-                            self.in_state.borrow_mut().set_slot(offset, i.words())
+                            state_r.set_slot(offset, i.words())
                         } else {
                             panic!("got array out of evaluation")
                         }
@@ -215,8 +189,10 @@ impl patronus::sim::Simulator for JITEngine<'_> {
         // its change is reflected in both buffers.
 
         let vref = value.into();
-        let offset = self.in_state.borrow().offset_query(expr).unwrap();
-        self.in_state.borrow_mut().set_slot(offset, vref.words());
+        let state_r = &mut self.backend.borrow_mut().state_buf;
+
+        let offset = state_r.offset_query(expr).unwrap();
+        state_r.set_slot(offset, vref.words());
         self.output_up_to_date.set(false);
     }
 
@@ -227,12 +203,13 @@ impl patronus::sim::Simulator for JITEngine<'_> {
     fn get(&self, expr: ExprRef) -> baa::Value {
         if let Some(data) = self.try_fetch_from_latest_outputs(expr) {
             data
-        } else if self.in_state.borrow().contains(expr) {
-            baa::Value::BitVec(self.in_state.borrow().get_slot(expr))
         } else {
-            // NOTE: this is extremely dumb, but is the only way i could find to work around the refcell containing InState
-            let state_ref = self.in_state.borrow().clone();
-            eval_expr(self.ctx, &state_ref, expr)
+            let state_r = &self.backend.borrow().state_buf;
+            if state_r.contains(expr) {
+                baa::Value::BitVec(state_r.get_slot(expr))
+            } else {
+                eval_expr(self.ctx, state_r, expr)
+            }
         }
     }
 
@@ -242,11 +219,13 @@ impl patronus::sim::Simulator for JITEngine<'_> {
 
     fn take_snapshot(&mut self) -> Self::SnapshotId {
         let id = self.snapshots.len() as u32;
-        self.snapshots.push(self.in_state.borrow().clone());
+        let saved = self.backend.borrow().state_buf.clone();
+        self.snapshots.push(saved);
         id
     }
 
     fn restore_snapshot(&mut self, id: Self::SnapshotId) {
-        self.in_state.replace(self.snapshots[id as usize].clone());
+        let state_r = &mut self.backend.borrow_mut().state_buf;
+        *state_r = self.snapshots[id as usize].clone();
     }
 }

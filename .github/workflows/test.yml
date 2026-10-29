@@ -233,50 +233,28 @@ jobs:
       - uses: actions/checkout@v5
       - name: Build
         run: cargo build --verbose --release -p sim
-      - name: simulate mux
+      - name: run simulation script
         run: |
-          cargo run --release -p sim -- --testbench=inputs/repair/mux_4_1.original.tb.csv inputs/repair/mux_4_1.original.btor
-      # TODO: re-enable once we can parse large decimal input number
-      #- name: simulate sha3 (keccak)
-      #  run: |
-      #    cargo run --release -p sim -- --testbench=inputs/repair/keccak.original.tb.csv inputs/repair/keccak.original.btor
-      - name: simulate sdram controller
+          ./scripts/run_sim.sh
+
+  jit-sim:
+    name: Test JIT Simulator Tool
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        toolchain:
+          - stable
+
+    steps:
+      - name: Update Rust to ${{ matrix.toolchain }}
+        run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
+      - uses: actions/checkout@v5
+      - name: Build
+        run: cargo build --verbose --release -p sim
+      - name: run simulation script
         run: |
-          cargo run --release -p sim -- --testbench=inputs/repair/sdram_controller.original.tb.csv inputs/repair/sdram_controller.original.btor
-      - name: simulate i2c controller
-        run: |
-          cargo run --release -p sim -- --init=zero --testbench=inputs/repair/i2c_m.tb.csv inputs/repair/i2c_m.original.replace_literals.btor
-      - name: simulate axis fifo (d4)
-        run: |
-          cargo run --release -p sim -- --init=zero --testbench=inputs/repair/axis-fifo-wrapper.original.tb.csv inputs/repair/axis-fifo-wrapper.original.btor
-      - name: simulate axis adapter (s3)
-        run: |
-          cargo run --release -p sim -- --init=zero --testbench=inputs/repair/axis-adapter.original.tb.csv inputs/repair/axis-adapter.original.btor
-      - name: simulate axis frame len (d13)
-        run: |
-          cargo run --release -p sim -- --init=zero --testbench=inputs/repair/axis_frame_len.original.tb.csv inputs/repair/axis_frame_len.original.btor
-      - name: simulate axis fifo (d12)
-        run: |
-          cargo run --release -p sim -- --init=zero --testbench=inputs/repair/axis-fifo.original.tb.csv inputs/repair/axis-fifo.original.btor
-      - name: simulate sd spi (c1, c3, d9)
-        run: |
-          cargo run --release -p sim -- --init=zero --testbench=inputs/repair/zipcpu_sdspi.original.tb.csv inputs/repair/zipcpu_sdspi.original.btor
-      - name: simulate axis frame fifo (d11)
-        run: |
-          cargo run --release -p sim -- --init=zero --testbench=inputs/repair/axis-frame-fifo.original.tb.csv inputs/repair/axis-frame-fifo.original.btor
-      - name: simulate axis switch (d8)
-        run: |
-          cargo run --release -p sim -- --init=zero --testbench=inputs/repair/axis-switch.original.tb.csv inputs/repair/axis-switch.original.btor
-      - name: simulate axis async fifo (c4)
-        run: |
-          cargo run --release -p sim -- --init=zero --testbench=inputs/repair/axis-async-fifo-wrapper.original.tb.csv inputs/repair/axis-async-fifo-wrapper.original.btor
-      - name: simulate axi lite (s1)
-        run: |
-          cargo run --release -p sim -- --init=zero --testbench=inputs/repair/axi-lite-xlnx.original.tb0.csv inputs/repair/axi-lite-xlnx.original.btor
-          cargo run --release -p sim -- --init=zero --testbench=inputs/repair/axi-lite-xlnx.original.tb1.csv inputs/repair/axi-lite-xlnx.original.btor
-      - name: simulate axis stream (s2)
-        run: |
-          cargo run --release -p sim -- --init=zero --testbench=inputs/repair/axi-stream-xlnx.original.tb.csv inputs/repair/axi-stream-xlnx.original.btor
+          ./scripts/run_sim.sh jit
 
   rewrite-condition:
     name: Test E-Graph Rewrite Condition Synthesizer

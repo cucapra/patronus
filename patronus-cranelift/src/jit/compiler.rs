@@ -5,24 +5,11 @@
 
 use super::JITResult;
 use super::bv_codegen;
-use super::expr_graph::*;
 use super::slot_new::*;
 use baa::BitVecOps;
-use patronus::expr::{self, ForEachChild, TypeCheck};
-use patronus::system::*;
+use patronus::expr::{self, TypeCheck};
 
-use cranelift::{
-    codegen::ir,
-    jit::{JITBuilder, JITModule},
-    module::Module,
-    prelude::*,
-};
-use rustc_hash::FxHashMap;
-
-pub(super) struct JITCompiler {
-    module: JITModule,
-}
-
+use cranelift::{codegen::ir, prelude::*};
 // a function that evaluates a certain set of expressions
 // the pointer argument points to a u64 array containing the state data for the design under simulation.
 // this is usually given by StateBuf.as_mut_slice()
@@ -37,14 +24,23 @@ impl EvalFun {
     }
 }
 
-macro_rules! iconst {
-    ($ctx: expr, $value: expr) => {
-        $ctx.fn_builder.ins().iconst(types::I64, ($value) as i64)
-    };
-}
+pub mod module_helpers {
 
-impl JITCompiler {
-    pub(super) fn new(flags: Option<&str>) -> Self {
+    use crate::jit::{CodeGenContext, expr_graph::BottomUpExprGraph, slot_new::StateBuf};
+
+    use super::JITResult;
+    use cranelift::{
+        jit::{JITBuilder, JITModule},
+        module::Module,
+        prelude::*,
+    };
+    use patronus::expr::{self, ForEachChild, TypeCheck};
+    use patronus::system::*;
+    use rustc_hash::FxHashMap;
+
+    use super::EvalFun;
+
+    pub fn new_m(flags: Option<&str>) -> JITModule {
         let mut default_flags = FxHashMap::from_iter([("regalloc_algorithm", "single_pass")]);
         default_flags.extend(
             flags
@@ -62,13 +58,12 @@ impl JITCompiler {
             cranelift::module::default_libcall_names(),
         )
         .unwrap_or_else(|err| panic!("fail to launch jit instance, due to: {err:?}"));
-        Self {
-            module: JITModule::new(builder),
-        }
+
+        JITModule::new(builder)
     }
 
-    pub(super) fn compile_transition_sys(
-        &mut self,
+    pub fn compile_transition_sys(
+        m: &mut JITModule,
         expr_ctx: &expr::Context,
         sys: &TransitionSystem,
         input_state_buffer: &StateBuf,
@@ -80,21 +75,27 @@ impl JITCompiler {
             .filter_map(|state| state.next.map(|next| (next, state.symbol)))
             .unzip();
         let slot_offset = output_state_buffer.batch_offsets(&states_expr);
-        self.compile_expr_batch(expr_ctx, &next_expr_batch, input_state_buffer, &slot_offset)
+        compile_exprs(
+            m,
+            expr_ctx,
+            &next_expr_batch,
+            input_state_buffer,
+            &slot_offset,
+        )
     }
 
-    pub(super) fn compile_batched_expr_eval(
-        &mut self,
+    pub fn compile_expr_batch(
+        m: &mut JITModule,
         expr_ctx: &expr::Context,
         expr_batch: &[expr::ExprRef],
         state: &mut StateBuf,
     ) -> JITResult<EvalFun> {
         let slot_offset = state.batch_offsets(expr_batch);
-        self.compile_expr_batch(expr_ctx, expr_batch, state, &slot_offset)
+        compile_exprs(m, expr_ctx, expr_batch, state, &slot_offset)
     }
 
-    pub(super) fn compile_expr_batch(
-        &mut self,
+    fn compile_exprs(
+        m: &mut JITModule,
         expr_ctx: &expr::Context,
         expr_batch: &[expr::ExprRef],
         input_state_buffer: &StateBuf,
@@ -106,7 +107,7 @@ impl JITCompiler {
             returns: vec![],
             call_conv: isa::CallConv::SystemV,
         };
-        let mut cranelift_ctx = self.module.make_context();
+        let mut cranelift_ctx = m.make_context();
         cranelift_ctx.func.signature = sig;
 
         let mut fn_builder_ctx = FunctionBuilderContext::new();
@@ -159,15 +160,12 @@ impl JITCompiler {
         // println!("{}", cranelift_ctx.func);
         // println!("BEGIN FUNC\n {} \n \n", cranelift_ctx.func);
 
-        let function_id = self
-            .module
-            .declare_anonymous_function(&cranelift_ctx.func.signature)?;
-        self.module
-            .define_function(function_id, &mut cranelift_ctx)?;
-        self.module.clear_context(&mut cranelift_ctx);
-        self.module.finalize_definitions()?;
+        let function_id = m.declare_anonymous_function(&cranelift_ctx.func.signature)?;
+        m.define_function(function_id, &mut cranelift_ctx)?;
+        m.clear_context(&mut cranelift_ctx);
+        m.finalize_definitions()?;
 
-        let fn_addr = self.module.get_finalized_function(function_id);
+        let fn_addr = m.get_finalized_function(function_id);
 
         let res = unsafe {
             // SAFETY: upheld by the unsafeness of call method
@@ -180,11 +178,18 @@ impl JITCompiler {
     }
 }
 
+// essentially wraps the cranelift builder with some information pertinent for the BTOR use case
 pub(super) struct CodeGenContext<'ctx, 'engine> {
     pub(super) fn_builder: FunctionBuilder<'ctx>,
     input_state_buffer: &'engine StateBuf,
     in_addr: Value,
     out_addr: Value,
+}
+
+macro_rules! iconst {
+    ($ctx: expr, $value: expr) => {
+        $ctx.fn_builder.ins().iconst(types::I64, ($value) as i64)
+    };
 }
 
 impl CodeGenContext<'_, '_> {
