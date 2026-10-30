@@ -1,0 +1,25 @@
+; Copyright 2023 The Regents of the University of California
+; released under BSD 3-Clause License
+; author: Kevin Laeufer <laeufer@berkeley.edu>
+;
+; This tests for a bug in updating next states. The system looks like this:
+; state a : bv<8>
+;   [init] 8'b0
+;   [next] b
+; state b : bv<8>
+;   [init] 8'b1
+;   [next] a
+
+1 sort bitvec 8 ; bv<8>
+2 zero 1        ; 8-bit zero
+3 one  1        ; 8-bit one
+
+10 state 1 b
+11 state 1 a
+
+13 init 1 11 2 ; [init] 0
+12 add 1 11 3
+14 init 1 10 12 ; init 1
+
+22 next 1 11 10 ; [next] a
+20 next 1 10 11 ; [next] b
