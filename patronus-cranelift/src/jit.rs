@@ -12,11 +12,13 @@ use compiler::*;
 use cranelift::module::ModuleError;
 use patronus::expr::{self, *};
 use patronus::system::*;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use slot_new::*;
 use std::cell::{Cell, RefCell};
 use std::ops::Index;
 use std::sync::LazyLock;
+
+use crate::jit::expr_graph::BottomUpExprGraph;
 
 type JITResult<T> = Result<T, JITError>;
 
@@ -56,14 +58,12 @@ impl SimAssets {
             .collect();
         state_buf.add_exprs(ctx, &base_exprs);
 
-        // create output ledger with associated offsets
-        let output_exprs: Vec<_> = Vec::from_iter(
-            sys.outputs
-                .iter()
-                .map(|out| out.expr)
-                .chain(sys.bad_states.iter().chain(&sys.constraints).copied())
-                .collect::<FxHashSet<_>>(),
-        );
+        let init_exprs: Vec<_> = sys.get_init_exprs();
+        state_buf.add_exprs(ctx, &init_exprs);
+
+        // add output offsets
+        // NOTE: previously collected into an hashset before being used. this seems unnecessary?
+        let output_exprs = sys.get_assert_assume_output_exprs();
         state_buf.add_exprs(ctx, &output_exprs);
 
         /*
@@ -155,26 +155,56 @@ impl patronus::sim::Simulator for JITEngine<'_> {
         let state_r = &mut self.backend.borrow_mut().state_buf;
         state_r.init(&mut generator);
 
-        for state in &self.sys.states {
-            if let Some(init) = state.init {
-                let backing_ex = self.ctx.index(init);
-                let offset = state_r.offset_query(state.symbol).unwrap();
+        /*
+            init order:
+            - get expressions with init
+            - do constants first
+            - if any of the subsequent expressions depends on constants, evaluate first
+        */
 
-                match backing_ex {
-                    Expr::BVLiteral(b) => {
-                        let r = b.get(self.ctx);
-                        state_r.set_slot(offset, r.words());
+        // maps init expression (k) to corresponding symbol (v)
+        let init_m: FxHashMap<ExprRef, ExprRef> = self
+            .sys
+            .states
+            .iter()
+            .filter_map(|s| s.init.map(|i| (i, s.symbol)))
+            .collect();
+
+        let init_exprs: Vec<_> = init_m.keys().cloned().collect();
+
+        let init_graph = BottomUpExprGraph::from_top_down_graph(self.ctx, &init_exprs);
+        let init_walker = init_graph.walker();
+
+        let mut tmp_store = SymbolValueStore::default();
+
+        // walk init tree and evalute
+        for er in init_walker {
+            let backing_ex = self.ctx.index(er);
+            // let offset = state_r.offset_query(er).unwrap();
+
+            match backing_ex {
+                Expr::BVLiteral(b) => {
+                    let r = b.get(self.ctx);
+                    // state_r.set_slot(offset, r.words());
+                    tmp_store.define_bv(er, r);
+                }
+                _ => {
+                    let res = eval_expr(self.ctx, &tmp_store, er);
+                    if let Value::BitVec(i) = res {
+                        // state_r.set_slot(offset, i.words())
+                        tmp_store.define_bv(er, &i);
+                    } else {
+                        panic!("got array out of evaluation")
                     }
-                    _ => {
-                        let res = eval_expr(self.ctx, state_r, init);
-                        if let Value::BitVec(i) = res {
-                            state_r.set_slot(offset, i.words())
-                        } else {
-                            panic!("got array out of evaluation")
-                        }
-                    }
-                };
-            }
+                }
+            };
+        }
+        // then, copy over to symbol
+
+        for (k, v) in init_m {
+            let init_v = tmp_store.get_bv(self.ctx, k).unwrap();
+            let sym_offset = state_r.offset_query(v).expect("symbol should exist");
+            state_r.set_slot(sym_offset, init_v.words());
         }
         self.output_up_to_date.set(false);
     }
