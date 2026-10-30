@@ -58,9 +58,6 @@ impl SimAssets {
             .collect();
         state_buf.add_exprs(ctx, &base_exprs);
 
-        let init_exprs: Vec<_> = sys.get_init_exprs();
-        state_buf.add_exprs(ctx, &init_exprs);
-
         // add output offsets
         // NOTE: previously collected into an hashset before being used. this seems unnecessary?
         let output_exprs = sys.get_assert_assume_output_exprs();
@@ -155,13 +152,6 @@ impl patronus::sim::Simulator for JITEngine<'_> {
         let state_r = &mut self.backend.borrow_mut().state_buf;
         state_r.init(&mut generator);
 
-        /*
-            init order:
-            - get expressions with init
-            - do constants first
-            - if any of the subsequent expressions depends on constants, evaluate first
-        */
-
         // maps init expression (k) to corresponding symbol (v)
         let init_m: FxHashMap<ExprRef, ExprRef> = self
             .sys
@@ -170,41 +160,35 @@ impl patronus::sim::Simulator for JITEngine<'_> {
             .filter_map(|s| s.init.map(|i| (i, s.symbol)))
             .collect();
 
-        let init_exprs: Vec<_> = init_m.keys().cloned().collect();
+        let init_exprs = self.sys.get_init_exprs();
 
+        // because this graph is over the full tree, any dependency between these will be detected
         let init_graph = BottomUpExprGraph::from_top_down_graph(self.ctx, &init_exprs);
         let init_walker = init_graph.walker();
 
-        let mut tmp_store = SymbolValueStore::default();
-
         // walk init tree and evalute
         for er in init_walker {
+            let Some(sym) = init_m.get(&er) else {
+                continue;
+            };
+
             let backing_ex = self.ctx.index(er);
-            // let offset = state_r.offset_query(er).unwrap();
+            let offset = state_r.offset_query(*sym).unwrap();
 
             match backing_ex {
                 Expr::BVLiteral(b) => {
                     let r = b.get(self.ctx);
-                    // state_r.set_slot(offset, r.words());
-                    tmp_store.define_bv(er, r);
+                    state_r.set_slot(offset, r.words());
                 }
                 _ => {
-                    let res = eval_expr(self.ctx, &tmp_store, er);
+                    let res = eval_expr(self.ctx, state_r, er);
                     if let Value::BitVec(i) = res {
-                        // state_r.set_slot(offset, i.words())
-                        tmp_store.define_bv(er, &i);
+                        state_r.set_slot(offset, i.words())
                     } else {
                         panic!("got array out of evaluation")
                     }
                 }
             };
-        }
-        // then, copy over to symbol
-
-        for (k, v) in init_m {
-            let init_v = tmp_store.get_bv(self.ctx, k).unwrap();
-            let sym_offset = state_r.offset_query(v).expect("symbol should exist");
-            state_r.set_slot(sym_offset, init_v.words());
         }
         self.output_up_to_date.set(false);
     }

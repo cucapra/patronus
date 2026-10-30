@@ -13,13 +13,13 @@
 1 sort bitvec 8 ; bv<8>
 2 zero 1        ; 8-bit zero
 3 one  1        ; 8-bit one
-4 add 1 2 3
 
-10 state 1 a
-11 init 1 10 2  ; [init] 0
+10 state 1 b
+11 state 1 a
 
-20 state 1 b
-21 init 1 20 4  ; [init] 1
-22 next 1 20 10 ; [next] a
+13 init 1 11 2 ; [init] 0
+12 add 1 11 3
+14 init 1 10 12 ; init 1
 
-12 next 1 10 20 ; [next] b
+22 next 1 11 10 ; [next] a
+20 next 1 10 11 ; [next] b
