@@ -155,7 +155,7 @@ pub mod module_helpers {
             codegen_ctx.output_state(t, loc, offset);
         }
         codegen_ctx.fn_builder.ins().return_(&[]);
-        codegen_ctx.fn_builder.finalize();
+        codegen_ctx.fn_builder.finalize(m.target_config());
 
         // println!("{}", cranelift_ctx.func);
         // println!("BEGIN FUNC\n {} \n \n", cranelift_ctx.func);
@@ -207,7 +207,7 @@ impl CodeGenContext<'_, '_> {
         self.fn_builder.ins().load(
             bv_codegen::select_container_primitive(width),
             // buffer is allocated by Rust, therefore trusted
-            ir::MemFlags::trusted(),
+            ir::MemFlagsData::trusted(),
             slot_address,
             0,
         )
@@ -226,7 +226,7 @@ impl CodeGenContext<'_, '_> {
         ret_loc = bv_codegen::extend_to_fit(fn_builder, ret_loc, type_width, type_repr_width);
         fn_builder
             .ins()
-            .store(ir::MemFlags::trusted(), ret_loc, dst_slot, 0);
+            .store(ir::MemFlagsData::trusted(), ret_loc, dst_slot, 0);
     }
 
     // generate code for an expression

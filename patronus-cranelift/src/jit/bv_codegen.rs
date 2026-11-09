@@ -174,28 +174,89 @@ pub fn slice(
 
     if orig_t.is_vector() {
         // on vectors, determining tmp has to be a little more nuanced: varies based on whether the output is a vector or not
-        if new_t.is_vector() {
-            // case: slice vec to vec
-            // do the dumb thing, extract / insert lanes
-            let zeroed = b.ins().iconst(types::I64, 0);
-            let mut out_v = b.ins().splat(new_t, zeroed);
 
-            for (olane, i) in ((lo / 64)..orig_t.lane_count()).enumerate() {
-                let orig_lv = b.ins().extractlane(value, i as u8);
-                out_v = b.ins().insertlane(out_v, orig_lv, olane as u8);
-            }
-            out_v
-        } else {
-            // case: slice vec to int
+        // compute which lanes the slice spans
+        let lane_lo = lo / 64;
+        let lane_hi = hi / 64;
+
+        // case: selection within a single lane
+        if lane_lo == lane_hi {
             // extract lane, then reduce to correct type
             let extracted_ln = b.ins().extractlane(value, (lo / 64) as u8);
             let extracted_ln = b.ins().ushr_imm(extracted_ln, lo as i64);
             if !new_t.eq(&types::I64) {
-                b.ins().ireduce(new_t, extracted_ln)
+                return b.ins().ireduce(new_t, extracted_ln);
             } else {
-                extracted_ln
+                return extracted_ln;
             }
         }
+
+        // right rotate every lane by `lo`
+        // let rot_l = b.ins().rotr_imm_u(value, lo as i64);
+
+        // given N lanes:
+        // - laneno < N-1: laneno+1's upper `lo` bits will contain the value that needs to be 'carried' over to the upper `lo` bits of the current lane
+        // - laneno == N-1: uppermost lane. zeroes are carried in.
+
+        // upper `lo` bits
+        let lane_mask = !(u64::MAX >> lo);
+
+        let lane_mask_v = b.ins().iconst(types::I64, lane_mask as i64);
+        let mut out_v = if new_t.is_vector() {
+            let zeroed = b.ins().iconst(types::I64, 0);
+            Some(b.ins().splat(new_t, zeroed))
+        } else {
+            None
+        };
+
+        for lno in lane_lo..lane_hi {
+            let lane_val = b.ins().extractlane(value, lno as u8);
+            let lane_val = b.ins().rotr_imm_u(lane_val, lo as i64);
+            let carry_bits = if lno < orig_t.lane_count() - 1 {
+                let lane_tmp = b.ins().extractlane(value, (lno + 1) as u8);
+                // let lane_v = b.ins().rotr_imm_u(lane_tmp, lo as i64);
+                b.ins().band(lane_tmp, lane_mask_v)
+            } else {
+                b.ins().iconst(types::I64, 0)
+            };
+            // let lane_v = b.ins().extractlane(rot_l, lno as u8);
+            let lane_lo = b.ins().band_not(lane_val, lane_mask_v);
+            let with_carry = b.ins().bor(lane_lo, carry_bits);
+            if let Some(ov) = out_v {
+                out_v = Some(b.ins().insertlane(ov, with_carry, lno as u8));
+            } else {
+                // return the first thing
+                if !new_t.eq(&types::I64) {
+                    return b.ins().ireduce(new_t, with_carry);
+                } else {
+                    return with_carry;
+                }
+            }
+        }
+        return out_v.unwrap();
+
+        // if new_t.is_vector() {
+        //     // case: slice vec to vec
+        //     // do the dumb thing, extract / insert lanes
+        //     let zeroed = b.ins().iconst(types::I64, 0);
+        //     let mut out_v = b.ins().splat(new_t, zeroed);
+
+        //     for (olane, i) in ((lo / 64)..orig_t.lane_count()).enumerate() {
+        //         let orig_lv = b.ins().extractlane(value, i as u8);
+        //         out_v = b.ins().insertlane(out_v, orig_lv, olane as u8);
+        //     }
+        //     out_v
+        // } else {
+        //     // case: slice vec to int
+        //     // extract lane, then reduce to correct type
+        //     let extracted_ln = b.ins().extractlane(value, (lo / 64) as u8);
+        //     let extracted_ln = b.ins().ushr_imm(extracted_ln, lo as i64);
+        //     if !new_t.eq(&types::I64) {
+        //         b.ins().ireduce(new_t, extracted_ln)
+        //     } else {
+        //         extracted_ln
+        //     }
+        // }
     } else {
         // case: slice int to int
         let tmp = mask(b, shifted, hi - lo + 1);
