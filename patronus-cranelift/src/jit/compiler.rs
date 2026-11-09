@@ -220,9 +220,10 @@ impl CodeGenContext<'_, '_> {
             .ins()
             .iadd_imm(self.out_addr, (out_offset * types::I64.bytes()) as i64);
         let type_width = ty.get_bit_vector_width().unwrap();
+        let type_repr_width = type_width.next_multiple_of(64);
 
         // pad if required
-        ret_loc = bv_codegen::extend_to_fit(fn_builder, ret_loc, type_width, 64);
+        ret_loc = bv_codegen::extend_to_fit(fn_builder, ret_loc, type_width, type_repr_width);
         fn_builder
             .ins()
             .store(ir::MemFlags::trusted(), ret_loc, dst_slot, 0);
@@ -260,7 +261,17 @@ impl CodeGenContext<'_, '_> {
             }
 
             // binary which don't require width
-            Expr::BVEqual(..) => b.ins().icmp(IntCC::Equal, args[0], args[1]),
+            Expr::BVEqual(l, _) => {
+                // if one of the two operands is vec, assume other is
+                let l_width = l.get_bv_type(expr_ctx).unwrap();
+                let l_t = select_container_primitive(l_width);
+                if l_t.is_vector() {
+                    let wide_res = b.ins().icmp(IntCC::Equal, args[0], args[1]);
+                    b.ins().vall_true(wide_res)
+                } else {
+                    b.ins().icmp(IntCC::Equal, args[0], args[1])
+                }
+            }
             Expr::BVGreater(..) => b.ins().icmp(IntCC::UnsignedGreaterThan, args[0], args[1]),
             Expr::BVGreaterEqual(..) => {
                 b.ins()

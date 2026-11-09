@@ -2,7 +2,7 @@
 // released under BSD 3-Clause License
 // author: Willow Ge <lg634@cornell.edu>
 
-use baa::BitVecValue;
+use baa::{BitVecOps, BitVecValue, BitVecValueRef};
 use patronus::expr::{self, TypeCheck};
 use rustc_hash::FxHashMap;
 
@@ -13,25 +13,47 @@ pub struct StateBuf {
     types: Vec<expr::Type>,
 }
 
+pub(crate) fn calc_words<const WORD_WIDTH: usize>(in_width: u32) -> usize {
+    if (in_width as usize) % WORD_WIDTH == 0 {
+        (in_width as usize) / WORD_WIDTH
+    } else {
+        (in_width as usize) / WORD_WIDTH + 1
+    }
+}
+
+pub(crate) fn words_in_ty<const WORD_WIDTH: usize>(tref: &expr::Type) -> usize {
+    if tref.is_bit_vector() {
+        calc_words::<WORD_WIDTH>(tref.get_bit_vector_width().unwrap())
+    } else {
+        panic!("can't compute words in arrays yet")
+    }
+}
+
 impl StateBuf {
     pub fn add_exprs(&mut self, ctx: &expr::Context, exprs: &Vec<expr::ExprRef>) {
-        // data is zero initialised
-        let new_data = vec![0; exprs.len()];
         let new_dtypes: Vec<_> = exprs.iter().map(|&e| e.get_type(ctx)).collect();
+        let new_size: usize = new_dtypes.iter().map(|t| words_in_ty::<64>(t)).sum();
+        // data is zero initialised
+        let new_data = vec![0; new_size];
         let start_len = self.data.len();
-        for (i, eref) in exprs.iter().enumerate() {
-            self.offsets.insert(*eref, start_len + i);
+        let mut offset_acc = 0;
+        for eref in exprs.iter() {
+            self.offsets.insert(*eref, start_len + offset_acc);
+            offset_acc += calc_words::<64>(eref.get_bv_type(ctx).unwrap());
         }
         self.data.extend(new_data);
         self.types.extend(new_dtypes);
     }
 
     pub fn init(&mut self, g: &mut patronus::sim::InitValueGenerator) {
-        for (idx, slot) in &mut self.data.iter_mut().enumerate() {
-            let init_value = g.generate(self.types[idx]);
-            *slot = init_value
-                .try_into_u64()
-                .expect("can't express a value as u64");
+        let mut offset = 0;
+        for i in 0..self.types.len() {
+            let init_value = g.generate(self.types[i]);
+            match init_value {
+                baa::Value::Array(..) => panic!("arrays unsupported"),
+                baa::Value::BitVec(v) => self.set_slot(offset, v.words()),
+            };
+            offset += words_in_ty::<64>(&self.types[i]);
         }
     }
 
@@ -55,13 +77,24 @@ impl StateBuf {
     }
 
     pub fn set_slot(&mut self, offset: usize, data: &[u64]) {
-        self.data[offset] = data[0];
+        // let num_words = words_in_ty(self.types[offset])
+
+        //     calc_words::<64>(self.types[offset].get_bit_vector_width().unwrap());
+        // debug_assert_eq!(num_words, data.len());
+        // println!("{}", data.len());
+        let assoc_pos = self.data.get_mut(offset..(offset + data.len())).unwrap();
+        assoc_pos.clone_from_slice(data);
     }
 
     pub fn get_slot(&self, expr: expr::ExprRef) -> BitVecValue {
         let offset = self.offset_query(expr).unwrap();
         let dtype = self.types[offset];
-        BitVecValue::from_u64(self.data[offset], dtype.get_bit_vector_width().unwrap())
+        let sl = self
+            .data
+            .get(offset..(offset + words_in_ty::<64>(&dtype)))
+            .unwrap();
+        let slot_ref = BitVecValueRef::new(sl, dtype.get_bit_vector_width().unwrap());
+        BitVecValue::from(slot_ref)
     }
 }
 

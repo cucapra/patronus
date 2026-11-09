@@ -12,7 +12,7 @@ use compiler::*;
 use cranelift::module::ModuleError;
 use patronus::expr::{self, *};
 use patronus::system::*;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use slot_new::*;
 use std::cell::{Cell, RefCell};
 use std::ops::Index;
