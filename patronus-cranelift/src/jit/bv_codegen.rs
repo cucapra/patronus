@@ -173,19 +173,6 @@ pub fn build_fixedw_op(
     mask_scalar(b, bin_ov, out_width)
 }
 
-pub fn add(b: &mut FunctionBuilder, lhs: Value, rhs: Value, width: WidthInt) -> Value {
-    let v1 = b.ins().iadd(lhs, rhs);
-    mask(b, v1, width)
-}
-pub fn sub(b: &mut FunctionBuilder, lhs: Value, rhs: Value, width: WidthInt) -> Value {
-    let v1 = b.ins().isub(lhs, rhs);
-    mask(b, v1, width)
-}
-pub fn mul(b: &mut FunctionBuilder, lhs: Value, rhs: Value, width: WidthInt) -> Value {
-    let v1 = b.ins().imul(lhs, rhs);
-    mask(b, v1, width)
-}
-
 pub fn not(b: &mut FunctionBuilder, arg: Value, width: WidthInt) -> Value {
     let tmp = b.ins().bnot(arg);
     mask(b, tmp, width)
@@ -194,24 +181,6 @@ pub fn negate(b: &mut FunctionBuilder, arg: Value, width: WidthInt) -> Value {
     let flipped = b.ins().bnot(arg);
     let tmp = b.ins().iadd_imm_u(flipped, 1);
     mask(b, tmp, width)
-}
-
-pub fn shift_right(b: &mut FunctionBuilder, arg0: Value, arg1: Value, width: WidthInt) -> Value {
-    let v1 = b.ins().ushr(arg0, arg1);
-    mask(b, v1, width)
-}
-pub fn arithmetic_shift_right(
-    b: &mut FunctionBuilder,
-    arg0: Value,
-    arg1: Value,
-    width: WidthInt,
-) -> Value {
-    let v1 = b.ins().sshr(arg0, arg1);
-    mask(b, v1, width)
-}
-pub fn shift_left(b: &mut FunctionBuilder, arg0: Value, arg1: Value, width: WidthInt) -> Value {
-    let v1 = b.ins().ishl(arg0, arg1);
-    mask(b, v1, width)
 }
 
 pub fn implies(b: &mut FunctionBuilder, lhs: Value, rhs: Value, width: WidthInt) -> Value {

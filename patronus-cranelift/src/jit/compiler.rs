@@ -352,26 +352,6 @@ impl CodeGenContext<'_, '_> {
 
                 WrappedVal::V(build_fixedw_op(b, opcode, arg0, arg1, w))
             }
-
-            // // these require an overflow guard
-            // Expr::BVAdd(_, _, w) => {
-            //     WrappedVal::V(build_fixedw_op(b, args[0].get_v(), args[1].get_v(), w))
-            // }
-            // Expr::BVSub(_, _, w) => WrappedVal::V(sub(b, args[0].get_v(), args[1].get_v(), w)),
-            // Expr::BVMul(_, _, w) => WrappedVal::V(mul(b, args[0].get_v(), args[1].get_v(), w)),
-
-            // Expr::BVShiftLeft(_, _, w) => {
-            //     WrappedVal::V(shift_left(b, args[0].get_v(), args[1].get_v(), w))
-            // }
-            // Expr::BVShiftRight(_, _, w) => {
-            //     WrappedVal::V(shift_right(b, args[0].get_v(), args[1].get_v(), w))
-            // }
-            // Expr::BVArithmeticShiftRight(_, _, w) => WrappedVal::V(arithmetic_shift_right(
-            //     b,
-            //     args[0].get_v(),
-            //     args[1].get_v(),
-            //     w,
-            // )),
             Expr::BVConcat(e1, e2, _) => {
                 let w1 = e1.get_bv_type(expr_ctx).unwrap();
                 let w2 = e2.get_bv_type(expr_ctx).unwrap();
