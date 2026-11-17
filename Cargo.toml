@@ -23,6 +23,7 @@ patronus = {path = "patronus"}
 patronus-cranelift = {path = "patronus-cranelift"}
 thiserror = "2.0.18"
 rand = { version = "0.10", features = [] }
+smallvec = {version = "1.*", features = ["union"]}
 
 # speed up execution of tests using insta
 [profile.dev.package]

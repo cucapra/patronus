@@ -6,6 +6,8 @@ use baa::{BitVecOps, BitVecValue, BitVecValueRef};
 use patronus::expr::{self, TypeCheck};
 use rustc_hash::FxHashMap;
 
+use super::multiword::width_words;
+
 #[derive(Clone, Debug, Default)]
 pub struct StateBuf {
     offsets: FxHashMap<expr::ExprRef, usize>,
@@ -13,17 +15,9 @@ pub struct StateBuf {
     types: Vec<expr::Type>,
 }
 
-pub(crate) fn calc_words<const WORD_WIDTH: usize>(in_width: u32) -> usize {
-    if (in_width as usize) % WORD_WIDTH == 0 {
-        (in_width as usize) / WORD_WIDTH
-    } else {
-        (in_width as usize) / WORD_WIDTH + 1
-    }
-}
-
-pub(crate) fn words_in_ty<const WORD_WIDTH: usize>(tref: &expr::Type) -> usize {
+pub(crate) fn words_in_ty(tref: &expr::Type) -> usize {
     if tref.is_bit_vector() {
-        calc_words::<WORD_WIDTH>(tref.get_bit_vector_width().unwrap())
+        width_words(tref.get_bit_vector_width().unwrap())
     } else {
         panic!("can't compute words in arrays yet")
     }
@@ -32,14 +26,14 @@ pub(crate) fn words_in_ty<const WORD_WIDTH: usize>(tref: &expr::Type) -> usize {
 impl StateBuf {
     pub fn add_exprs(&mut self, ctx: &expr::Context, exprs: &Vec<expr::ExprRef>) {
         let new_dtypes: Vec<_> = exprs.iter().map(|&e| e.get_type(ctx)).collect();
-        let new_size: usize = new_dtypes.iter().map(|t| words_in_ty::<64>(t)).sum();
+        let new_size: usize = new_dtypes.iter().map(|t| words_in_ty(t)).sum();
         // data is zero initialised
         let new_data = vec![0; new_size];
         let start_len = self.data.len();
         let mut offset_acc = 0;
         for eref in exprs.iter() {
             self.offsets.insert(*eref, start_len + offset_acc);
-            offset_acc += calc_words::<64>(eref.get_bv_type(ctx).unwrap());
+            offset_acc += width_words(eref.get_bv_type(ctx).unwrap());
         }
         self.data.extend(new_data);
         self.types.extend(new_dtypes);
@@ -51,9 +45,9 @@ impl StateBuf {
             let init_value = g.generate(self.types[i]);
             match init_value {
                 baa::Value::Array(..) => panic!("arrays unsupported"),
-                baa::Value::BitVec(v) => self.set_slot(offset, v.words()),
+                baa::Value::BitVec(v) => self.set_offset(offset, v.words()),
             };
-            offset += words_in_ty::<64>(&self.types[i]);
+            offset += words_in_ty(&self.types[i]);
         }
     }
 
@@ -76,12 +70,11 @@ impl StateBuf {
         self.offsets.get(&expr).is_some()
     }
 
-    pub fn set_slot(&mut self, offset: usize, data: &[u64]) {
-        // let num_words = words_in_ty(self.types[offset])
-
-        //     calc_words::<64>(self.types[offset].get_bit_vector_width().unwrap());
-        // debug_assert_eq!(num_words, data.len());
-        // println!("{}", data.len());
+    pub fn set_slot(&mut self, expr: expr::ExprRef, data: &[u64]) {
+        let offset = self.offset_query(expr).unwrap();
+        self.set_offset(offset, data);
+    }
+    fn set_offset(&mut self, offset: usize, data: &[u64]) {
         let assoc_pos = self.data.get_mut(offset..(offset + data.len())).unwrap();
         assoc_pos.clone_from_slice(data);
     }
@@ -91,7 +84,7 @@ impl StateBuf {
         let dtype = self.types[offset];
         let sl = self
             .data
-            .get(offset..(offset + words_in_ty::<64>(&dtype)))
+            .get(offset..(offset + words_in_ty(&dtype)))
             .unwrap();
         let slot_ref = BitVecValueRef::new(sl, dtype.get_bit_vector_width().unwrap());
         BitVecValue::from(slot_ref)

@@ -5,6 +5,7 @@
 mod bv_codegen;
 mod compiler;
 mod expr_graph;
+mod multiword;
 mod slot_new;
 
 use baa::*;
@@ -173,17 +174,16 @@ impl patronus::sim::Simulator for JITEngine<'_> {
             };
 
             let backing_ex = self.ctx.index(er);
-            let offset = state_r.offset_query(*sym).unwrap();
 
             match backing_ex {
                 Expr::BVLiteral(b) => {
                     let r = b.get(self.ctx);
-                    state_r.set_slot(offset, r.words());
+                    state_r.set_slot(*sym, r.words());
                 }
                 _ => {
                     let res = eval_expr(self.ctx, state_r, er);
                     if let Value::BitVec(i) = res {
-                        state_r.set_slot(offset, i.words())
+                        state_r.set_slot(*sym, i.words());
                     } else {
                         panic!("got array out of evaluation")
                     }
@@ -205,8 +205,7 @@ impl patronus::sim::Simulator for JITEngine<'_> {
         let vref = value.into();
         let state_r = &mut self.backend.borrow_mut().state_buf;
 
-        let offset = state_r.offset_query(expr).unwrap();
-        state_r.set_slot(offset, vref.words());
+        state_r.set_slot(expr, vref.words());
         self.output_up_to_date.set(false);
     }
 

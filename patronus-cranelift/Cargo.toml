@@ -12,5 +12,6 @@ version.workspace = true
 patronus.workspace = true
 baa.workspace = true
 rustc-hash.workspace = true
+smallvec.workspace = true
 cranelift = { version = "0.137", features = ["jit", "module"]}
 

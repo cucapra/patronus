@@ -15,7 +15,7 @@ rust-version.workspace = true
 indexmap = "2.14.0"
 codespan-reporting = "0.13.1"
 lazy_static = "1.5.0"
-smallvec = { version = "1.*", features = ["union"] }
+smallvec.workspace = true
 rand.workspace = true
 boolean_expression.workspace = true
 regex.workspace = true

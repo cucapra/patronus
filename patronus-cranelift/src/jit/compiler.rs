@@ -3,6 +3,8 @@
 // author: Zihan Li <zl2225@cornell.edu>
 // author: Willow Ge <lg634@cornell.edu>
 
+use crate::jit::multiword::Bundle;
+
 use super::JITResult;
 use super::bv_codegen;
 use super::slot_new::*;
@@ -23,10 +25,26 @@ impl EvalFun {
         (self.0)(state_ptr.as_mut_ptr())
     }
 }
+#[derive(Clone)]
+pub enum WrappedVal {
+    V(Value),
+    B(Bundle),
+}
+
+impl WrappedVal {
+    pub(crate) fn get_v(&self) -> Value {
+        let Self::V(i) = self else {
+            panic!("not value")
+        };
+        *i
+    }
+}
 
 pub mod module_helpers {
 
-    use crate::jit::{CodeGenContext, expr_graph::BottomUpExprGraph, slot_new::StateBuf};
+    use crate::jit::{
+        CodeGenContext, WrappedVal, expr_graph::BottomUpExprGraph, slot_new::StateBuf,
+    };
 
     use super::JITResult;
     use cranelift::{
@@ -101,7 +119,7 @@ pub mod module_helpers {
         input_state_buffer: &StateBuf,
         out_offsets: &[usize],
     ) -> JITResult<EvalFun> {
-        assert_eq!(expr_batch.len(), out_offsets.len());
+        debug_assert_eq!(expr_batch.len(), out_offsets.len());
         let sig = Signature {
             params: vec![AbiParam::new(types::I64)],
             returns: vec![],
@@ -130,7 +148,8 @@ pub mod module_helpers {
         };
 
         // keep track of where evaluated expressions store their results
-        let mut evaluated: FxHashMap<expr::ExprRef, Value> = FxHashMap::default();
+        // TODO: evaluation results should be tracked in a better structure, so we can pass references to the smallvecs rather than cloning every time.
+        let mut evaluated: FxHashMap<expr::ExprRef, WrappedVal> = FxHashMap::default();
         let bottom_up_expr_graph = BottomUpExprGraph::from_top_down_graph(expr_ctx, expr_batch);
 
         let mut arguments = Vec::with_capacity(4);
@@ -140,19 +159,19 @@ pub mod module_helpers {
             // for each expression, generate code. its arguments should be in the evaluated map
             let expr = &expr_ctx[e];
             expr.for_each_child(|child| {
-                arguments.push(evaluated[child]);
+                arguments.push(evaluated[child].clone());
             });
             let r = codegen_ctx.expr_codegen(e, expr_ctx, &arguments);
-            // println!("{:?}", r);
+            // println!("->{:?}", r);
             evaluated.insert(e, r);
             arguments.clear();
         }
         // now, write outputs to the output location
         for (idx, expr) in expr_batch.iter().enumerate() {
             let t = expr.get_type(expr_ctx);
-            let loc = evaluated[expr];
+            let loc = evaluated[expr].clone();
             let offset = out_offsets[idx] as u32;
-            codegen_ctx.output_state(t, loc, offset);
+            codegen_ctx.output_state(t, &loc, offset);
         }
         codegen_ctx.fn_builder.ins().return_(&[]);
         codegen_ctx.fn_builder.finalize(m.target_config());
@@ -198,35 +217,47 @@ impl CodeGenContext<'_, '_> {
         &mut self,
         expr: expr::ExprRef,
         expr_ctx: &expr::Context,
-    ) -> Value {
+    ) -> WrappedVal {
         let param_offset = self.input_state_buffer.offset_query(expr).unwrap() as u32;
         let offset_const = iconst!(self, param_offset * types::I64.bytes());
         let slot_address = self.fn_builder.ins().iadd(self.in_addr, offset_const);
 
         let width = expr.get_bv_type(expr_ctx).unwrap();
-        self.fn_builder.ins().load(
-            bv_codegen::select_container_primitive(width),
-            // buffer is allocated by Rust, therefore trusted
-            ir::MemFlagsData::trusted(),
-            slot_address,
-            0,
-        )
+        if width <= 64 {
+            WrappedVal::V(self.fn_builder.ins().load(
+                bv_codegen::select_contain_t(width),
+                // buffer is allocated by Rust, therefore trusted
+                ir::MemFlagsData::trusted(),
+                slot_address,
+                0,
+            ))
+        } else {
+            WrappedVal::B(Bundle::load_from(&mut self.fn_builder, slot_address, width))
+        }
     }
 
     // generate code to perform the final state update for one given state
-    fn output_state(&mut self, ty: expr::Type, mut ret_loc: Value, out_offset: u32) {
+    fn output_state(&mut self, ty: expr::Type, ret_loc: &WrappedVal, out_offset: u32) {
         let fn_builder = &mut self.fn_builder;
         let dst_slot = fn_builder
             .ins()
-            .iadd_imm(self.out_addr, (out_offset * types::I64.bytes()) as i64);
+            .iadd_imm_u(self.out_addr, (out_offset * types::I64.bytes()) as i64);
         let type_width = ty.get_bit_vector_width().unwrap();
         let type_repr_width = type_width.next_multiple_of(64);
 
-        // pad if required
-        ret_loc = bv_codegen::extend_to_fit(fn_builder, ret_loc, type_width, type_repr_width);
-        fn_builder
-            .ins()
-            .store(ir::MemFlagsData::trusted(), ret_loc, dst_slot, 0);
+        match ret_loc {
+            WrappedVal::V(inner) => {
+                // pad if required
+                let tmp =
+                    bv_codegen::extend_to_fit(fn_builder, *inner, type_width, type_repr_width);
+                fn_builder
+                    .ins()
+                    .store(ir::MemFlagsData::trusted(), tmp, dst_slot, 0);
+            }
+            WrappedVal::B(bdl) => {
+                bdl.store_to(fn_builder, dst_slot, type_width);
+            }
+        }
     }
 
     // generate code for an expression
@@ -235,9 +266,10 @@ impl CodeGenContext<'_, '_> {
         &mut self,
         expr: expr::ExprRef,
         expr_ctx: &expr::Context,
-        args: &[Value],
-    ) -> Value {
+        args: &[WrappedVal],
+    ) -> WrappedVal {
         use bv_codegen::*;
+        use cranelift::codegen::ir as clir;
         use expr::Expr;
         let b = &mut self.fn_builder;
         // println!("generating code for {:?} {:?}", expr_ctx[expr], args);
@@ -246,69 +278,111 @@ impl CodeGenContext<'_, '_> {
             Expr::BVSymbol { .. } => self.load_input_state(expr, expr_ctx),
             Expr::BVLiteral(value) => {
                 let v = value.get(expr_ctx);
-                literal(b, v, v.width())
+                WrappedVal::V(literal(b, v, v.width()))
             }
             // unary, includes dest width
-            Expr::BVNot(_, w) => not(b, args[0], w),
-            Expr::BVNegate(_, w) => negate(b, args[0], w),
+            Expr::BVNot(_, w) => WrappedVal::V(not(b, args[0].get_v(), w)),
+            Expr::BVNegate(_, w) => WrappedVal::V(negate(b, args[0].get_v(), w)),
 
             // unary, includes source and dest width
-            Expr::BVZeroExt { by, width, .. } => zero_extend(b, args[0], by, width),
-            Expr::BVSignExt { by, width, .. } => sign_extend(b, args[0], by, width),
+            Expr::BVZeroExt { by, width, .. } => {
+                WrappedVal::V(zero_extend(b, args[0].get_v(), by, width))
+            }
+            Expr::BVSignExt { by, width, .. } => {
+                WrappedVal::V(sign_extend(b, args[0].get_v(), by, width))
+            }
             Expr::BVSlice { hi, lo, e } => {
                 let v = e.get_bv_type(expr_ctx).unwrap();
-                slice(b, args[0], hi, lo, v)
+                WrappedVal::V(slice(b, args[0].get_v(), hi, lo, v))
             }
 
             // binary which don't require width
-            Expr::BVEqual(l, _) => {
+            Expr::BVEqual(..) => {
                 // if one of the two operands is vec, assume other is
-                let l_width = l.get_bv_type(expr_ctx).unwrap();
-                let l_t = select_container_primitive(l_width);
-                if l_t.is_vector() {
-                    let wide_res = b.ins().icmp(IntCC::Equal, args[0], args[1]);
-                    b.ins().vall_true(wide_res)
-                } else {
-                    b.ins().icmp(IntCC::Equal, args[0], args[1])
-                }
+                // TODO: add back vector support
+                WrappedVal::V(b.ins().icmp(IntCC::Equal, args[0].get_v(), args[1].get_v()))
             }
-            Expr::BVGreater(..) => b.ins().icmp(IntCC::UnsignedGreaterThan, args[0], args[1]),
-            Expr::BVGreaterEqual(..) => {
-                b.ins()
-                    .icmp(IntCC::UnsignedGreaterThanOrEqual, args[0], args[1])
-            }
-            Expr::BVGreaterSigned(..) => b.ins().icmp(IntCC::SignedGreaterThan, args[0], args[1]),
-            Expr::BVGreaterEqualSigned(..) => {
-                b.ins()
-                    .icmp(IntCC::SignedGreaterThanOrEqual, args[0], args[1])
-            }
-            Expr::BVAnd(..) => b.ins().band(args[0], args[1]),
-            Expr::BVOr(..) => b.ins().bor(args[0], args[1]),
-            Expr::BVXor(..) => b.ins().bxor(args[0], args[1]),
+            Expr::BVGreater(..) => WrappedVal::V(b.ins().icmp(
+                IntCC::UnsignedGreaterThan,
+                args[0].get_v(),
+                args[1].get_v(),
+            )),
+            Expr::BVGreaterEqual(..) => WrappedVal::V(b.ins().icmp(
+                IntCC::UnsignedGreaterThanOrEqual,
+                args[0].get_v(),
+                args[1].get_v(),
+            )),
+            Expr::BVGreaterSigned(..) => WrappedVal::V(b.ins().icmp(
+                IntCC::SignedGreaterThan,
+                args[0].get_v(),
+                args[1].get_v(),
+            )),
+            Expr::BVGreaterEqualSigned(..) => WrappedVal::V(b.ins().icmp(
+                IntCC::SignedGreaterThanOrEqual,
+                args[0].get_v(),
+                args[1].get_v(),
+            )),
+            Expr::BVAnd(..) => WrappedVal::V(b.ins().band(args[0].get_v(), args[1].get_v())),
+            Expr::BVOr(..) => WrappedVal::V(b.ins().bor(args[0].get_v(), args[1].get_v())),
+            Expr::BVXor(..) => WrappedVal::V(b.ins().bxor(args[0].get_v(), args[1].get_v())),
 
             // doesn't have overflow width, needs it
             Expr::BVImplies(e1, ..) => {
                 let out_w = e1.get_bv_type(expr_ctx).unwrap();
-                implies(b, args[0], args[1], out_w)
+                WrappedVal::V(implies(b, args[0].get_v(), args[1].get_v(), out_w))
             }
 
-            // binary
+            // binary, scalar only, output width masked
+            Expr::BVAdd(.., w)
+            | Expr::BVSub(.., w)
+            | Expr::BVMul(.., w)
+            | Expr::BVShiftLeft(.., w)
+            | Expr::BVShiftRight(.., w) => {
+                let arg0 = args[0].get_v();
+                let arg1 = args[1].get_v();
+                let opcode = match expr_ctx[expr] {
+                    Expr::BVAdd(..) => clir::Opcode::Iadd,
+                    Expr::BVSub(..) => clir::Opcode::Isub,
+                    Expr::BVMul(..) => clir::Opcode::Imul,
+                    Expr::BVShiftLeft(..) => clir::Opcode::Ishl,
+                    Expr::BVShiftRight(..) => clir::Opcode::Ushr,
+                    Expr::BVArithmeticShiftRight(..) => clir::Opcode::Sshr,
+                    _ => unreachable!(),
+                };
 
-            // these require an overflow guard
-            Expr::BVAdd(_, _, w) => add(b, args[0], args[1], w),
-            Expr::BVSub(_, _, w) => sub(b, args[0], args[1], w),
-            Expr::BVMul(_, _, w) => mul(b, args[0], args[1], w),
+                WrappedVal::V(build_fixedw_op(b, opcode, arg0, arg1, w))
+            }
 
-            Expr::BVShiftLeft(_, _, w) => shift_left(b, args[0], args[1], w),
-            Expr::BVShiftRight(_, _, w) => shift_right(b, args[0], args[1], w),
-            Expr::BVArithmeticShiftRight(_, _, w) => arithmetic_shift_right(b, args[0], args[1], w),
+            // // these require an overflow guard
+            // Expr::BVAdd(_, _, w) => {
+            //     WrappedVal::V(build_fixedw_op(b, args[0].get_v(), args[1].get_v(), w))
+            // }
+            // Expr::BVSub(_, _, w) => WrappedVal::V(sub(b, args[0].get_v(), args[1].get_v(), w)),
+            // Expr::BVMul(_, _, w) => WrappedVal::V(mul(b, args[0].get_v(), args[1].get_v(), w)),
+
+            // Expr::BVShiftLeft(_, _, w) => {
+            //     WrappedVal::V(shift_left(b, args[0].get_v(), args[1].get_v(), w))
+            // }
+            // Expr::BVShiftRight(_, _, w) => {
+            //     WrappedVal::V(shift_right(b, args[0].get_v(), args[1].get_v(), w))
+            // }
+            // Expr::BVArithmeticShiftRight(_, _, w) => WrappedVal::V(arithmetic_shift_right(
+            //     b,
+            //     args[0].get_v(),
+            //     args[1].get_v(),
+            //     w,
+            // )),
             Expr::BVConcat(e1, e2, _) => {
                 let w1 = e1.get_bv_type(expr_ctx).unwrap();
                 let w2 = e2.get_bv_type(expr_ctx).unwrap();
-                concat(b, args[0], w1, args[1], w2)
+                WrappedVal::V(concat(b, args[0].get_v(), w1, args[1].get_v(), w2))
             }
 
-            Expr::BVIte { .. } => b.ins().select(args[0], args[1], args[2]),
+            Expr::BVIte { .. } => WrappedVal::V(b.ins().select(
+                args[0].get_v(),
+                args[1].get_v(),
+                args[2].get_v(),
+            )),
 
             _ => panic!("unsupported op {:?}", expr_ctx[expr]),
         }
