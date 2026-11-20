@@ -3,6 +3,7 @@
 /*
 TODO:
 - basic, extremely naive, "set of words" implementation
+- reduce allocation count (currently an awful lot of vecs are being thrown around)
 - byte-granularity / finer width control
 - more intelligent representations (perhaps lazy)
 - clever codegen tricks

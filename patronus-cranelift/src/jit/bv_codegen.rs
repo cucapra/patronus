@@ -17,7 +17,7 @@ pub(super) fn select_contain_t(width: WidthInt) -> cranelift::prelude::Type {
         17..=32 => types::I32,
         33..=64 => types::I64,
         // _ => make_vect(width),
-        _ => panic!("unsupported width for thin bit vec"),
+        _ => panic!("unsupported width for thin bit vec {width}"),
     }
 }
 
@@ -78,28 +78,14 @@ pub fn concat(
 ) -> Value {
     // case: two int, output int
     let tot_width = hi_width + lo_width;
-    let (hi, lo) = if lo_width < 64 {
-        let (hi, lo) = (
-            extend_to_fit(b, hi, hi_width, tot_width),
-            extend_to_fit(b, lo, lo_width, tot_width),
-        );
-        // shifts on vectors essentially apply the shift operation to each lane, with no overflow from lane to lane. so, this thing
-        let hi = b.ins().ishl_imm_u(hi, lo_width as i64);
-        (hi, lo)
-    } else {
-        let lane_idx = lo_width / 64;
-        let lo = extend_to_fit(b, lo, lo_width, tot_width);
-        let hi = extend_to_fit(b, hi, hi_width, 64);
-        let hi = b.ins().ishl_imm_u(hi, (lo_width % 64) as i64);
-        // println!("{:?}", hi);
 
-        // create a zeroed vector
-        let container = select_contain_t(tot_width);
-        let zeroed = b.ins().iconst(types::I64, 0);
-        let mut out_v = b.ins().splat(container, zeroed);
-        out_v = b.ins().insertlane(out_v, hi, lane_idx as u8);
-        (out_v, lo)
-    };
+    let (hi, lo) = (
+        extend_to_fit(b, hi, hi_width, tot_width),
+        extend_to_fit(b, lo, lo_width, tot_width),
+    );
+    // shifts on vectors essentially apply the shift operation to each lane, with no overflow from lane to lane. so, this thing
+    let hi = b.ins().ishl_imm_u(hi, lo_width as i64);
+
     b.ins().bor(hi, lo)
 }
 
@@ -131,8 +117,7 @@ pub fn zero_extend(b: &mut FunctionBuilder, arg: Value, by: WidthInt, width: Wid
 pub fn sign_extend(b: &mut FunctionBuilder, arg: Value, by: WidthInt, width: WidthInt) -> Value {
     let mut ret = extend_to_fit(b, arg, width - by, width);
 
-    // TODO: this is borked for wide bitvecs
-    let num_leading_zeros = select_contain_t(width % 64).bytes() * 8 - (width % 64);
+    let num_leading_zeros = select_contain_t(width).bytes() * 8 - (width % 64);
     if num_leading_zeros != 0 {
         let shifted = b.ins().ishl_imm_u(ret, num_leading_zeros as i64);
 
@@ -157,8 +142,30 @@ fn mask_scalar(b: &mut FunctionBuilder, value: Value, width: WidthInt) -> Value 
     }
 }
 
-// build an operation which requires a masking at the end
-pub fn build_fixedw_op(
+pub fn match_masked_binop(expr: &Expr) -> clir::Opcode {
+    match expr {
+        Expr::BVAdd(..) => clir::Opcode::Iadd,
+        Expr::BVSub(..) => clir::Opcode::Isub,
+        Expr::BVMul(..) => clir::Opcode::Imul,
+        Expr::BVShiftLeft(..) => clir::Opcode::Ishl,
+        Expr::BVShiftRight(..) => clir::Opcode::Ushr,
+        Expr::BVArithmeticShiftRight(..) => clir::Opcode::Sshr,
+        _ => unreachable!(),
+    }
+}
+
+pub fn match_scalar_cmp(expr: &Expr) -> clir::condcodes::IntCC {
+    match expr {
+        Expr::BVGreater(..) => IntCC::UnsignedGreaterThan,
+        Expr::BVGreaterEqual(..) => IntCC::UnsignedGreaterThanOrEqual,
+        Expr::BVGreaterSigned(..) => IntCC::SignedGreaterThan,
+        Expr::BVGreaterEqualSigned(..) => IntCC::SignedGreaterThanOrEqual,
+        _ => unreachable!(),
+    }
+}
+
+// build a binary operation which is masked to a certain width at the end
+pub fn build_masked_binop(
     b: &mut FunctionBuilder,
     op: clir::Opcode,
     arg0: Value,
